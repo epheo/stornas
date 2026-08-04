@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed kmod image clean
+.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets.
 # Only the image build stays out: it pulls the base image and kernel-devel.
@@ -69,10 +69,14 @@ image: sync-manifests embed kmod
 	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
 		--from $(BASE_IMAGE) -f image/Containerfile -t stornas-os:$(VERSION) image
 
-# Boot acceptance (same harness shape as the distro's vm-test): needs a
-# root-capable podman and qemu-system-x86_64. CI runs it as
-# `make vm-test PODMAN='sudo podman'`; rootless dev boxes cannot.
+# Runtime gates, same harness shapes as the distro's smoke-test and
+# vm-test. Both need a root-capable podman (PODMAN='sudo podman');
+# vm-test also needs qemu-system-x86_64 and OVMF. smoke boots the image
+# as a privileged container in minutes; vm-test is the full VM boot.
 PODMAN ?= podman
+smoke:
+	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/smoke-test.sh
+
 vm-test:
 	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/boot-test.sh
 

@@ -41,6 +41,8 @@ jobs:
         working-directory: web
       - name: build the appliance image
         run: make image PODMAN=podman
+      - name: smoke test (privileged container, fails fast)
+        run: make smoke PODMAN='sudo podman'
       - name: boot and validate
         run: make vm-test PODMAN='sudo podman'
       - name: collect console log on failure
