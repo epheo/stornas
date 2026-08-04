@@ -16,6 +16,7 @@ import (
 type fakeRunner struct {
 	results map[string]result
 	calls   []string
+	stdins  map[string]string
 }
 
 type result struct {
@@ -31,6 +32,14 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 		return nil, fmt.Errorf("unexpected command: %s", cmd)
 	}
 	return []byte(r.out), r.err
+}
+
+func (f *fakeRunner) RunInput(ctx context.Context, stdin, name string, args ...string) ([]byte, error) {
+	if f.stdins == nil {
+		f.stdins = map[string]string{}
+	}
+	f.stdins[strings.Join(append([]string{name}, args...), " ")] = stdin
+	return f.Run(ctx, name, args...)
 }
 
 func pool(name, raid string, devices ...string) *storagev1alpha1.StoragePool {

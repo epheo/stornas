@@ -21,7 +21,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -30,58 +32,137 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
+type fakePlacer struct {
+	node, device string
+	err          error
+}
+
+func (f *fakePlacer) ResolvePlacement(context.Context, string) (string, string, error) {
+	return f.node, f.device, f.err
+}
+
 var _ = Describe("Share Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	ctx := context.Background()
 
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	newShare := func(name, claim string) *storagev1alpha1.Share {
+		return &storagev1alpha1.Share{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: storagev1alpha1.ShareSpec{
+				ClaimName: claim,
+				NFS:       &storagev1alpha1.NFSExport{Clients: []string{"192.168.1.0/24(rw)"}},
+			},
 		}
+	}
+
+	boundClaim := func(name, volume string) {
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: volume},
+			Spec: corev1.PersistentVolumeSpec{
+				Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					CSI: &corev1.CSIPersistentVolumeSource{
+						Driver:       "linstor.csi.linbit.com",
+						VolumeHandle: volume,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pv)).To(Succeed())
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				VolumeName:  volume,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
+	}
+
+	reconcileOnce := func(r *ShareReconciler, name string) (*storagev1alpha1.Share, error) {
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: name}})
 		share := &storagev1alpha1.Share{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: name}, share)).To(Succeed())
+		return share, err
+	}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind Share")
-			err := k8sClient.Get(ctx, typeNamespacedName, share)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &storagev1alpha1.Share{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: storagev1alpha1.ShareSpec{
-						ClaimName: "media",
-						NFS:       &storagev1alpha1.NFSExport{Clients: []string{"192.168.1.0/24(rw)"}},
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
+	It("waits for the volume while the claim is missing", func() {
+		Expect(k8sClient.Create(ctx, newShare("unbound", "no-such-claim"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newShare("unbound", "no-such-claim"))).To(Succeed())
+		}()
+
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: &fakePlacer{}}, "unbound")
+		Expect(err).NotTo(HaveOccurred())
+
+		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForVolume))
+	})
+
+	It("places the share on the resolved node and waits for the agent", func() {
+		boundClaim("media", "pvc-media-1")
+		Expect(k8sClient.Create(ctx, newShare("media", "media"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newShare("media", "media"))).To(Succeed())
+		}()
+
+		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1000"}
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "media")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(share.Status.Node).To(Equal("node-a"))
+		Expect(share.Status.Device).To(Equal("/dev/drbd1000"))
+		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
+
+		By("going available once the agent reports HostReady")
+		meta.SetStatusCondition(&share.Status.Conditions, metav1.Condition{
+			Type:   storagev1alpha1.ConditionHostReady,
+			Status: metav1.ConditionTrue,
+			Reason: storagev1alpha1.ReasonReady,
 		})
+		Expect(k8sClient.Status().Update(ctx, share)).To(Succeed())
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &storagev1alpha1.Share{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+		share, err = reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "media")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(meta.IsStatusConditionTrue(share.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+	})
 
-			By("Cleanup the specific resource instance Share")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ShareReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	It("rejects claims not backed by LINSTOR CSI", func() {
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "pv-hostpath"},
+			Spec: corev1.PersistentVolumeSpec{
+				Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				PersistentVolumeSource: corev1.PersistentVolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "/tmp/x"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pv)).To(Succeed())
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "foreign", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				VolumeName:  "pv-hostpath",
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
+		Expect(k8sClient.Create(ctx, newShare("foreign", "foreign"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newShare("foreign", "foreign"))).To(Succeed())
+		}()
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: &fakePlacer{}}, "foreign")
+		Expect(err).NotTo(HaveOccurred())
+
+		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
 	})
 })

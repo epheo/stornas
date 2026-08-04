@@ -48,10 +48,25 @@ type Volume struct {
 	Block         bool   `json:"block"`
 }
 
+// Share is one NFS/SMB export: spec identity plus the operator's placement
+// and the agent's export state.
+type Share struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Claim     string `json:"claim"`
+	NFS       bool   `json:"nfs"`
+	SMB       bool   `json:"smb"`
+	Node      string `json:"node"`
+	State     string `json:"state"` // Pending | Exported | Failed
+	Available bool   `json:"available"`
+	Reason    string `json:"reason"`
+}
+
 // Snapshot is one consistent frame of everything the UI shows; the WS hub
 // sends a full frame per change rather than diffs.
 type Snapshot struct {
 	Pools   []Pool   `json:"pools"`
 	Nodes   []Node   `json:"nodes"`
 	Volumes []Volume `json:"volumes"`
+	Shares  []Share  `json:"shares"`
 }

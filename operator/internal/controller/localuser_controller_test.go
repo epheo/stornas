@@ -21,7 +21,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -31,57 +32,43 @@ import (
 )
 
 var _ = Describe("LocalUser Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	ctx := context.Background()
 
-		ctx := context.Background()
+	reconcileOnce := func(name string) *storagev1alpha1.LocalUser {
+		r := &LocalUserReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: name}})
+		Expect(err).NotTo(HaveOccurred())
+		user := &storagev1alpha1.LocalUser{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: name}, user)).To(Succeed())
+		return user
+	}
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	newUser := func(name, secretRef string) *storagev1alpha1.LocalUser {
+		return &storagev1alpha1.LocalUser{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       storagev1alpha1.LocalUserSpec{Role: "admin", SMB: true, PasswordSecretRef: secretRef},
 		}
-		localuser := &storagev1alpha1.LocalUser{}
+	}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind LocalUser")
-			err := k8sClient.Get(ctx, typeNamespacedName, localuser)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &storagev1alpha1.LocalUser{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: storagev1alpha1.LocalUserSpec{
-						Role:              "admin",
-						PasswordSecretRef: "alice-password",
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+	It("flags a missing or empty password secret", func() {
+		Expect(k8sClient.Create(ctx, newUser("alice", "alice-password"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newUser("alice", "alice-password"))).To(Succeed())
+		}()
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &storagev1alpha1.LocalUser{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+		user := reconcileOnce("alice")
+		cond := meta.FindStatusCondition(user.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
 
-			By("Cleanup the specific resource instance LocalUser")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &LocalUserReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+		By("going available once the secret carries a password")
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "alice-password", Namespace: "default"},
+			Data:       map[string][]byte{"password": []byte("hunter2")},
+		}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		user = reconcileOnce("alice")
+		Expect(meta.IsStatusConditionTrue(user.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
 	})
 })

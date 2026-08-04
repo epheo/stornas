@@ -41,8 +41,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.New()}
+	host := agent.HostRunner{}
+	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.NewWithRunner(host)}
 	if err := r.SetupWithManager(mgr); err != nil {
+		log.Fatal(err)
+	}
+	shares := &agent.ShareAgentReconciler{
+		Client: mgr.GetClient(),
+		Node:   node,
+		Shares: &agent.ShareManager{Run: host, Node: node},
+	}
+	if err := shares.SetupWithManager(mgr); err != nil {
+		log.Fatal(err)
+	}
+	users := &agent.UserAgentReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Run: host}
+	if err := users.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
 

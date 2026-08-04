@@ -25,12 +25,13 @@ const (
 )
 
 const (
-	ReasonReady           = "Ready"
-	ReasonInvalidSpec     = "InvalidSpec"
-	ReasonWaitingForAgent = "WaitingForAgent"
-	ReasonHostError       = "HostError"
-	ReasonNotConfigured   = "NotConfigured"
-	ReasonLinstorError    = "LinstorError"
+	ReasonReady            = "Ready"
+	ReasonInvalidSpec      = "InvalidSpec"
+	ReasonWaitingForAgent  = "WaitingForAgent"
+	ReasonWaitingForVolume = "WaitingForVolume"
+	ReasonHostError        = "HostError"
+	ReasonNotConfigured    = "NotConfigured"
+	ReasonLinstorError     = "LinstorError"
 )
 
 // LinstorPool is the single LINSTOR storage pool name every StoragePool

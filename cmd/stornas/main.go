@@ -45,7 +45,7 @@ func main() {
 	state := clusterstate.New(cs, dyn, bus)
 	state.Run(ctx)
 
-	kinds := []eventbus.Kind{eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged}
+	kinds := []eventbus.Kind{eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged, eventbus.ShareChanged}
 	wake, cancel := bus.Subscribe(kinds...)
 	defer cancel()
 	hub := stream.NewHub(state.Snapshot, wake, func() uint64 { return bus.Version(kinds...) })

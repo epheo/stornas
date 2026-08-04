@@ -56,6 +56,21 @@ export interface Volume {
   block: boolean;
 }
 /**
+ * Share is one NFS/SMB export: spec identity plus the operator's placement
+ * and the agent's export state.
+ */
+export interface Share {
+  namespace: string;
+  name: string;
+  claim: string;
+  nfs: boolean;
+  smb: boolean;
+  node: string;
+  state: string; // Pending | Exported | Failed
+  available: boolean;
+  reason: string;
+}
+/**
  * Snapshot is one consistent frame of everything the UI shows; the WS hub
  * sends a full frame per change rather than diffs.
  */
@@ -63,4 +78,5 @@ export interface Snapshot {
   pools: Pool[];
   nodes: Node[];
   volumes: Volume[];
+  shares: Share[];
 }

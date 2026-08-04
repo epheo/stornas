@@ -4,7 +4,7 @@
 	import type { Snapshot } from '$lib/model.gen';
 	import { connectState, formatBytes } from '$lib/stream';
 
-	let snap = $state<Snapshot>({ pools: [], nodes: [], volumes: [] });
+	let snap = $state<Snapshot>({ pools: [], nodes: [], volumes: [], shares: [] });
 
 	onMount(() => connectState((s) => (snap = s)));
 
@@ -89,6 +89,42 @@
 				<li class="text-sm opacity-60">No nodes.</li>
 			{/each}
 		</ul>
+	</section>
+
+	<section>
+		<h2 class="mb-2 text-sm font-medium uppercase tracking-wide opacity-60">Shares</h2>
+		{#if snap.shares.length === 0}
+			<p class="text-sm opacity-60">No shares yet.</p>
+		{:else}
+			<div class="overflow-x-auto rounded border border-gray-200">
+				<table class="w-full text-sm">
+					<thead class="bg-gray-50 text-left">
+						<tr>
+							<th class="px-3 py-2">Name</th>
+							<th class="px-3 py-2">Claim</th>
+							<th class="px-3 py-2">Protocols</th>
+							<th class="px-3 py-2">Node</th>
+							<th class="px-3 py-2">State</th>
+							<th class="px-3 py-2">Status</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each snap.shares as s (s.namespace + '/' + s.name)}
+							<tr class="border-t border-gray-100">
+								<td class="px-3 py-2 font-medium">{s.name}</td>
+								<td class="px-3 py-2">{s.claim}</td>
+								<td class="px-3 py-2"
+									>{[s.nfs && 'NFS', s.smb && 'SMB'].filter(Boolean).join(' + ')}</td
+								>
+								<td class="px-3 py-2">{s.node || '-'}</td>
+								<td class="px-3 py-2">{s.state}</td>
+								<td class="px-3 py-2 text-xs opacity-70">{s.available ? 'Available' : s.reason}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	</section>
 
 	<section>

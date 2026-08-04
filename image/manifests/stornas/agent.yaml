@@ -15,11 +15,37 @@ metadata:
   name: stornas-agent
 rules:
   - apiGroups: [storage.stornas.io]
-    resources: [storagepools]
+    resources: [storagepools, shares, localusers]
     verbs: [get, list, watch]
   - apiGroups: [storage.stornas.io]
-    resources: [storagepools/status]
+    resources: [storagepools/status, shares/status]
     verbs: [get, update, patch]
+---
+# Secrets stay namespace-scoped: the agent reads LocalUser passwords via
+# an uncached get, never a cluster list.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: stornas-agent-secrets
+  namespace: stornas-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stornas-agent-secrets
+  namespace: stornas-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: stornas-agent-secrets
+subjects:
+  - kind: ServiceAccount
+    name: stornas-agent
+    namespace: stornas-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -74,6 +100,14 @@ spec:
               mountPath: /run/lvm
             - name: run-lock
               mountPath: /run/lock
+            - name: etc-samba
+              mountPath: /etc/samba
+            - name: etc-exports
+              mountPath: /etc/exports.d
+            - name: shares
+              mountPath: /var/lib/stornas
+              # Mounts the agent performs via nsenter must appear here too.
+              mountPropagation: HostToContainer
       volumes:
         - name: dev
           hostPath:
@@ -88,3 +122,14 @@ spec:
         - name: run-lock
           hostPath:
             path: /run/lock
+        - name: etc-samba
+          hostPath:
+            path: /etc/samba
+        - name: etc-exports
+          hostPath:
+            path: /etc/exports.d
+            type: DirectoryOrCreate
+        - name: shares
+          hostPath:
+            path: /var/lib/stornas
+            type: DirectoryOrCreate

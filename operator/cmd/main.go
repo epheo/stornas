@@ -181,7 +181,10 @@ func main() {
 
 	// Unset means no LINSTOR: pools go Available on host state alone and
 	// carry LinstorRegistered=Unknown, so the gap stays visible in status.
+	// Typed nil interfaces would defeat the reconcilers' nil checks, so
+	// each interface variable is only assigned on success.
 	var registrar controller.LinstorRegistrar
+	var placer controller.SharePlacer
 	if u := os.Getenv("LINSTOR_URL"); u != "" {
 		r, err := linstor.NewRegistrar(u)
 		if err != nil {
@@ -189,6 +192,7 @@ func main() {
 			os.Exit(1)
 		}
 		registrar = r
+		placer = r
 	}
 
 	if err := (&controller.StoragePoolReconciler{
@@ -207,8 +211,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ShareReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Linstor: placer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Share")
 		os.Exit(1)

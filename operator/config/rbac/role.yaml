@@ -5,6 +5,16 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - persistentvolumes
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - storage.stornas.io
   resources:
   - localusers

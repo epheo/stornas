@@ -19,15 +19,20 @@ package controller
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// LocalUserReconciler reconciles a LocalUser object
+// LocalUserReconciler validates the referenced password Secret; the agent
+// consumes it directly for the samba passdb, the UI session layer later.
 type LocalUserReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -36,21 +41,40 @@ type LocalUserReconciler struct {
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the LocalUser object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	var user storagev1alpha1.LocalUser
+	if err := r.Get(ctx, req.NamespacedName, &user); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
-	// TODO(user): your logic here
+	available := metav1.Condition{
+		Type:               storagev1alpha1.ConditionAvailable,
+		Status:             metav1.ConditionTrue,
+		Reason:             storagev1alpha1.ReasonReady,
+		ObservedGeneration: user.Generation,
+	}
+	var secret corev1.Secret
+	err := r.Get(ctx, types.NamespacedName{Namespace: user.Namespace, Name: user.Spec.PasswordSecretRef}, &secret)
+	switch {
+	case err != nil:
+		available.Status = metav1.ConditionFalse
+		available.Reason = storagev1alpha1.ReasonInvalidSpec
+		available.Message = "password secret " + user.Spec.PasswordSecretRef + " not found"
+	case len(secret.Data["password"]) == 0:
+		available.Status = metav1.ConditionFalse
+		available.Reason = storagev1alpha1.ReasonInvalidSpec
+		available.Message = "password secret " + user.Spec.PasswordSecretRef + " has no password key"
+	}
 
+	meta.SetStatusCondition(&user.Status.Conditions, available)
+	if err := r.Status().Update(ctx, &user); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 

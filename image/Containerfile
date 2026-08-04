@@ -30,3 +30,11 @@ COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
 # LINSTOR CSI replaces the distro's TopoLVM (DESIGN.md): two default
 # StorageClasses is a conflict, and two LVM managers must not share VGs.
 RUN rm -rf /usr/lib/microshift/manifests.d/001-microshift-topolvm
+
+# NAS plane: the agent rewrites only the stornas include; the base config
+# stays image-owned. /var/lib/stornas is tmpfiles-created because bootc
+# images do not ship /var content.
+COPY files/smb.conf /etc/samba/smb.conf
+RUN touch /etc/samba/stornas-shares.conf \
+	&& echo 'd /var/lib/stornas 0755 root root -' > /usr/lib/tmpfiles.d/stornas.conf \
+	&& systemctl enable smb nfs-server

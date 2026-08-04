@@ -37,18 +37,25 @@ var poolGVR = schema.GroupVersionResource{
 	Resource: "storagepools",
 }
 
+var shareGVR = schema.GroupVersionResource{
+	Group:    storagev1alpha1.GroupVersion.Group,
+	Version:  storagev1alpha1.GroupVersion.Version,
+	Resource: "shares",
+}
+
 // State is the SA-maintained snapshot. Build with New, start with Run;
 // Snapshot reads are lock-free indexer scans safe for concurrent callers.
 type State struct {
-	pools cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
-	nodes cache.Indexer // *corev1.Node
-	pvcs  cache.Indexer // *corev1.PersistentVolumeClaim
+	pools  cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
+	shares cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
+	nodes  cache.Indexer // *corev1.Node
+	pvcs   cache.Indexer // *corev1.PersistentVolumeClaim
 
 	specs []reflectorSpec
 
-	poolsSynced, nodesSynced, pvcsSynced atomic.Bool
-	syncedOnce                           sync.Once
-	allSynced                            chan struct{}
+	poolsSynced, sharesSynced, nodesSynced, pvcsSynced atomic.Bool
+	syncedOnce                                         sync.Once
+	allSynced                                          chan struct{}
 
 	healthy atomic.Bool // any reflector's List/Watch failing flips this false
 }
@@ -66,11 +73,13 @@ type reflectorSpec struct {
 func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *State {
 	s := &State{allSynced: make(chan struct{})}
 	s.pools = newIndexer()
+	s.shares = newIndexer()
 	s.nodes = newIndexer()
 	s.pvcs = newIndexer()
 	s.healthy.Store(true)
 
 	pool := func() { bus.Publish(eventbus.PoolChanged) }
+	shareFn := func() { bus.Publish(eventbus.ShareChanged) }
 	node := func() { bus.Publish(eventbus.NodeChanged) }
 	volume := func() { bus.Publish(eventbus.VolumeChanged) }
 
@@ -84,6 +93,18 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 				},
 				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 					return dyn.Resource(poolGVR).Watch(ctx, o)
+				},
+			}, &s.healthy),
+		},
+		{
+			reflect.NewStore(s.shares, shareFn, func() { s.sharesSynced.Store(true); s.checkSynced() }),
+			&unstructured.Unstructured{},
+			reflect.TrackHealth(&cache.ListWatch{
+				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+					return dyn.Resource(shareGVR).List(ctx, o)
+				},
+				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+					return dyn.Resource(shareGVR).Watch(ctx, o)
 				},
 			}, &s.healthy),
 		},
@@ -141,7 +162,7 @@ func (s *State) WaitForSync(ctx context.Context) error {
 }
 
 func (s *State) checkSynced() {
-	if s.poolsSynced.Load() && s.nodesSynced.Load() && s.pvcsSynced.Load() {
+	if s.poolsSynced.Load() && s.sharesSynced.Load() && s.nodesSynced.Load() && s.pvcsSynced.Load() {
 		s.syncedOnce.Do(func() { close(s.allSynced) })
 	}
 }
@@ -178,6 +199,17 @@ func (s *State) Snapshot() model.Snapshot {
 		}
 		snap.Volumes = append(snap.Volumes, volumeModel(pvc))
 	}
+	for _, u := range reflect.List(s.shares) {
+		var share storagev1alpha1.Share
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &share); err != nil {
+			continue
+		}
+		snap.Shares = append(snap.Shares, shareModel(&share))
+	}
+	sort.Slice(snap.Shares, func(i, j int) bool {
+		a, b := snap.Shares[i], snap.Shares[j]
+		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
+	})
 	sort.Slice(snap.Pools, func(i, j int) bool { return snap.Pools[i].Name < snap.Pools[j].Name })
 	sort.Slice(snap.Nodes, func(i, j int) bool { return snap.Nodes[i].Name < snap.Nodes[j].Name })
 	sort.Slice(snap.Volumes, func(i, j int) bool {
@@ -220,6 +252,28 @@ func poolModel(p *storagev1alpha1.StoragePool) model.Pool {
 		out.Devices = append(out.Devices, dev)
 	}
 	for _, c := range p.Status.Conditions {
+		if c.Type == storagev1alpha1.ConditionAvailable {
+			out.Available = c.Status == metav1.ConditionTrue
+			out.Reason = c.Reason
+		}
+	}
+	return out
+}
+
+func shareModel(s *storagev1alpha1.Share) model.Share {
+	out := model.Share{
+		Namespace: s.Namespace,
+		Name:      s.Name,
+		Claim:     s.Spec.ClaimName,
+		NFS:       s.Spec.NFS != nil,
+		SMB:       s.Spec.SMB != nil,
+		Node:      s.Status.Node,
+		State:     s.Status.State,
+	}
+	if out.State == "" {
+		out.State = "Pending"
+	}
+	for _, c := range s.Status.Conditions {
 		if c.Type == storagev1alpha1.ConditionAvailable {
 			out.Available = c.Status == metav1.ConditionTrue
 			out.Reason = c.Reason

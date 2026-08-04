@@ -7,6 +7,10 @@ linters:
   enable:
     - misspell
   settings:
+    misspell:
+      ignore-rules:
+        # The NFS export-table command, not a typo of "exports".
+        - exportfs
     errcheck:
       exclude-functions:
         # Deferred cleanup closes; write paths check Close explicitly.

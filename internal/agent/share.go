@@ -1,0 +1,105 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
+)
+
+const (
+	shareRoot   = "/var/lib/stornas/shares"
+	exportsDir  = "/etc/exports.d"
+	sambaShares = "/etc/samba/stornas-shares.conf"
+)
+
+// ShareManager converges one node's mounts and exports from Share specs.
+// Root prefixes every file write so tests run against a temp tree; commands
+// always run through the Runner (nsenter on a real host).
+type ShareManager struct {
+	Run  Runner
+	Node string
+	Root string
+}
+
+func (m *ShareManager) mountPoint(ns, name string) string {
+	return filepath.Join(shareRoot, ns+"-"+name)
+}
+
+func (m *ShareManager) exportsFile(ns, name string) string {
+	return filepath.Join(exportsDir, "stornas-"+ns+"-"+name+".exports")
+}
+
+// EnsureShare mounts the placed device and converges the NFS export. The
+// mount doubles as the DRBD promotion: auto-promote makes the first opener
+// primary, which is why placement (status.node) must be decided upstream.
+func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.Share) error {
+	mnt := m.mountPoint(share.Namespace, share.Name)
+	if _, err := m.Run.Run(ctx, "findmnt", "-n", mnt); err != nil {
+		if err := os.MkdirAll(m.Root+mnt, 0o755); err != nil {
+			return err
+		}
+		if _, err := m.Run.Run(ctx, "mount", "-t", "xfs", share.Status.Device, mnt); err != nil {
+			return err
+		}
+	}
+	path := m.Root + m.exportsFile(share.Namespace, share.Name)
+	if share.Spec.NFS != nil {
+		line := mnt + " " + strings.Join(share.Spec.NFS.Clients, " ") + "\n"
+		if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+			return err
+		}
+	} else if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_, err := m.Run.Run(ctx, "exportfs", "-ra")
+	return err
+}
+
+// RemoveShare tears down what EnsureShare built; best effort, because the
+// share object is already gone and there is nothing left to report into.
+func (m *ShareManager) RemoveShare(ctx context.Context, ns, name string) {
+	_ = os.Remove(m.Root + m.exportsFile(ns, name))
+	_, _ = m.Run.Run(ctx, "exportfs", "-ra")
+	_, _ = m.Run.Run(ctx, "umount", m.mountPoint(ns, name))
+}
+
+// ApplySamba rewrites the single stornas include from every SMB share
+// placed on this node and reloads. Whole-file regeneration makes share
+// deletion fall out for free.
+func (m *ShareManager) ApplySamba(ctx context.Context, shares []storagev1alpha1.Share) error {
+	sort.Slice(shares, func(i, j int) bool {
+		return shares[i].Namespace+"/"+shares[i].Name < shares[j].Namespace+"/"+shares[j].Name
+	})
+	var b strings.Builder
+	for _, s := range shares {
+		if s.Spec.SMB == nil || s.Status.Node != m.Node {
+			continue
+		}
+		name := s.Spec.SMB.Name
+		if name == "" {
+			name = s.Name
+		}
+		fmt.Fprintf(&b, "[%s]\n\tpath = %s\n\tread only = no\n", name, m.mountPoint(s.Namespace, s.Name))
+		if len(s.Spec.SMB.ValidUsers) > 0 {
+			fmt.Fprintf(&b, "\tvalid users = %s\n", strings.Join(s.Spec.SMB.ValidUsers, " "))
+		}
+		b.WriteString("\n")
+	}
+	if err := os.WriteFile(m.Root+sambaShares, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	_, err := m.Run.Run(ctx, "smbcontrol", "all", "reload-config")
+	return err
+}
+
+// EnsureSMBUser provisions one user in the host samba passdb. smbpasswd -s
+// is idempotent: re-applying the same password is a no-op in effect.
+func EnsureSMBUser(ctx context.Context, run Runner, user, password string) error {
+	_, err := run.RunInput(ctx, password+"\n"+password+"\n", "smbpasswd", "-s", "-a", user)
+	return err
+}
