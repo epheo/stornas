@@ -91,8 +91,19 @@ log "booting the appliance with a scratch disk"
 truncate -s 20G "$WORKDIR/scratch.raw"
 ACCEL=tcg
 [ -w /dev/kvm ] && ACCEL=kvm
+# bootc disks are UEFI; SeaBIOS sits at a blank screen with no serial
+# output and the guest never faults memory in. Find OVMF or refuse.
+OVMF_CODE=""
+for c in /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+	[ -f "$c" ] && OVMF_CODE=$c && break
+done
+[ -n "$OVMF_CODE" ] || die "no OVMF firmware found (install edk2-ovmf / ovmf)"
+cp "${OVMF_CODE%CODE*}VARS${OVMF_CODE##*CODE}" "$WORKDIR/ovmf-vars.fd" 2>/dev/null \
+	|| cp "$(dirname "$OVMF_CODE")"/OVMF_VARS*.fd "$WORKDIR/ovmf-vars.fd"
 qemu-system-x86_64 \
-	-machine "accel=$ACCEL" -cpu max -smp "$(nproc)" -m "$VM_MEM" \
+	-machine "q35,accel=$ACCEL" -cpu max -smp "$(nproc)" -m "$VM_MEM" \
+	-drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
+	-drive "if=pflash,format=raw,file=$WORKDIR/ovmf-vars.fd" \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \

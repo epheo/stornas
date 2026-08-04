@@ -25,10 +25,10 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: install qemu
+      - name: install qemu and UEFI firmware
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86
+          sudo apt-get install -y qemu-system-x86 ovmf
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
