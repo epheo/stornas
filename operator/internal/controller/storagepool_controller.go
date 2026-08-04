@@ -18,40 +18,101 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// StoragePoolReconciler reconciles a StoragePool object
+// LinstorRegistrar registers a node's VG under the shared LINSTOR pool
+// name. nil means no controller is configured; registration is skipped
+// and reported as such rather than failed.
+type LinstorRegistrar interface {
+	EnsurePool(ctx context.Context, node, vg string) error
+}
+
+// StoragePoolReconciler owns every StoragePool condition except HostReady,
+// which belongs to the node agent (internal/agent in the root module).
 type StoragePoolReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Linstor LinstorRegistrar
 }
 
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the StoragePool object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	var pool storagev1alpha1.StoragePool
+	if err := r.Get(ctx, req.NamespacedName, &pool); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
-	// TODO(user): your logic here
+	available := metav1.Condition{
+		Type:               storagev1alpha1.ConditionAvailable,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: pool.Generation,
+	}
+	var retErr error
 
-	return ctrl.Result{}, nil
+	switch {
+	case len(pool.Spec.Devices) < storagev1alpha1.MinDevices(pool.Spec.Raid):
+		available.Reason = storagev1alpha1.ReasonInvalidSpec
+		available.Message = fmt.Sprintf("%s needs at least %d devices, got %d",
+			pool.Spec.Raid, storagev1alpha1.MinDevices(pool.Spec.Raid), len(pool.Spec.Devices))
+
+	case !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionHostReady):
+		// No requeue: the agent's status write triggers the next pass.
+		available.Reason = storagev1alpha1.ReasonWaitingForAgent
+		available.Message = "waiting for the node agent to converge host state"
+
+	case r.Linstor == nil:
+		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+			Type:               storagev1alpha1.ConditionLinstorRegistered,
+			Status:             metav1.ConditionUnknown,
+			Reason:             storagev1alpha1.ReasonNotConfigured,
+			Message:            "no LINSTOR controller configured",
+			ObservedGeneration: pool.Generation,
+		})
+		available.Status = metav1.ConditionTrue
+		available.Reason = storagev1alpha1.ReasonReady
+
+	default:
+		if err := r.Linstor.EnsurePool(ctx, pool.Spec.Node, pool.Status.VG); err != nil {
+			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+				Type:               storagev1alpha1.ConditionLinstorRegistered,
+				Status:             metav1.ConditionFalse,
+				Reason:             storagev1alpha1.ReasonLinstorError,
+				Message:            err.Error(),
+				ObservedGeneration: pool.Generation,
+			})
+			available.Reason = storagev1alpha1.ReasonLinstorError
+			available.Message = err.Error()
+			retErr = err
+		} else {
+			pool.Status.LinstorPool = storagev1alpha1.LinstorPool
+			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+				Type:               storagev1alpha1.ConditionLinstorRegistered,
+				Status:             metav1.ConditionTrue,
+				Reason:             storagev1alpha1.ReasonReady,
+				ObservedGeneration: pool.Generation,
+			})
+			available.Status = metav1.ConditionTrue
+			available.Reason = storagev1alpha1.ReasonReady
+		}
+	}
+
+	meta.SetStatusCondition(&pool.Status.Conditions, available)
+	if err := r.Status().Update(ctx, &pool); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, retErr
 }
 
 // SetupWithManager sets up the controller with the Manager.

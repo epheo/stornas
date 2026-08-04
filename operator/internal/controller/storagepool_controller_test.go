@@ -18,10 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -30,58 +31,115 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
+type fakeRegistrar struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeRegistrar) EnsurePool(_ context.Context, node, vg string) error {
+	f.calls = append(f.calls, node+":"+vg)
+	return f.err
+}
+
 var _ = Describe("StoragePool Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	ctx := context.Background()
 
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	newPool := func(name, raid string, devices ...string) *storagev1alpha1.StoragePool {
+		return &storagev1alpha1.StoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: devices, Raid: raid},
 		}
-		storagepool := &storagev1alpha1.StoragePool{}
+	}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind StoragePool")
-			err := k8sClient.Get(ctx, typeNamespacedName, storagepool)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &storagev1alpha1.StoragePool{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: storagev1alpha1.StoragePoolSpec{
-						Node:    "node-a",
-						Devices: []string{"/dev/disk/by-id/wwn-0xdeadbeef"},
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
+	reconcileOnce := func(r *StoragePoolReconciler, name string) (*storagev1alpha1.StoragePool, error) {
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
+		pool := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, pool)).To(Succeed())
+		return pool, err
+	}
+
+	markHostReady := func(name string) {
+		pool := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, pool)).To(Succeed())
+		pool.Status.VG = pool.VGName()
+		pool.Status.Health = "Online"
+		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+			Type:   storagev1alpha1.ConditionHostReady,
+			Status: metav1.ConditionTrue,
+			Reason: storagev1alpha1.ReasonReady,
 		})
+		Expect(k8sClient.Status().Update(ctx, pool)).To(Succeed())
+	}
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &storagev1alpha1.StoragePool{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+	deletePool := func(name string) {
+		pool := &storagev1alpha1.StoragePool{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
+	}
 
-			By("Cleanup the specific resource instance StoragePool")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &StoragePoolReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	It("rejects raid levels the device count cannot carry", func() {
+		Expect(k8sClient.Create(ctx, newPool("invalid", "raid5", "/dev/sda", "/dev/sdb"))).To(Succeed())
+		defer deletePool("invalid")
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "invalid")
+		Expect(err).NotTo(HaveOccurred())
+
+		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
+	})
+
+	It("waits for the agent before going available", func() {
+		Expect(k8sClient.Create(ctx, newPool("waiting", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("waiting")
+
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "waiting")
+		Expect(err).NotTo(HaveOccurred())
+
+		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
+	})
+
+	It("goes available without LINSTOR when no registrar is configured", func() {
+		Expect(k8sClient.Create(ctx, newPool("hostonly", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("hostonly")
+		markHostReady("hostonly")
+
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "hostonly")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+		linstor := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)
+		Expect(linstor.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(linstor.Reason).To(Equal(storagev1alpha1.ReasonNotConfigured))
+	})
+
+	It("registers the VG with LINSTOR once the host is ready", func() {
+		Expect(k8sClient.Create(ctx, newPool("registered", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("registered")
+		markHostReady("registered")
+
+		reg := &fakeRegistrar{}
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}, "registered")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(reg.calls).To(Equal([]string{"node-a:stornas-registered"}))
+		Expect(pool.Status.LinstorPool).To(Equal(storagev1alpha1.LinstorPool))
+		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)).To(BeTrue())
+	})
+
+	It("surfaces LINSTOR errors and retries", func() {
+		Expect(k8sClient.Create(ctx, newPool("failing", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("failing")
+		markHostReady("failing")
+
+		reg := &fakeRegistrar{err: fmt.Errorf("controller unreachable")}
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}, "failing")
+		Expect(err).To(HaveOccurred())
+
+		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
 	})
 })

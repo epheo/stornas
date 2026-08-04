@@ -1,0 +1,96 @@
+package lvm
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+type fakeRunner struct {
+	// results keyed by the full command line; a missing key is a test bug.
+	results map[string]result
+	calls   []string
+}
+
+type result struct {
+	out string
+	err error
+}
+
+var errExit = fmt.Errorf("exit status 5")
+
+func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	cmd := strings.Join(append([]string{name}, args...), " ")
+	f.calls = append(f.calls, cmd)
+	r, ok := f.results[cmd]
+	if !ok {
+		return nil, fmt.Errorf("unexpected command: %s", cmd)
+	}
+	return []byte(r.out), r.err
+}
+
+func TestCreateThinPoolRaid(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"lvcreate --yes --type raid1 --extents 85%VG --name thin vg0":            {},
+		"lvcreate --yes --type raid1 --extents 2%VG --name thin_meta vg0":        {},
+		"lvconvert --yes --type thin-pool --poolmetadata vg0/thin_meta vg0/thin": {},
+	}}
+	if err := NewWithRunner(f).CreateThinPool(context.Background(), "vg0", "thin", "raid1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 3 {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+func TestCreateThinPoolLinear(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"lvcreate --type thin-pool --extents 90%VG --name thin vg0": {},
+	}}
+	if err := NewWithRunner(f).CreateThinPool(context.Background(), "vg0", "thin", "none"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVGInfo(t *testing.T) {
+	out := `{"report":[{"vg":[{"vg_size":"4000000000","vg_free":"1000000000"}]}]}`
+	f := &fakeRunner{results: map[string]result{
+		"vgs --reportformat json --units b --nosuffix --options vg_size,vg_free vg0": {out: out},
+	}}
+	info, err := NewWithRunner(f).VGInfo(context.Background(), "vg0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.SizeBytes != 4000000000 || info.FreeBytes != 1000000000 {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestPVsMissing(t *testing.T) {
+	out := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":""},{"pv_name":"/dev/sdb","pv_missing":"missing"}]}]}`
+	f := &fakeRunner{results: map[string]result{
+		"pvs --reportformat json --options pv_name,pv_missing --select vg_name=vg0": {out: out},
+	}}
+	pvs, err := NewWithRunner(f).PVs(context.Background(), "vg0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pvs) != 2 || pvs[0].Missing || !pvs[1].Missing {
+		t.Fatalf("pvs = %+v", pvs)
+	}
+}
+
+func TestProbesUseExitCode(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"pvs /dev/sda": {err: errExit},
+		"vgs vg0":      {},
+	}}
+	l := NewWithRunner(f)
+	if l.IsPV(context.Background(), "/dev/sda") {
+		t.Fatal("IsPV should be false on nonzero exit")
+	}
+	if !l.VGExists(context.Background(), "vg0") {
+		t.Fatal("VGExists should be true on zero exit")
+	}
+}
