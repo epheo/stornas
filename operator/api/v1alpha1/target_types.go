@@ -64,6 +64,14 @@ type TargetSpec struct {
 	Initiators []Initiator `json:"initiators,omitempty"`
 }
 
+// LUNStatus is the operator's device resolution for one LUN; the agent
+// builds the backstore from it.
+type LUNStatus struct {
+	ID int32 `json:"id"`
+	// +optional
+	Device string `json:"device,omitempty"`
+}
+
 // TargetStatus defines the observed state of Target.
 type TargetStatus struct {
 	// +listType=map
@@ -75,6 +83,10 @@ type TargetStatus struct {
 	IQN string `json:"iqn,omitempty"`
 	// +optional
 	ActiveNode string `json:"activeNode,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=id
+	LUNs []LUNStatus `json:"luns,omitempty"`
 	// +optional
 	Sessions int32 `json:"sessions,omitempty"`
 	// +optional

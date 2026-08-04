@@ -15,13 +15,14 @@ metadata:
   name: stornas-agent
 rules:
   - apiGroups: [storage.stornas.io]
-    resources: [storagepools, shares, localusers]
+    resources: [storagepools, shares, targets, localusers]
     verbs: [get, list, watch]
   - apiGroups: [storage.stornas.io]
     resources: [nodeinventories]
     verbs: [get, list, watch, create]
   - apiGroups: [storage.stornas.io]
-    resources: [storagepools/status, shares/status, nodeinventories/status]
+    resources:
+      [storagepools/status, shares/status, targets/status, nodeinventories/status]
     verbs: [get, update, patch]
 ---
 # Secrets stay namespace-scoped: the agent reads LocalUser passwords via

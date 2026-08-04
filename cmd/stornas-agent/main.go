@@ -62,6 +62,15 @@ func main() {
 	if err := mgr.Add(inv); err != nil {
 		log.Fatal(err)
 	}
+	targets := &agent.TargetAgentReconciler{
+		Client:  mgr.GetClient(),
+		Secrets: mgr.GetAPIReader(),
+		Node:    node,
+		LIO:     &agent.LIOManager{Run: host},
+	}
+	if err := targets.SetupWithManager(mgr); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("stornas-agent %s on node %s", version, node)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

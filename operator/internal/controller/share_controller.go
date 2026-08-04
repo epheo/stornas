@@ -20,12 +20,10 @@ import (
 	"context"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -69,7 +67,7 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	res := ctrl.Result{}
 	var retErr error
 
-	handle, reason, msg := r.volumeHandle(ctx, &share)
+	handle, reason, msg := claimHandle(ctx, r.Client, share.Namespace, share.Spec.ClaimName)
 	switch {
 	case reason != "":
 		available.Reason = reason
@@ -109,27 +107,6 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 	return res, retErr
-}
-
-// volumeHandle resolves the share's PVC to its LINSTOR resource name (the
-// CSI volume handle). A non-empty reason means the volume is not usable yet.
-func (r *ShareReconciler) volumeHandle(ctx context.Context, share *storagev1alpha1.Share) (handle, reason, msg string) {
-	var pvc corev1.PersistentVolumeClaim
-	err := r.Get(ctx, types.NamespacedName{Namespace: share.Namespace, Name: share.Spec.ClaimName}, &pvc)
-	if err != nil {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "claim " + share.Spec.ClaimName + " not found"
-	}
-	if pvc.Spec.VolumeName == "" {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "claim " + share.Spec.ClaimName + " not bound"
-	}
-	var pv corev1.PersistentVolume
-	if err := r.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, &pv); err != nil {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "volume " + pvc.Spec.VolumeName + " not found"
-	}
-	if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != "linstor.csi.linbit.com" {
-		return "", storagev1alpha1.ReasonInvalidSpec, "claim is not backed by LINSTOR CSI"
-	}
-	return pv.Spec.CSI.VolumeHandle, "", ""
 }
 
 // SetupWithManager sets up the controller with the Manager.

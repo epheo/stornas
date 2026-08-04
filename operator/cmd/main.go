@@ -204,8 +204,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.TargetReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Linstor: placer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Target")
 		os.Exit(1)

@@ -164,6 +164,24 @@ spec:
                 x-kubernetes-list-type: map
               iqn:
                 type: string
+              luns:
+                items:
+                  description: |-
+                    LUNStatus is the operator's device resolution for one LUN; the agent
+                    builds the backstore from it.
+                  properties:
+                    device:
+                      type: string
+                    id:
+                      format: int32
+                      type: integer
+                  required:
+                  - id
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - id
+                x-kubernetes-list-type: map
               sessions:
                 format: int32
                 type: integer

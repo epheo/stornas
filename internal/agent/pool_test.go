@@ -134,3 +134,7 @@ func TestEnsurePoolFailsClosed(t *testing.T) {
 		t.Fatalf("health = %s", rep.Health)
 	}
 }
+
+func errExitWith(msg string) error {
+	return fmt.Errorf("exit status 1: %s", msg)
+}
