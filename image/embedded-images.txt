@@ -1,0 +1,19 @@
+# Every workload image the appliance runs, embedded into the bootc image
+# as OCI archives under /usr/lib/embedded-images (imported into cri-o at
+# boot; pods pull with policy Never). Tags mirror the vendored piraeus
+# manifests (image/manifests/piraeus); bump both together.
+# drbd9-* module loader images are deliberately absent: the kmod ships in
+# the OS (image/kmod) and the satellite loader is patched out.
+quay.io/piraeusdatastore/piraeus-operator:v2.11.0
+quay.io/piraeusdatastore/piraeus-server:v1.34.2
+quay.io/piraeusdatastore/piraeus-csi:v1.12.0
+quay.io/piraeusdatastore/drbd-reactor:v1.12.0
+quay.io/piraeusdatastore/piraeus-ha-controller:v1.3.3
+quay.io/piraeusdatastore/drbd-shutdown-guard:v1.1.2
+quay.io/piraeusdatastore/ktls-utils:v1.2.1
+registry.k8s.io/sig-storage/csi-attacher:v4.12.0
+registry.k8s.io/sig-storage/livenessprobe:v2.19.0
+registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+registry.k8s.io/sig-storage/csi-snapshotter:v8.6.0
+registry.k8s.io/sig-storage/csi-resizer:v2.2.1
+registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0

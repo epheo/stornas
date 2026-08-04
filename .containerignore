@@ -1,0 +1,8 @@
+.git
+web/node_modules
+web/.svelte-kit
+web/test-results
+operator/bin
+image/build
+stornas
+stornas-agent

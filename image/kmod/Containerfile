@@ -10,7 +10,10 @@ ARG DRBD_UTILS_VERSION=9.31.0
 # the base image and passes it in.
 ARG KERNEL_VERSION
 
-RUN dnf install -y gcc make rpm-build elfutils-libelf-devel \
+# po4a (drbd-utils man pages) lives in EPEL, not the Stream repos.
+RUN dnf install -y epel-release \
+	&& (dnf config-manager --set-enabled crb || dnf config-manager setopt crb.enabled=1) \
+	&& dnf install -y gcc make rpm-build elfutils-libelf-devel \
 	kernel-devel-${KERNEL_VERSION} kernel-rpm-macros \
 	flex keyutils-libs-devel po4a && dnf clean all
 

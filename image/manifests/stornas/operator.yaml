@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stornas-operator
+  namespace: stornas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stornas-operator
+rules:
+  - apiGroups: [storage.stornas.io]
+    resources: [storagepools, targets, shares, localusers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [storage.stornas.io]
+    resources:
+      [
+        storagepools/status,
+        targets/status,
+        shares/status,
+        localusers/status,
+      ]
+    verbs: [get, update, patch]
+  - apiGroups: [storage.stornas.io]
+    resources:
+      [
+        storagepools/finalizers,
+        targets/finalizers,
+        shares/finalizers,
+        localusers/finalizers,
+      ]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: stornas-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: stornas-operator
+subjects:
+  - kind: ServiceAccount
+    name: stornas-operator
+    namespace: stornas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: stornas-operator-leader-election
+  namespace: stornas-system
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stornas-operator-leader-election
+  namespace: stornas-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: stornas-operator-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: stornas-operator
+    namespace: stornas-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stornas-operator
+  namespace: stornas-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stornas-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stornas-operator
+    spec:
+      serviceAccountName: stornas-operator
+      containers:
+        - name: operator
+          image: ghcr.io/epheo/stornas-operator:latest
+          imagePullPolicy: Never # embedded via /usr/lib/embedded-images
+          args: [--leader-elect]
+          env:
+            # Piraeus places the controller Service in its own namespace.
+            - name: LINSTOR_URL
+              value: http://linstor-controller.piraeus-datastore.svc:3370
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            runAsNonRoot: true

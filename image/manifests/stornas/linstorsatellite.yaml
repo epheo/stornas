@@ -1,0 +1,21 @@
+apiVersion: piraeus.io/v1
+kind: LinstorSatelliteConfiguration
+metadata:
+  name: host-drbd
+spec:
+  # The DRBD 9 kmod ships in the bootc image, matched to the kernel at
+  # build time; the satellite's compile-on-node loader must not run (it
+  # would need a registry and a compiler, both absent by design).
+  patches:
+    - target:
+        kind: Pod
+        name: satellite
+      patch: |
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: satellite
+        spec:
+          initContainers:
+            - name: drbd-module-loader
+              $patch: delete

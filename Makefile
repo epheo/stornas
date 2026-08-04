@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate lint test web image clean
+.PHONY: ci build generate types lint test web images sync-manifests embed kmod image clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets.
 # Only the image build stays out: it pulls the base image and kernel-devel.
@@ -33,13 +33,39 @@ test:
 web:
 	cd web && npm run format:check && npm run check && npm run build
 
-image:
+# App images, built into local podman storage under their runtime names.
+images: web
+	podman build -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
+	podman build -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
+	podman build -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
+
+sync-manifests: generate
+	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
+
+# OCI archives for /usr/lib/embedded-images: the app images from local
+# storage plus every ref in image/embedded-images.txt.
+embed: images
+	mkdir -p image/build/embedded-images
+	for img in ghcr.io/epheo/stornas ghcr.io/epheo/stornas-operator ghcr.io/epheo/stornas-agent; do \
+		podman save --format oci-archive \
+			-o image/build/embedded-images/$$(basename $$img).tar $$img:latest || exit 1; \
+	done
+	grep -v '^#' image/embedded-images.txt | while read -r img; do \
+		[ -z "$$img" ] && continue; \
+		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
+		skopeo copy docker://$$img \
+			oci-archive:image/build/embedded-images/$$out:$$img || exit 1; \
+	done
+
+kmod:
 	podman build --target kmod -t stornas-kmod -f image/kmod/Containerfile \
 		--build-arg KERNEL_VERSION=$$(podman run --rm $(BASE_IMAGE) \
 			rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core) \
 		image/kmod
+
+image: sync-manifests embed kmod
 	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
-		--from $(BASE_IMAGE) -f image/Containerfile -t stornas:$(VERSION) image
+		--from $(BASE_IMAGE) -f image/Containerfile -t stornas-os:$(VERSION) image
 
 clean:
 	rm -f stornas stornas-agent

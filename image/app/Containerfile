@@ -1,5 +1,6 @@
-# Application images: stornas (server) and stornas-agent, built from the
-# repo root context: podman build -f image/app/Containerfile --target <t> .
+# Application images: stornas (server), stornas-agent, stornas-operator.
+# Built from the repo root context: podman build -f image/app/Containerfile
+# --target <t> .  The server image expects web/build to exist (make web).
 FROM docker.io/library/golang:1.25 AS build
 WORKDIR /src
 COPY go.mod go.sum go.work go.work.sum ./
@@ -7,12 +8,20 @@ COPY operator/go.mod operator/go.sum operator/
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /out/ ./cmd/stornas ./cmd/stornas-agent
+RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /out/ ./cmd/stornas ./cmd/stornas-agent \
+	&& CGO_ENABLED=0 go build -o /out/stornas-operator ./operator/cmd
 
 FROM quay.io/centos/centos:stream10-minimal AS server
 COPY --from=build /out/stornas /usr/local/bin/stornas
+COPY web/build /usr/share/stornas/web
+ENV STORNAS_WEB=/usr/share/stornas/web
 USER 65534
 ENTRYPOINT ["/usr/local/bin/stornas"]
+
+FROM quay.io/centos/centos:stream10-minimal AS operator
+COPY --from=build /out/stornas-operator /usr/local/bin/stornas-operator
+USER 65534
+ENTRYPOINT ["/usr/local/bin/stornas-operator"]
 
 # The agent shells out to the host's LVM state, so the container carries
 # the lvm2 userland and runs privileged with /dev and /run mounts.
