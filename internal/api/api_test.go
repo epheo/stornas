@@ -194,6 +194,46 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	}
 }
 
+func TestUserLifecycle(t *testing.T) {
+	a := newAPI()
+	w := doReq(t, a.CreateUser, "POST", "/api/v1/users", `{"name":"alice","password":"s3cret","role":"viewer","smb":true}`, nil)
+	if w.Code != 201 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	sec, err := a.CS.CoreV1().Secrets("stornas-system").Get(context.Background(), "alice-password", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sec.StringData["password"] != "s3cret" {
+		t.Fatalf("secret = %v", sec.StringData)
+	}
+	got, err := a.Dyn.Resource(userGVR).Namespace("stornas-system").Get(context.Background(), "alice", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	smb, _, _ := unstructured.NestedBool(got.Object, "spec", "smb")
+	ref, _, _ := unstructured.NestedString(got.Object, "spec", "passwordSecretRef")
+	if !smb || ref != "alice-password" {
+		t.Fatalf("spec = %v", got.Object["spec"])
+	}
+
+	w = doReq(t, a.CreateUser, "POST", "/api/v1/users", `{"name":"bob","role":"viewer"}`, nil)
+	if w.Code != 400 {
+		t.Fatalf("empty password accepted: code=%d", w.Code)
+	}
+	w = doReq(t, a.DeleteUser, "DELETE", "/api/v1/users/admin", "", map[string]string{"name": "admin"})
+	if w.Code != 409 {
+		t.Fatalf("admin delete allowed: code=%d", w.Code)
+	}
+	w = doReq(t, a.DeleteUser, "DELETE", "/api/v1/users/alice", "", map[string]string{"name": "alice"})
+	if w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := a.CS.CoreV1().Secrets("stornas-system").Get(context.Background(), "alice-password", metav1.GetOptions{}); err == nil {
+		t.Fatal("password secret survived user delete")
+	}
+}
+
 func TestCreateVolumeBlockMode(t *testing.T) {
 	a := newAPI()
 	body := `{"name":"disk0","size":"10Gi","storageClass":"stornas-replicated","block":true}`
