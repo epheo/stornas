@@ -15,6 +15,9 @@ build:
 generate:
 	$(MAKE) -C operator manifests generate
 
+types:
+	go run github.com/gzuidhof/tygo@v0.2.21 generate
+
 # One .golangci.yml at the root covers both modules; golangci-lint resolves
 # it by walking up from operator/. The pinned binary comes from the operator
 # Makefile so both modules lint with the same version.

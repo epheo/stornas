@@ -14,39 +14,39 @@ func drained(ch <-chan struct{}) bool {
 
 func TestPublishWakesOnlySubscribersOfThatKind(t *testing.T) {
 	b := New()
-	live, _ := b.Subscribe(LiveChanged)
-	git, _ := b.Subscribe(GitChanged)
+	live, _ := b.Subscribe(PoolChanged)
+	git, _ := b.Subscribe(NodeChanged)
 
-	b.Publish(GitChanged)
+	b.Publish(NodeChanged)
 	if drained(live) {
-		t.Error("LiveChanged subscriber woke on a GitChanged publish")
+		t.Error("PoolChanged subscriber woke on a NodeChanged publish")
 	}
 	if !drained(git) {
-		t.Error("GitChanged subscriber did not wake on a GitChanged publish")
+		t.Error("NodeChanged subscriber did not wake on a NodeChanged publish")
 	}
 }
 
 func TestSubscribeMultipleKinds(t *testing.T) {
 	b := New()
-	ch, _ := b.Subscribe(VMSpecChanged, NamespaceChanged)
+	ch, _ := b.Subscribe(PoolChanged, VolumeChanged)
 
-	b.Publish(NamespaceChanged)
+	b.Publish(VolumeChanged)
 	if !drained(ch) {
-		t.Error("did not wake on a subscribed kind (NamespaceChanged)")
+		t.Error("did not wake on a subscribed kind (VolumeChanged)")
 	}
-	b.Publish(DriftChanged)
+	b.Publish(TargetChanged)
 	if drained(ch) {
-		t.Error("woke on an unsubscribed kind (DriftChanged)")
+		t.Error("woke on an unsubscribed kind (TargetChanged)")
 	}
 }
 
 func TestPublishCoalesces(t *testing.T) {
 	b := New()
-	ch, _ := b.Subscribe(LiveChanged)
+	ch, _ := b.Subscribe(PoolChanged)
 
-	b.Publish(LiveChanged)
-	b.Publish(LiveChanged)
-	b.Publish(LiveChanged)
+	b.Publish(PoolChanged)
+	b.Publish(PoolChanged)
+	b.Publish(PoolChanged)
 	if !drained(ch) {
 		t.Fatal("expected a pending wake after publishes")
 	}
@@ -57,9 +57,9 @@ func TestPublishCoalesces(t *testing.T) {
 
 func TestCancelUnsubscribes(t *testing.T) {
 	b := New()
-	ch, cancel := b.Subscribe(LiveChanged)
+	ch, cancel := b.Subscribe(PoolChanged)
 	cancel()
-	b.Publish(LiveChanged)
+	b.Publish(PoolChanged)
 	if drained(ch) {
 		t.Error("a cancelled subscription still received a wake")
 	}
@@ -68,11 +68,11 @@ func TestCancelUnsubscribes(t *testing.T) {
 
 func TestNilBusIsNoop(t *testing.T) {
 	var b *Bus
-	b.Publish(LiveChanged) // must not panic
-	if v := b.Version(LiveChanged); v != 0 {
+	b.Publish(PoolChanged) // must not panic
+	if v := b.Version(PoolChanged); v != 0 {
 		t.Errorf("nil bus Version = %d, want 0", v)
 	}
-	ch, cancel := b.Subscribe(LiveChanged)
+	ch, cancel := b.Subscribe(PoolChanged)
 	if ch != nil {
 		t.Error("nil bus Subscribe should yield a nil channel")
 	}
@@ -81,22 +81,22 @@ func TestNilBusIsNoop(t *testing.T) {
 
 func TestVersionIncrementsPerKind(t *testing.T) {
 	b := New()
-	if v := b.Version(VMSpecChanged); v != 0 {
+	if v := b.Version(PoolChanged); v != 0 {
 		t.Fatalf("fresh bus Version = %d, want 0", v)
 	}
-	b.Publish(VMSpecChanged)
-	if v := b.Version(VMSpecChanged); v != 1 {
-		t.Errorf("after one publish Version(VMSpecChanged) = %d, want 1", v)
+	b.Publish(PoolChanged)
+	if v := b.Version(PoolChanged); v != 1 {
+		t.Errorf("after one publish Version(PoolChanged) = %d, want 1", v)
 	}
 	// A different kind doesn't move this one.
-	b.Publish(LiveChanged)
-	if v := b.Version(VMSpecChanged); v != 1 {
-		t.Errorf("Version(VMSpecChanged) moved on a LiveChanged publish: %d", v)
+	b.Publish(NodeChanged)
+	if v := b.Version(PoolChanged); v != 1 {
+		t.Errorf("Version(PoolChanged) moved on a NodeChanged publish: %d", v)
 	}
 	// The summed version of multiple kinds strictly increases when ANY moves.
-	sum := b.Version(VMSpecChanged, LiveChanged)
-	b.Publish(LiveChanged)
-	if got := b.Version(VMSpecChanged, LiveChanged); got <= sum {
+	sum := b.Version(PoolChanged, NodeChanged)
+	b.Publish(NodeChanged)
+	if got := b.Version(PoolChanged, NodeChanged); got <= sum {
 		t.Errorf("summed Version did not increase: %d <= %d", got, sum)
 	}
 }
@@ -106,14 +106,14 @@ func TestVersionIncrementsPerKind(t *testing.T) {
 // against stale state and need an extra event to catch up).
 func TestVersionBumpedBeforeWake(t *testing.T) {
 	b := New()
-	ch, _ := b.Subscribe(DriftChanged)
-	before := b.Version(DriftChanged)
-	b.Publish(DriftChanged)
+	ch, _ := b.Subscribe(TargetChanged)
+	before := b.Version(TargetChanged)
+	b.Publish(TargetChanged)
 	if !drained(ch) {
 		t.Fatal("expected a wake")
 	}
 	// The wake fired, so by the bump-before-wake rule the version must already be ahead.
-	if got := b.Version(DriftChanged); got <= before {
+	if got := b.Version(TargetChanged); got <= before {
 		t.Errorf("version not bumped before wake: %d <= %d", got, before)
 	}
 }

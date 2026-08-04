@@ -1,4 +1,4 @@
-// Package eventbus is dotvirt's change-propagation primitive: a typed pub/sub that
+// Package eventbus is stornas's change-propagation primitive: a typed pub/sub that
 // carries both an EDGE (a coalesced wake when a kind moves) and a LEVEL (a monotonic
 // per-kind version). Consumers reconcile to the level - they wake on the edge, read
 // the current Version of the kinds they depend on, do their work, and re-check the
@@ -7,10 +7,8 @@
 // or a TTL (invalidation falls out of comparing a version).
 //
 // A single channel can only notify ONE consumer; the fan-out is what lets the
-// exporter, the proposals refresher, and the inventory hub ride the same events.
-// Typed kinds keep a consumer from waking on churn it doesn't care about - the
-// exporter depends on VMSpecChanged + NamespaceChanged, so a VMI status heartbeat
-// (LiveChanged) never wakes it.
+// WS hub, the alert evaluator, and future consumers ride the same events. Typed
+// kinds keep a consumer from waking on churn it doesn't care about.
 package eventbus
 
 import (
@@ -23,30 +21,18 @@ import (
 type Kind int
 
 const (
-	// VMSpecChanged: a VirtualMachine's spec/generation changed, or a VM was added or
-	// removed - the exported manifest set moved. (NOT fired on VM status churn.)
-	VMSpecChanged Kind = iota
-	// LiveChanged: runtime state moved - a VMI status change, or a VM status/existence
-	// change. The live inventory tree's per-VM phase/IP/node.
-	LiveChanged
-	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
-	// inventory topology change AND a visibility (RBAC) change.
-	NamespaceChanged
-	// RBACChanged: a RoleBinding moved, so a token's visible-namespace set may have
-	// changed - the cue to revalidate the per-token visibility cache.
-	RBACChanged
-	// DriftChanged: an ArgoCD Application moved - sync/health drift.
-	DriftChanged
-	// GitChanged: a project repo's branch heads moved (a push/merge, seen via the
-	// forge webhook or the backstop poll).
-	GitChanged
-	// ProposalsChanged: a token's open-PR lane changed (the refresher found a diff).
-	ProposalsChanged
-	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved - the network catalog,
-	// fetched out-of-band from the inventory frame, needs re-pulling.
-	NetworkChanged
-	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
-	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
+	// PoolChanged: a StoragePool moved - spec, or agent/operator status
+	// (health, capacity, conditions).
+	PoolChanged Kind = iota
+	// NodeChanged: a Node moved - readiness, addresses, or membership.
+	NodeChanged
+	// VolumeChanged: a PVC moved - phase, capacity, or existence.
+	VolumeChanged
+	// TargetChanged: an iSCSI Target moved - placement, sessions, or state.
+	TargetChanged
+	// ShareChanged: an NFS/SMB Share moved - placement or state.
+	ShareChanged
+	// TaskChanged: the recent-tasks feed moved - an operation was recorded.
 	TaskChanged
 
 	// kindCount is the number of kinds - keep it last. Sizes the version array.
