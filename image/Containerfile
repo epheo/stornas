@@ -24,6 +24,10 @@ RUN dnf install -y \
 # archives (imported into cri-o at boot by the distro's import service)
 # and manifests applied from disk. No registry is reachable at runtime.
 COPY build/embedded-images/ /usr/lib/embedded-images/
+# The import service reads one manifest; merge our lines into the
+# distro's (which keeps its own entries, e.g. portail).
+RUN cat /usr/lib/embedded-images/manifest.stornas >> /usr/lib/embedded-images/manifest \
+	&& rm /usr/lib/embedded-images/manifest.stornas
 COPY manifests/piraeus/ /usr/lib/microshift/manifests.d/000-piraeus/
 COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
 

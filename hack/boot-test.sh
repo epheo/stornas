@@ -7,6 +7,11 @@
 # storage stack: drbd kmod, piraeus + LINSTOR, a StoragePool converging on
 # the scratch disk, a PVC binding through LINSTOR CSI, and the UI.
 #
+# The guest network is restrict=on: no outbound at all, only the hostfwd
+# ports in. The appliance must function fully air-gapped (DESIGN.md);
+# a kubelet quietly pulling a missing embedded image must fail the test,
+# not paper over it.
+#
 # Needs a root-capable podman (PODMAN='sudo podman' in CI) and
 # qemu-system-x86_64. KVM is used when present, TCG otherwise.
 set -euo pipefail
@@ -119,7 +124,7 @@ qemu-system-x86_64 \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \
-	-netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
+	-netdev "user,id=n0,restrict=on,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
 	-device virtio-rng-pci \
 	-serial "file:$WORKDIR/console.log" \

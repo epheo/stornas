@@ -64,6 +64,31 @@ subjects:
     name: stornas-agent
     namespace: stornas-system
 ---
+# MicroShift enforces SCCs; without this grant the DaemonSet controller
+# cannot create the hostPID/privileged/hostPath agent pods at all.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stornas-scc-privileged
+rules:
+  - apiGroups: [security.openshift.io]
+    resources: [securitycontextconstraints]
+    resourceNames: [privileged]
+    verbs: [use]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: stornas-agent-scc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: stornas-scc-privileged
+subjects:
+  - kind: ServiceAccount
+    name: stornas-agent
+    namespace: stornas-system
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:

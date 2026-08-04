@@ -45,18 +45,27 @@ sync-manifests: generate
 	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
 
 # OCI archives for /usr/lib/embedded-images: the app images from local
-# storage plus every ref in image/embedded-images.txt.
+# storage plus every ref in image/embedded-images.txt. The distro's
+# import service only imports archives listed in its manifest, so every
+# archive gets a "path ref" line in a fragment the Containerfile appends
+# to the distro manifest; a tar without a line is dead weight and the
+# pod behind it pulls from the network.
 embed: images
 	mkdir -p image/build/embedded-images
+	: > image/build/embedded-images/manifest.stornas
 	for img in ghcr.io/epheo/stornas ghcr.io/epheo/stornas-operator ghcr.io/epheo/stornas-agent; do \
 		podman save --format oci-archive \
 			-o image/build/embedded-images/$$(basename $$img).tar $$img:latest || exit 1; \
+		echo "/usr/lib/embedded-images/$$(basename $$img).tar $$img:latest" \
+			>> image/build/embedded-images/manifest.stornas; \
 	done
 	grep -v '^#' image/embedded-images.txt | while read -r img; do \
 		[ -z "$$img" ] && continue; \
 		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
 		skopeo copy docker://$$img \
 			oci-archive:image/build/embedded-images/$$out:$$img || exit 1; \
+		echo "/usr/lib/embedded-images/$$out $$img" \
+			>> image/build/embedded-images/manifest.stornas; \
 	done
 
 kmod:
