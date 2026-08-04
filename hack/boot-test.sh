@@ -33,17 +33,38 @@ QEMU_PID=""
 log() { printf '\n== %s\n' "$*"; }
 die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+diagnostics() {
+	log "DIAGNOSTICS: pods"
+	kc get pods -A -o wide 2>&1 || true
+	log "DIAGNOSTICS: not-running pod describes"
+	for p in $(kc get pods -A --no-headers 2>/dev/null \
+			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
+		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | tail -15 || true
+	done
+	log "DIAGNOSTICS: linstorcluster status"
+	kc get linstorcluster -o yaml 2>&1 | sed -n '/status:/,$p' | tail -25 || true
+	log "DIAGNOSTICS: piraeus operator log tail"
+	kc -n piraeus-datastore logs deploy/piraeus-operator-controller-manager --tail=25 2>&1 || true
+	log "DIAGNOSTICS: import-embedded-images"
+	vssh journalctl -u import-embedded-images --no-pager 2>&1 | tail -10 || true
+	log "DIAGNOSTICS: crio image pulls"
+	vssh journalctl -u crio --no-pager 2>/dev/null | grep 'Pulling image' | tail -15 || true
+}
+
 cleanup() {
 	rc=$?
+	if [ $rc -ne 0 ]; then
+		log "FAILED (rc=$rc)"
+		# ssh may itself be the failure; diagnostics degrade to noise then.
+		diagnostics
+		log "last 40 lines of VM console:"
+		tail -40 "$WORKDIR/console.log" 2>/dev/null || true
+	fi
 	if [ "$KEEP" = 1 ]; then
 		log "keeping VM (pid $(cat "$WORKDIR/qemu.pid" 2>/dev/null || echo '?')) and $WORKDIR"
 		exit $rc
 	fi
 	[ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null || true
-	if [ $rc -ne 0 ]; then
-		log "FAILED (rc=$rc) - last 60 lines of VM console:"
-		tail -60 "$WORKDIR/console.log" 2>/dev/null || true
-	fi
 	rm -rf "$WORKDIR"
 	exit $rc
 }
