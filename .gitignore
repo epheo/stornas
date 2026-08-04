@@ -1,0 +1,8 @@
+/stornas
+/stornas-agent
+web/node_modules/
+web/build/
+web/.svelte-kit/
+operator/bin/
+*.out
+.DS_Store

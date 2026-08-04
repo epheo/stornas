@@ -1,0 +1,29 @@
+# This rule is not used by the project stornas-operator itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to storage.stornas.io resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: stornas-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: share-viewer-role
+rules:
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - shares
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - shares/status
+  verbs:
+  - get

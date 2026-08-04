@@ -1,0 +1,9 @@
+apiVersion: storage.stornas.io/v1alpha1
+kind: Share
+metadata:
+  labels:
+    app.kubernetes.io/name: stornas-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: share-sample
+spec:
+  # TODO(user): Add fields here

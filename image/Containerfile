@@ -1,0 +1,19 @@
+# stornas bootc layer on the epheo/microshift distro image.
+# Pin by digest before release; :latest only while bootstrapping.
+FROM ghcr.io/epheo/microshift:latest
+
+# drbd-utils and the drbd9 kmod are not in CentOS repos; they come from
+# the kmod build stage (image/kmod) matched to this image's kernel.
+COPY --from=kmod /out/rpms /tmp/drbd-rpms
+
+RUN dnf install -y \
+	lvm2 \
+	mdadm \
+	smartmontools \
+	nvme-cli \
+	targetcli \
+	samba \
+	nfs-utils \
+	/tmp/drbd-rpms/*.rpm \
+	&& dnf clean all \
+	&& rm -rf /tmp/drbd-rpms

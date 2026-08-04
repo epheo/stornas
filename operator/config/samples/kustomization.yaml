@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- storage_v1alpha1_storagepool.yaml
+- storage_v1alpha1_target.yaml
+- storage_v1alpha1_share.yaml
+- storage_v1alpha1_localuser.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

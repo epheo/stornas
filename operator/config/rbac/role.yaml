@@ -1,0 +1,41 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - localusers
+  - shares
+  - storagepools
+  - targets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - localusers/finalizers
+  - shares/finalizers
+  - storagepools/finalizers
+  - targets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - localusers/status
+  - shares/status
+  - storagepools/status
+  - targets/status
+  verbs:
+  - get
+  - patch
+  - update

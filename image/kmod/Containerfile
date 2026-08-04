@@ -1,0 +1,29 @@
+# Builds the out-of-tree DRBD 9 kmod and drbd-utils as RPMs against the
+# exact kernel of the microshift base image. The image build fails if the
+# kernel headers and base kernel diverge; greenboot is the last resort,
+# this stage is the first line.
+FROM quay.io/centos/centos:stream10 AS build
+
+ARG DRBD_VERSION=9.2.14
+ARG DRBD_UTILS_VERSION=9.31.0
+# Must match the kernel in ghcr.io/epheo/microshift; CI extracts it from
+# the base image and passes it in.
+ARG KERNEL_VERSION
+
+RUN dnf install -y gcc make rpm-build elfutils-libelf-devel \
+	kernel-devel-${KERNEL_VERSION} kernel-rpm-macros \
+	flex keyutils-libs-devel po4a && dnf clean all
+
+WORKDIR /build
+RUN curl -fsSLO https://pkg.linbit.com/downloads/drbd/9/drbd-${DRBD_VERSION}.tar.gz \
+	&& curl -fsSLO https://pkg.linbit.com/downloads/drbd/utils/drbd-utils-${DRBD_UTILS_VERSION}.tar.gz
+
+RUN tar xf drbd-${DRBD_VERSION}.tar.gz \
+	&& make -C drbd-${DRBD_VERSION} kmp-rpm KDIR=/usr/src/kernels/${KERNEL_VERSION}
+
+RUN tar xf drbd-utils-${DRBD_UTILS_VERSION}.tar.gz \
+	&& cd drbd-utils-${DRBD_UTILS_VERSION} \
+	&& ./configure --enable-spec && make rpm
+
+FROM scratch AS kmod
+COPY --from=build /root/rpmbuild/RPMS /out/rpms

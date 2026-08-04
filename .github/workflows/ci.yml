@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go test ./...
+
+  operator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: operator/go.mod
+      - run: make -C operator manifests generate
+      - name: fail on uncommitted generated diffs
+        run: git diff --exit-code
+      - run: make -C operator test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: web
+      - run: npm run check
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  # Compile gate for the out-of-tree DRBD 9 kmod against the base image
+  # kernel. A mismatched image must never publish; this job is the gate.
+  kmod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: extract kernel version from base image
+        id: kernel
+        run: |
+          podman pull ghcr.io/epheo/microshift:latest
+          KVER=$(podman run --rm ghcr.io/epheo/microshift:latest rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)
+          echo "version=$KVER" >> "$GITHUB_OUTPUT"
+      - name: build kmod
+        run: |
+          podman build --target kmod \
+            --build-arg KERNEL_VERSION=${{ steps.kernel.outputs.version }} \
+            -f image/kmod/Containerfile image/kmod
