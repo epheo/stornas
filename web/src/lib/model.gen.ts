@@ -42,6 +42,19 @@ export interface Node {
   roles: string[];
   addresses: string[];
   kubeletVersion: string;
+  disks: Disk[];
+}
+/**
+ * Disk is one observed block device on a node; unclaimed disks feed the
+ * create-pool form.
+ */
+export interface Disk {
+  path: string;
+  model: string;
+  serial: string;
+  sizeBytes: number /* int64 */;
+  rotational: boolean;
+  claimed: boolean;
 }
 /**
  * Volume is one PVC: the unit everything else references (LUNs, shares,

@@ -43,19 +43,26 @@ var shareGVR = schema.GroupVersionResource{
 	Resource: "shares",
 }
 
+var inventoryGVR = schema.GroupVersionResource{
+	Group:    storagev1alpha1.GroupVersion.Group,
+	Version:  storagev1alpha1.GroupVersion.Version,
+	Resource: "nodeinventories",
+}
+
 // State is the SA-maintained snapshot. Build with New, start with Run;
 // Snapshot reads are lock-free indexer scans safe for concurrent callers.
 type State struct {
-	pools  cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
-	shares cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
-	nodes  cache.Indexer // *corev1.Node
-	pvcs   cache.Indexer // *corev1.PersistentVolumeClaim
+	pools       cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
+	shares      cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
+	inventories cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
+	nodes       cache.Indexer // *corev1.Node
+	pvcs        cache.Indexer // *corev1.PersistentVolumeClaim
 
 	specs []reflectorSpec
 
-	poolsSynced, sharesSynced, nodesSynced, pvcsSynced atomic.Bool
-	syncedOnce                                         sync.Once
-	allSynced                                          chan struct{}
+	poolsSynced, sharesSynced, invSynced, nodesSynced, pvcsSynced atomic.Bool
+	syncedOnce                                                    sync.Once
+	allSynced                                                     chan struct{}
 
 	healthy atomic.Bool // any reflector's List/Watch failing flips this false
 }
@@ -74,6 +81,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 	s := &State{allSynced: make(chan struct{})}
 	s.pools = newIndexer()
 	s.shares = newIndexer()
+	s.inventories = newIndexer()
 	s.nodes = newIndexer()
 	s.pvcs = newIndexer()
 	s.healthy.Store(true)
@@ -105,6 +113,20 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 				},
 				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 					return dyn.Resource(shareGVR).Watch(ctx, o)
+				},
+			}, &s.healthy),
+		},
+		{
+			// Inventory moves feed the same NodeChanged kind: the UI's
+			// node view is the join of both objects.
+			reflect.NewStore(s.inventories, node, func() { s.invSynced.Store(true); s.checkSynced() }),
+			&unstructured.Unstructured{},
+			reflect.TrackHealth(&cache.ListWatch{
+				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+					return dyn.Resource(inventoryGVR).List(ctx, o)
+				},
+				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+					return dyn.Resource(inventoryGVR).Watch(ctx, o)
 				},
 			}, &s.healthy),
 		},
@@ -162,7 +184,7 @@ func (s *State) WaitForSync(ctx context.Context) error {
 }
 
 func (s *State) checkSynced() {
-	if s.poolsSynced.Load() && s.sharesSynced.Load() && s.nodesSynced.Load() && s.pvcsSynced.Load() {
+	if s.poolsSynced.Load() && s.sharesSynced.Load() && s.invSynced.Load() && s.nodesSynced.Load() && s.pvcsSynced.Load() {
 		s.syncedOnce.Do(func() { close(s.allSynced) })
 	}
 }
@@ -185,12 +207,34 @@ func (s *State) Snapshot() model.Snapshot {
 		}
 		snap.Pools = append(snap.Pools, poolModel(&pool))
 	}
+	disksByNode := map[string][]model.Disk{}
+	for _, u := range reflect.List(s.inventories) {
+		var inv storagev1alpha1.NodeInventory
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &inv); err != nil {
+			continue
+		}
+		for _, d := range inv.Status.Disks {
+			disk := model.Disk{
+				Path:       d.Path,
+				Model:      d.Model,
+				Serial:     d.Serial,
+				Rotational: d.Rotational,
+				Claimed:    d.Claimed,
+			}
+			if d.Size != nil {
+				disk.SizeBytes = d.Size.Value()
+			}
+			disksByNode[inv.Name] = append(disksByNode[inv.Name], disk)
+		}
+	}
 	for _, obj := range s.nodes.List() {
 		n, ok := obj.(*corev1.Node)
 		if !ok {
 			continue
 		}
-		snap.Nodes = append(snap.Nodes, nodeModel(n))
+		nm := nodeModel(n)
+		nm.Disks = disksByNode[n.Name]
+		snap.Nodes = append(snap.Nodes, nm)
 	}
 	for _, obj := range s.pvcs.List() {
 		pvc, ok := obj.(*corev1.PersistentVolumeClaim)

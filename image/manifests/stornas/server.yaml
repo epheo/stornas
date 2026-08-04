@@ -11,11 +11,16 @@ metadata:
 rules:
   # The clusterstate reflectors: read-only, exactly what the UI shows.
   - apiGroups: [storage.stornas.io]
-    resources: [storagepools, targets, shares]
+    resources: [storagepools, targets, shares, nodeinventories]
     verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [nodes, persistentvolumeclaims]
     verbs: [get, list, watch]
+  # Mutations: pools are cluster-scoped; everything else the API creates
+  # is namespace-confined (see the auth Role).
+  - apiGroups: [storage.stornas.io]
+    resources: [storagepools]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -41,9 +46,15 @@ rules:
   - apiGroups: [storage.stornas.io]
     resources: [localusers]
     verbs: [get, list, create]
+  - apiGroups: [storage.stornas.io]
+    resources: [shares]
+    verbs: [create]
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, create]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

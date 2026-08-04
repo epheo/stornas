@@ -58,6 +58,10 @@ func main() {
 	if err := users.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
+	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host}
+	if err := mgr.Add(inv); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("stornas-agent %s on node %s", version, node)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

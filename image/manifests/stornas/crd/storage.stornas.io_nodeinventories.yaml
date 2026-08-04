@@ -1,0 +1,97 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: nodeinventories.storage.stornas.io
+spec:
+  group: storage.stornas.io
+  names:
+    kind: NodeInventory
+    listKind: NodeInventoryList
+    plural: nodeinventories
+    singular: nodeinventory
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.observedAt
+      name: Observed
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodeInventory is the Schema for the nodeinventories API; one per node,
+          named after it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NodeInventorySpec is intentionally empty: inventories are pure agent
+              observations, named after the node, created and refreshed by the agent.
+            type: object
+          status:
+            description: NodeInventoryStatus is the agent's latest disk observation.
+            properties:
+              disks:
+                items:
+                  description: Disk is one block device the agent observed.
+                  properties:
+                    claimed:
+                      description: |-
+                        claimed marks disks already carrying an LVM PV; the create-pool UI
+                        offers only unclaimed ones.
+                      type: boolean
+                    model:
+                      type: string
+                    path:
+                      description: |-
+                        path is the stable identifier pools should reference
+                        (/dev/disk/by-id/... when the device carries a WWN or serial).
+                      type: string
+                    rotational:
+                      type: boolean
+                    serial:
+                      type: string
+                    size:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    smart:
+                      enum:
+                      - Passed
+                      - Failed
+                      - Unknown
+                      type: string
+                  required:
+                  - path
+                  type: object
+                type: array
+              observedAt:
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

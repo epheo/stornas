@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/epheo/stornas/internal/api"
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/clusterstate"
 	"github.com/epheo/stornas/internal/eventbus"
@@ -77,6 +78,11 @@ func main() {
 		writeJSON(w, state.Snapshot())
 	})))
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
+
+	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace}
+	mux.Handle("POST /api/v1/pools", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreatePool)))
+	mux.Handle("POST /api/v1/volumes", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreateVolume)))
+	mux.Handle("POST /api/v1/shares", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreateShare)))
 	mux.Handle("GET /", spaHandler(*webDir))
 
 	srv := &http.Server{Addr: *addr, Handler: mux}

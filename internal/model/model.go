@@ -35,6 +35,18 @@ type Node struct {
 	Roles          []string `json:"roles"`
 	Addresses      []string `json:"addresses"`
 	KubeletVersion string   `json:"kubeletVersion"`
+	Disks          []Disk   `json:"disks"`
+}
+
+// Disk is one observed block device on a node; unclaimed disks feed the
+// create-pool form.
+type Disk struct {
+	Path       string `json:"path"`
+	Model      string `json:"model"`
+	Serial     string `json:"serial"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	Rotational bool   `json:"rotational"`
+	Claimed    bool   `json:"claimed"`
 }
 
 // Volume is one PVC: the unit everything else references (LUNs, shares,

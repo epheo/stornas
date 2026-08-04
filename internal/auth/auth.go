@@ -110,6 +110,23 @@ func (m *Manager) Require(next http.Handler) http.Handler {
 	})
 }
 
+// RequireRole gates a handler behind a session carrying the role; admin
+// implies every role.
+func (m *Manager) RequireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := m.userFor(r)
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+			return
+		}
+		if user.Role != role && user.Role != "admin" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (m *Manager) userFor(r *http.Request) (User, bool) {
 	c, err := r.Cookie(cookieName)
 	if err != nil {

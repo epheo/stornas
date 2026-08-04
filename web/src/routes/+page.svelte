@@ -3,10 +3,17 @@
 	import { HardDrive, Server, Database } from 'lucide-svelte';
 	import type { Snapshot } from '$lib/model.gen';
 	import { connectState, formatBytes } from '$lib/stream';
+	import CreateForms from '$lib/CreateForms.svelte';
 
 	let snap = $state<Snapshot>({ pools: [], nodes: [], volumes: [], shares: [] });
+	let role = $state('');
 
-	onMount(() => connectState((s) => (snap = s)));
+	onMount(() => {
+		fetch('/api/v1/session')
+			.then((r) => (r.ok ? r.json() : undefined))
+			.then((s) => (role = s?.role ?? ''));
+		return connectState((s) => (snap = s));
+	});
 
 	const healthClass: Record<string, string> = {
 		Online: 'bg-emerald-100 text-emerald-800',
@@ -21,6 +28,10 @@
 		<HardDrive size={22} />
 		<h1 class="text-xl font-semibold">stornas</h1>
 	</header>
+
+	{#if role === 'admin'}
+		<CreateForms {snap} />
+	{/if}
 
 	<section>
 		<h2 class="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide opacity-60">
