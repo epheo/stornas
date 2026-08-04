@@ -1,0 +1,8 @@
+apiVersion: piraeus.io/v1
+kind: LinstorCluster
+metadata:
+  name: linstorcluster
+spec:
+  # Controller state lives in k8s CRDs, so losing the pod loses no data;
+  # IO continues without it, only provisioning stops.
+  controller: {}
