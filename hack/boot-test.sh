@@ -42,6 +42,7 @@ trap cleanup EXIT
 
 retry() { # retry <seconds> <description> <cmd...>; cmd runs in this shell
 	local deadline=$(( $(date +%s) + $1 )) desc=$2
+	printf 'waiting up to %ss for: %s\n' "$1" "$desc"
 	shift 2
 	until "$@" >/dev/null 2>&1; do
 		if [ "$(date +%s)" -gt "$deadline" ]; then
@@ -75,7 +76,18 @@ cat > "$WORKDIR/config.toml" <<EOF
 name = "root"
 key = "$(cat "$WORKDIR/id.pub")"
 EOF
-$PODMAN image exists "$IMAGE" || podman save "$IMAGE" | $PODMAN load
+# Sync the image into rootful storage by ID, not mere existence: a stale
+# rootful copy would boot silently and old bugs would resurface.
+if [ "$PODMAN" != podman ] && podman image exists "$IMAGE"; then
+	want=$(podman image inspect -f '{{.Id}}' "$IMAGE")
+	have=$($PODMAN image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)
+	if [ "$want" != "$have" ]; then
+		log "syncing $IMAGE into rootful podman storage"
+		podman save "$IMAGE" | $PODMAN load
+	fi
+else
+	$PODMAN image exists "$IMAGE" || die "image $IMAGE not found in $PODMAN storage"
+fi
 $PODMAN run --rm --privileged \
 	--security-opt label=type:unconfined_t \
 	-v "$WORKDIR/config.toml:/config.toml:ro" \
@@ -113,6 +125,7 @@ qemu-system-x86_64 \
 	-serial "file:$WORKDIR/console.log" \
 	-display none -daemonize -pidfile "$WORKDIR/qemu.pid"
 QEMU_PID=$(cat "$WORKDIR/qemu.pid")
+log "VM running (qemu pid $QEMU_PID, no libvirt); console: $WORKDIR/console.log"
 
 retry 600 "ssh reachable" vssh true
 retry 600 "microshift service active" vssh systemctl is-active microshift
