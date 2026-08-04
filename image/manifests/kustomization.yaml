@@ -4,3 +4,4 @@ resources:
   - linstorcluster.yaml
   - storageclasses.yaml
   - snapshotclass.yaml
+  - agent.yaml

@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stornas-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stornas-agent
+  namespace: stornas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stornas-agent
+rules:
+  - apiGroups: [storage.stornas.io]
+    resources: [storagepools]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.stornas.io]
+    resources: [storagepools/status]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: stornas-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: stornas-agent
+subjects:
+  - kind: ServiceAccount
+    name: stornas-agent
+    namespace: stornas-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: stornas-agent
+  namespace: stornas-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stornas-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stornas-agent
+    spec:
+      serviceAccountName: stornas-agent
+      hostPID: true
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          # Pin by digest before release; :latest only while bootstrapping.
+          image: ghcr.io/epheo/stornas-agent:latest
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+            - name: run-udev
+              mountPath: /run/udev
+            - name: run-lvm
+              mountPath: /run/lvm
+            - name: run-lock
+              mountPath: /run/lock
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: run-udev
+          hostPath:
+            path: /run/udev
+        - name: run-lvm
+          hostPath:
+            path: /run/lvm
+            type: DirectoryOrCreate
+        - name: run-lock
+          hostPath:
+            path: /run/lock

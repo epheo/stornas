@@ -37,6 +37,7 @@ import (
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 	"github.com/epheo/stornas/operator/internal/controller"
+	"github.com/epheo/stornas/operator/internal/linstor"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -178,9 +179,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Unset means no LINSTOR: pools go Available on host state alone and
+	// carry LinstorRegistered=Unknown, so the gap stays visible in status.
+	var registrar controller.LinstorRegistrar
+	if u := os.Getenv("LINSTOR_URL"); u != "" {
+		r, err := linstor.NewRegistrar(u)
+		if err != nil {
+			setupLog.Error(err, "Failed to create LINSTOR registrar", "url", u)
+			os.Exit(1)
+		}
+		registrar = r
+	}
+
 	if err := (&controller.StoragePoolReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Linstor: registrar,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "StoragePool")
 		os.Exit(1)
