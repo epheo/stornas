@@ -19,6 +19,23 @@ Better than TrueNAS at SAN, replication, and KubeVirt; simpler everywhere else.
 - Chassis copied from dotvirt; GitOps core of dotvirt not reused.
 - stornas is the storage plane only; dotvirt owns the VM plane.
 
+## Self-contained image
+
+An appliance must boot and serve storage with zero external connectivity.
+Everything ships inside the bootc image:
+
+- stornas server, agent, and operator images, embedded in the image's
+  container storage via the distro's embedding mechanism (same path the
+  distro uses for its edge components).
+- Piraeus operator, LINSTOR controller/satellite, and CSI images, embedded
+  and digest-pinned the same way.
+- The DRBD 9 kmod, matched to the image kernel at build time.
+- All manifests, applied from disk, never fetched.
+- The SPA, served by the stornas server from the image.
+
+No registry pull, package install, or download happens at runtime.
+Updates arrive as a new bootc image; greenboot gates, bootc rolls back.
+
 ## Storage planes
 
 Block plane, SAN and PVC:
