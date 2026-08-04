@@ -239,6 +239,40 @@ curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
 curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
 
+log "snapshot and restore through the appliance API"
+curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"name":"boot-snap","volume":"boot-test"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/snapshots" >/dev/null || die "snapshot create failed"
+snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
+retry 300 "snapshot ready" snap_ready
+curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"name":"boot-restore","fromSnapshot":"boot-snap"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes" >/dev/null || die "restore create failed"
+# WaitForFirstConsumer: the restored PVC binds only under a consumer.
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: boot-restore-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "3600"]
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: boot-restore
+EOF
+restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 300 "restored volume Bound" restore_bound
+
 log "no stornas, piraeus, or sig-storage image was pulled at runtime"
 pulled=$(vssh journalctl -u crio --no-pager 2>/dev/null \
 	| grep -E 'Pulling image.*(epheo/stornas|piraeusdatastore|sig-storage)' || true)
