@@ -1,7 +1,7 @@
 # Application images: stornas (server), stornas-agent, stornas-operator.
 # Built from the repo root context: podman build -f image/app/Containerfile
 # --target <t> .  The server image expects web/build to exist (make web).
-FROM docker.io/library/golang:1.25 AS build
+FROM docker.io/library/golang:1.26 AS build
 WORKDIR /src
 COPY go.mod go.sum go.work go.work.sum ./
 COPY operator/go.mod operator/go.sum operator/

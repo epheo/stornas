@@ -135,6 +135,13 @@ func (s *signalStore) Replace(_ []any, _ string) error {
 	return nil
 }
 
+// Bookmark tracking is as unread as the rest of the store; discard it too.
+// (client-go v0.36 grew these on cache.Store; divergence from the dotvirt
+// copy, which pins v0.34.)
+func (s *signalStore) Bookmark(string) {}
+
+func (s *signalStore) LastStoreSyncResourceVersion() string { return "" }
+
 // The read half is unused (the reflector never reads its store back) - satisfy
 // cache.Store with empty results.
 func (s *signalStore) List() []any                        { return nil }

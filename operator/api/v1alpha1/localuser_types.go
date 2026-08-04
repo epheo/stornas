@@ -78,5 +78,5 @@ type LocalUserList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&LocalUser{}, &LocalUserList{})
+	register(&LocalUser{}, &LocalUserList{})
 }

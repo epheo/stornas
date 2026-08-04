@@ -7,7 +7,7 @@ FROM quay.io/centos/centos:stream10 AS build
 # 9.3.x tracks current kernels; 9.2.x lacks the timer API of 6.16+.
 # Piraeus's own module loaders ship the same line (drbd9 v9.3.3).
 ARG DRBD_VERSION=9.3.3
-ARG DRBD_UTILS_VERSION=9.31.0
+ARG DRBD_UTILS_VERSION=9.34.0
 # Must match the kernel in ghcr.io/epheo/microshift; CI extracts it from
 # the base image and passes it in.
 ARG KERNEL_VERSION

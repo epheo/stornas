@@ -20,9 +20,11 @@ types:
 
 # One .golangci.yml at the root covers both modules; golangci-lint resolves
 # it by walking up from operator/. The pinned binary comes from the operator
-# Makefile so both modules lint with the same version.
+# Makefile so both modules lint with the same version. The custom-gcl build
+# ignores the module toolchain directive, so pin it to this repo's Go or the
+# binary type-checks with an older language version and bails.
 lint:
-	$(MAKE) -C operator golangci-lint
+	GOTOOLCHAIN=$$(go env GOVERSION) $(MAKE) -C operator golangci-lint
 	"$(GOLANGCI_LINT)" run
 	cd operator && "bin/golangci-lint" run
 

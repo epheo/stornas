@@ -116,5 +116,5 @@ type TargetList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Target{}, &TargetList{})
+	register(&Target{}, &TargetList{})
 }

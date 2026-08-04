@@ -100,5 +100,5 @@ type ShareList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Share{}, &ShareList{})
+	register(&Share{}, &ShareList{})
 }

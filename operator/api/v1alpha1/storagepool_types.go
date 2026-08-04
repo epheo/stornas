@@ -119,5 +119,5 @@ type StoragePoolList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&StoragePool{}, &StoragePoolList{})
+	register(&StoragePool{}, &StoragePoolList{})
 }
