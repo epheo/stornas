@@ -83,9 +83,13 @@ retry() { # retry <seconds> <description> <cmd...>; cmd runs in this shell
 	log "ok: $desc"
 }
 
+# ssh adds a remote shell evaluation layer that strips quoting (the
+# parens in a kubectl jsonpath break the remote shell) — re-quote every
+# arg with printf %q so commands run remotely exactly as written here.
 vssh() {
 	ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o ConnectTimeout=5 -i "$WORKDIR/id" -p "$SSH_PORT" root@127.0.0.1 "$@"
+		-o ConnectTimeout=5 -o LogLevel=ERROR -i "$WORKDIR/id" -p "$SSH_PORT" \
+		root@127.0.0.1 "$(printf '%q ' "$@")"
 }
 kc() { vssh kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
 
