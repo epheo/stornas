@@ -30,6 +30,35 @@ subjects:
     name: stornas-server
     namespace: stornas-system
 ---
+# The auth layer: LocalUser lookups, first-boot admin bootstrap, and
+# password Secret reads, all confined to the appliance namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: stornas-server-auth
+  namespace: stornas-system
+rules:
+  - apiGroups: [storage.stornas.io]
+    resources: [localusers]
+    verbs: [get, list, create]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: stornas-server-auth
+  namespace: stornas-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: stornas-server-auth
+subjects:
+  - kind: ServiceAccount
+    name: stornas-server
+    namespace: stornas-system
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/clusterstate"
 	"github.com/epheo/stornas/internal/eventbus"
 	"github.com/epheo/stornas/internal/stream"
@@ -41,6 +42,17 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
+
+	src := &auth.KubeSource{Dyn: dyn, CS: cs, Namespace: envOr("STORNAS_NAMESPACE", "stornas-system")}
+	if pw, err := src.Bootstrap(ctx); err != nil {
+		log.Printf("auth bootstrap: %v (login unavailable until a LocalUser exists)", err)
+	} else if pw != "" {
+		// First boot only; afterwards the password lives in the
+		// admin-password Secret.
+		log.Printf("initial admin password: %s", pw)
+	}
+	sessions := auth.NewManager(src)
+
 	bus := eventbus.New()
 	state := clusterstate.New(cs, dyn, bus)
 	state.Run(ctx)
@@ -58,10 +70,13 @@ func main() {
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"version": version, "healthy": state.Healthy()})
 	})
-	mux.HandleFunc("GET /api/v1/state", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /api/v1/login", sessions.Login)
+	mux.HandleFunc("POST /api/v1/logout", sessions.Logout)
+	mux.HandleFunc("GET /api/v1/session", sessions.Session)
+	mux.Handle("GET /api/v1/state", sessions.Require(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, state.Snapshot())
-	})
-	mux.Handle("GET /api/v1/stream", hub)
+	})))
+	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 	mux.Handle("GET /", spaHandler(*webDir))
 
 	srv := &http.Server{Addr: *addr, Handler: mux}
