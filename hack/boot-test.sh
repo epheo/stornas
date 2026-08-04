@@ -81,7 +81,8 @@ $PODMAN run --rm --privileged \
 	-v "$WORKDIR/config.toml:/config.toml:ro" \
 	-v "$WORKDIR/output:/output" \
 	-v /var/lib/containers/storage:/var/lib/containers/storage \
-	"$BIB_IMAGE" --type qcow2 --config /config.toml "$IMAGE"
+	"$BIB_IMAGE" --type qcow2 --config /config.toml \
+	--chown "$(id -u):$(id -g)" "$IMAGE"
 DISK="$WORKDIR/output/qcow2/disk.qcow2"
 [ -f "$DISK" ] || DISK=$(find "$WORKDIR/output" -name '*.qcow2' | head -1)
 [ -n "$DISK" ] || die "bootc-image-builder produced no qcow2"
