@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { HardDrive, Server, Database, Camera, Cable } from 'lucide-svelte';
+	import { HardDrive, Server, Database, Camera, Cable, Users, LogOut } from 'lucide-svelte';
 	import type { Snapshot } from '$lib/model.gen';
 	import { connectState, formatBytes } from '$lib/stream';
 	import { post, del } from '$lib/api';
 	import CreateForms from '$lib/CreateForms.svelte';
+
+	type LocalUser = { name: string; role: string; smb: boolean };
 
 	let snap = $state<Snapshot>({
 		pools: [],
@@ -15,14 +17,34 @@
 		snapshots: [],
 	});
 	let role = $state('');
+	let who = $state('');
+	let users = $state<LocalUser[]>([]);
 	let actionError = $state('');
+	let userName = $state('');
+	let userPassword = $state('');
+	let userRole = $state('viewer');
+	let userSMB = $state(false);
+
+	async function loadUsers() {
+		const r = await fetch('/api/v1/users').catch(() => undefined);
+		if (r?.ok) users = await r.json();
+	}
 
 	onMount(() => {
 		fetch('/api/v1/session')
 			.then((r) => (r.ok ? r.json() : undefined))
-			.then((s) => (role = s?.role ?? ''));
+			.then((s) => {
+				role = s?.role ?? '';
+				who = s?.username ?? s?.name ?? '';
+				if (role === 'admin') loadUsers();
+			});
 		return connectState((s) => (snap = s));
 	});
+
+	async function logout() {
+		await fetch('/api/v1/logout', { method: 'POST' }).catch(() => undefined);
+		location.reload();
+	}
 
 	const healthClass: Record<string, string> = {
 		Online: 'bg-emerald-100 text-emerald-800',
@@ -66,6 +88,25 @@
 			run(() => del(`/api/v1/targets/${name}`));
 		}
 	}
+	async function createUser(e: Event) {
+		e.preventDefault();
+		actionError = await post('/api/v1/users', {
+			name: userName,
+			password: userPassword,
+			role: userRole,
+			smb: userSMB,
+		});
+		if (!actionError) {
+			userName = '';
+			userPassword = '';
+			loadUsers();
+		}
+	}
+	async function deleteUser(name: string) {
+		if (!confirm(`Delete user ${name}?`)) return;
+		actionError = await del(`/api/v1/users/${name}`);
+		if (!actionError) loadUsers();
+	}
 </script>
 
 {#snippet actionButton(label: string, danger: boolean, onclick: () => void)}
@@ -83,6 +124,12 @@
 	<header class="flex items-center gap-2">
 		<HardDrive size={22} />
 		<h1 class="text-xl font-semibold">stornas</h1>
+		<div class="ml-auto flex items-center gap-3 text-sm">
+			{#if who}<span class="opacity-60">{who} ({role})</span>{/if}
+			<button class="flex items-center gap-1 rounded px-2 py-1 hover:bg-gray-100" onclick={logout}>
+				<LogOut size={14} /> Sign out
+			</button>
+		</div>
 	</header>
 
 	{#if actionError}<p class="text-sm text-red-600">{actionError}</p>{/if}
@@ -400,4 +447,69 @@
 			</div>
 		{/if}
 	</section>
+	{#if role === 'admin'}
+		<section>
+			<h2
+				class="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide opacity-60"
+			>
+				<Users size={14} /> Users
+			</h2>
+			<div class="grid gap-4 md:grid-cols-2">
+				<div class="rounded border border-gray-200">
+					<table class="w-full text-sm">
+						<thead class="bg-gray-50 text-left">
+							<tr>
+								<th class="px-3 py-2">Name</th>
+								<th class="px-3 py-2">Role</th>
+								<th class="px-3 py-2">SMB</th>
+								<th class="px-3 py-2">Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each users as u (u.name)}
+								<tr class="border-t border-gray-100">
+									<td class="px-3 py-2 font-medium">{u.name}</td>
+									<td class="px-3 py-2">{u.role}</td>
+									<td class="px-3 py-2">{u.smb ? 'yes' : '-'}</td>
+									<td class="px-3 py-2">
+										{#if u.name !== 'admin'}
+											{@render actionButton('delete', true, () => deleteUser(u.name))}
+										{/if}
+									</td>
+								</tr>
+							{:else}
+								<tr><td class="px-3 py-2 text-sm opacity-60">No users.</td></tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<form onsubmit={createUser} class="space-y-2 rounded border border-gray-200 p-4">
+					<h3 class="text-sm font-semibold">New user</h3>
+					<input
+						class="w-full rounded border px-2 py-1 text-sm"
+						placeholder="Username"
+						autocomplete="off"
+						bind:value={userName}
+					/>
+					<input
+						class="w-full rounded border px-2 py-1 text-sm"
+						type="password"
+						placeholder="Password"
+						autocomplete="new-password"
+						bind:value={userPassword}
+					/>
+					<select class="w-full rounded border px-2 py-1 text-sm" bind:value={userRole}>
+						<option value="viewer">viewer</option>
+						<option value="admin">admin</option>
+					</select>
+					<label class="flex items-center gap-2 text-sm">
+						<input type="checkbox" bind:checked={userSMB} /> SMB access (share logins)
+					</label>
+					<button class="w-full rounded bg-gray-900 px-2 py-1 text-sm text-white" type="submit"
+						>Create user</button
+					>
+				</form>
+			</div>
+		</section>
+	{/if}
 </main>

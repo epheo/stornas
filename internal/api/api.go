@@ -24,6 +24,7 @@ var (
 	poolGVR   = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "storagepools"}
 	shareGVR  = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "shares"}
 	targetGVR = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "targets"}
+	userGVR   = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "localusers"}
 	snapGVR   = schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshots"}
 )
 
@@ -296,6 +297,91 @@ func (a *API) CreateShare(w http.ResponseWriter, r *http.Request) {
 	}}
 	created, err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).Create(r.Context(), share, metav1.CreateOptions{})
 	respond(w, created, err)
+}
+
+type userRequest struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+	SMB      bool   `json:"smb"`
+}
+
+// CreateUser makes the password Secret first: a LocalUser with a dangling
+// ref would let login fail closed but confuse the agent's smb reconciler.
+func (a *API) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req userRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Password == "" {
+		http.Error(w, "password required", http.StatusBadRequest)
+		return
+	}
+	secretName := req.Name + "-password"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: a.Namespace},
+		StringData: map[string]string{"password": req.Password},
+	}
+	if _, err := a.CS.CoreV1().Secrets(a.Namespace).Create(r.Context(), secret, metav1.CreateOptions{}); err != nil {
+		respond(w, nil, err)
+		return
+	}
+	user := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "storage.stornas.io/v1alpha1",
+		"kind":       "LocalUser",
+		"metadata":   map[string]any{"name": req.Name, "namespace": a.Namespace},
+		"spec": map[string]any{
+			"role":              orDefault(req.Role, "viewer"),
+			"smb":               req.SMB,
+			"passwordSecretRef": secretName,
+		},
+	}}
+	created, err := a.Dyn.Resource(userGVR).Namespace(a.Namespace).Create(r.Context(), user, metav1.CreateOptions{})
+	if err != nil {
+		// Roll the Secret back so a retry with a fixed spec starts clean.
+		_ = a.CS.CoreV1().Secrets(a.Namespace).Delete(r.Context(), secretName, metav1.DeleteOptions{})
+	}
+	respond(w, created, err)
+}
+
+func (a *API) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "admin" {
+		http.Error(w, "the admin user cannot be deleted", http.StatusConflict)
+		return
+	}
+	u, err := a.Dyn.Resource(userGVR).Namespace(a.Namespace).Get(r.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		respondDelete(w, err)
+		return
+	}
+	if ref, _, _ := unstructured.NestedString(u.Object, "spec", "passwordSecretRef"); ref != "" {
+		_ = a.CS.CoreV1().Secrets(a.Namespace).Delete(r.Context(), ref, metav1.DeleteOptions{})
+	}
+	respondDelete(w, a.Dyn.Resource(userGVR).Namespace(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{}))
+}
+
+// ListUsers returns identity only; password material never leaves the
+// Secret.
+func (a *API) ListUsers(w http.ResponseWriter, r *http.Request) {
+	list, err := a.Dyn.Resource(userGVR).Namespace(a.Namespace).List(r.Context(), metav1.ListOptions{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type user struct {
+		Name string `json:"name"`
+		Role string `json:"role"`
+		SMB  bool   `json:"smb"`
+	}
+	users := make([]user, 0, len(list.Items))
+	for _, item := range list.Items {
+		role, _, _ := unstructured.NestedString(item.Object, "spec", "role")
+		smb, _, _ := unstructured.NestedBool(item.Object, "spec", "smb")
+		users = append(users, user{Name: item.GetName(), Role: role, SMB: smb})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(users)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

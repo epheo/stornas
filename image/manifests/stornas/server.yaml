@@ -48,7 +48,7 @@ metadata:
 rules:
   - apiGroups: [storage.stornas.io]
     resources: [localusers]
-    verbs: [get, list, create]
+    verbs: [get, list, create, delete]
   - apiGroups: [storage.stornas.io]
     resources: [shares, targets]
     verbs: [create, delete]
@@ -57,7 +57,7 @@ rules:
     verbs: [create, delete]
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [get, create]
+    verbs: [get, create, delete]
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [create, delete, patch]

@@ -111,6 +111,9 @@ func main() {
 	mux.Handle("DELETE /api/v1/targets/{name}", admin(mutate.DeleteTarget))
 	mux.Handle("POST /api/v1/snapshots", admin(mutate.CreateSnapshot))
 	mux.Handle("DELETE /api/v1/snapshots/{name}", admin(mutate.DeleteSnapshot))
+	mux.Handle("GET /api/v1/users", admin(mutate.ListUsers))
+	mux.Handle("POST /api/v1/users", admin(mutate.CreateUser))
+	mux.Handle("DELETE /api/v1/users/{name}", admin(mutate.DeleteUser))
 	mux.Handle("GET /", spaHandler(*webDir))
 
 	srv := &http.Server{Addr: *addr, Handler: mux}
