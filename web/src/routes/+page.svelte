@@ -153,6 +153,7 @@
 							<th class="px-3 py-2">Mode</th>
 							<th class="px-3 py-2">Size</th>
 							<th class="px-3 py-2">Phase</th>
+							<th class="px-3 py-2">Replication</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -164,6 +165,22 @@
 								<td class="px-3 py-2">{vol.block ? 'Block' : 'Filesystem'}</td>
 								<td class="px-3 py-2">{formatBytes(vol.capacityBytes)}</td>
 								<td class="px-3 py-2">{vol.phase}</td>
+								<td class="px-3 py-2 text-xs">
+									{#if vol.replication}
+										{#each vol.replication.replicas as r (r.node)}
+											<span
+												class="mr-1 rounded px-1 py-0.5 {r.diskState === 'UpToDate'
+													? 'bg-emerald-100 text-emerald-800'
+													: 'bg-amber-100 text-amber-800'}"
+												title={r.node}
+											>
+												{r.node}: {r.diskState}{r.inUse ? ' *' : ''}
+											</span>
+										{/each}
+									{:else}
+										<span class="opacity-50">local</span>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>

@@ -93,6 +93,8 @@ spec:
           env:
             - name: STORNAS_WEB
               value: /usr/share/stornas/web
+            - name: LINSTOR_URL
+              value: http://linstor-controller.piraeus-datastore.svc:3370
           ports:
             - containerPort: 8080
           securityContext:

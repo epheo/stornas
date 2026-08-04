@@ -365,6 +365,7 @@ func volumeModel(pvc *corev1.PersistentVolumeClaim) model.Volume {
 		Name:      pvc.Name,
 		Phase:     string(pvc.Status.Phase),
 		Block:     pvc.Spec.VolumeMode != nil && *pvc.Spec.VolumeMode == corev1.PersistentVolumeBlock,
+		Resource:  pvc.Spec.VolumeName,
 	}
 	if pvc.Spec.StorageClassName != nil {
 		out.StorageClass = *pvc.Spec.StorageClassName

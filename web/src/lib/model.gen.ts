@@ -58,7 +58,8 @@ export interface Disk {
 }
 /**
  * Volume is one PVC: the unit everything else references (LUNs, shares,
- * VM disks all point at PVCs).
+ * VM disks all point at PVCs). Resource is the bound PV name, which is
+ * also the LINSTOR resource name for CSI-provisioned volumes.
  */
 export interface Volume {
   namespace: string;
@@ -67,6 +68,24 @@ export interface Volume {
   phase: string;
   capacityBytes: number /* int64 */;
   block: boolean;
+  resource: string;
+  replication?: Replication;
+}
+/**
+ * Replication is the DRBD view of one volume, absent for non-replicated
+ * or unresolved volumes.
+ */
+export interface Replication {
+  replicas: Replica[];
+}
+/**
+ * Replica is one node's copy: disk state (UpToDate, Inconsistent,
+ * SyncTarget...) and whether the node currently holds the resource open.
+ */
+export interface Replica {
+  node: string;
+  diskState: string;
+  inUse: boolean;
 }
 /**
  * Share is one NFS/SMB export: spec identity plus the operator's placement

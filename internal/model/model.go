@@ -50,14 +50,31 @@ type Disk struct {
 }
 
 // Volume is one PVC: the unit everything else references (LUNs, shares,
-// VM disks all point at PVCs).
+// VM disks all point at PVCs). Resource is the bound PV name, which is
+// also the LINSTOR resource name for CSI-provisioned volumes.
 type Volume struct {
-	Namespace     string `json:"namespace"`
-	Name          string `json:"name"`
-	StorageClass  string `json:"storageClass"`
-	Phase         string `json:"phase"`
-	CapacityBytes int64  `json:"capacityBytes"`
-	Block         bool   `json:"block"`
+	Namespace     string       `json:"namespace"`
+	Name          string       `json:"name"`
+	StorageClass  string       `json:"storageClass"`
+	Phase         string       `json:"phase"`
+	CapacityBytes int64        `json:"capacityBytes"`
+	Block         bool         `json:"block"`
+	Resource      string       `json:"resource"`
+	Replication   *Replication `json:"replication"`
+}
+
+// Replication is the DRBD view of one volume, absent for non-replicated
+// or unresolved volumes.
+type Replication struct {
+	Replicas []Replica `json:"replicas"`
+}
+
+// Replica is one node's copy: disk state (UpToDate, Inconsistent,
+// SyncTarget...) and whether the node currently holds the resource open.
+type Replica struct {
+	Node      string `json:"node"`
+	DiskState string `json:"diskState"`
+	InUse     bool   `json:"inUse"`
 }
 
 // Share is one NFS/SMB export: spec identity plus the operator's placement

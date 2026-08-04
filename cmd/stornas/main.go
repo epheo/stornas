@@ -19,6 +19,8 @@ import (
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/clusterstate"
 	"github.com/epheo/stornas/internal/eventbus"
+	"github.com/epheo/stornas/internal/linstorpoll"
+	"github.com/epheo/stornas/internal/model"
 	"github.com/epheo/stornas/internal/stream"
 )
 
@@ -58,10 +60,25 @@ func main() {
 	state := clusterstate.New(cs, dyn, bus)
 	state.Run(ctx)
 
+	var poller *linstorpoll.Poller
+	if u := os.Getenv("LINSTOR_URL"); u != "" {
+		p, err := linstorpoll.New(u, bus)
+		if err != nil {
+			log.Fatalf("linstor poller: %v", err)
+		}
+		poller = p
+		go poller.Run(ctx)
+	}
+	snapFn := func() model.Snapshot {
+		snap := state.Snapshot()
+		poller.Decorate(&snap)
+		return snap
+	}
+
 	kinds := []eventbus.Kind{eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged, eventbus.ShareChanged}
 	wake, cancel := bus.Subscribe(kinds...)
 	defer cancel()
-	hub := stream.NewHub(state.Snapshot, wake, func() uint64 { return bus.Version(kinds...) })
+	hub := stream.NewHub(snapFn, wake, func() uint64 { return bus.Version(kinds...) })
 	go hub.Run(ctx)
 
 	mux := http.NewServeMux()
@@ -75,7 +92,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/logout", sessions.Logout)
 	mux.HandleFunc("GET /api/v1/session", sessions.Session)
 	mux.Handle("GET /api/v1/state", sessions.Require(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, state.Snapshot())
+		writeJSON(w, snapFn())
 	})))
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
