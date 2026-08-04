@@ -69,6 +69,13 @@ image: sync-manifests embed kmod
 	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
 		--from $(BASE_IMAGE) -f image/Containerfile -t stornas-os:$(VERSION) image
 
+# Boot acceptance (same harness shape as the distro's vm-test): needs a
+# root-capable podman and qemu-system-x86_64. CI runs it as
+# `make vm-test PODMAN='sudo podman'`; rootless dev boxes cannot.
+PODMAN ?= podman
+vm-test:
+	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/boot-test.sh
+
 clean:
 	rm -f stornas stornas-agent
 	rm -rf web/build web/.svelte-kit
