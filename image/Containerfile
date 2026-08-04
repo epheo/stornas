@@ -4,7 +4,9 @@ FROM ghcr.io/epheo/microshift:latest
 
 # drbd-utils and the drbd9 kmod are not in CentOS repos; they come from
 # the kmod build stage (image/kmod) matched to this image's kernel.
+# Utils land as a file tree (no rpm target upstream); the kmod as RPMs.
 COPY --from=kmod /out/rpms /tmp/drbd-rpms
+COPY --from=kmod /out/utils/ /
 
 RUN dnf install -y \
 	lvm2 \
@@ -14,7 +16,7 @@ RUN dnf install -y \
 	targetcli \
 	samba \
 	nfs-utils \
-	/tmp/drbd-rpms/*/*.rpm \
+	/tmp/drbd-rpms/*/kmod-drbd-[0-9]*.rpm \
 	&& dnf clean all \
 	&& rm -rf /tmp/drbd-rpms
 
@@ -24,3 +26,7 @@ RUN dnf install -y \
 COPY build/embedded-images/ /usr/lib/embedded-images/
 COPY manifests/piraeus/ /usr/lib/microshift/manifests.d/000-piraeus/
 COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
+
+# LINSTOR CSI replaces the distro's TopoLVM (DESIGN.md): two default
+# StorageClasses is a conflict, and two LVM managers must not share VGs.
+RUN rm -rf /usr/lib/microshift/manifests.d/001-microshift-topolvm

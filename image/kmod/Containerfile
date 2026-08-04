@@ -4,18 +4,17 @@
 # this stage is the first line.
 FROM quay.io/centos/centos:stream10 AS build
 
-ARG DRBD_VERSION=9.2.14
+# 9.3.x tracks current kernels; 9.2.x lacks the timer API of 6.16+.
+# Piraeus's own module loaders ship the same line (drbd9 v9.3.3).
+ARG DRBD_VERSION=9.3.3
 ARG DRBD_UTILS_VERSION=9.31.0
 # Must match the kernel in ghcr.io/epheo/microshift; CI extracts it from
 # the base image and passes it in.
 ARG KERNEL_VERSION
 
-# po4a (drbd-utils man pages) lives in EPEL, not the Stream repos.
-RUN dnf install -y epel-release \
-	&& (dnf config-manager --set-enabled crb || dnf config-manager setopt crb.enabled=1) \
-	&& dnf install -y gcc make rpm-build elfutils-libelf-devel \
+RUN dnf install -y gcc make rpm-build elfutils-libelf-devel \
 	kernel-devel-${KERNEL_VERSION} kernel-rpm-macros \
-	flex keyutils-libs-devel po4a && dnf clean all
+	flex keyutils-libs-devel && dnf clean all
 
 WORKDIR /build
 RUN curl -fsSLO https://pkg.linbit.com/downloads/drbd/9/drbd-${DRBD_VERSION}.tar.gz \
@@ -24,9 +23,16 @@ RUN curl -fsSLO https://pkg.linbit.com/downloads/drbd/9/drbd-${DRBD_VERSION}.tar
 RUN tar xf drbd-${DRBD_VERSION}.tar.gz \
 	&& make -C drbd-${DRBD_VERSION} kmp-rpm KDIR=/usr/src/kernels/${KERNEL_VERSION}
 
+# Utils ship as a plain DESTDIR tree, not an RPM: 9.31 dropped the rpm
+# make target, and a bootc layer composes file trees anyway. drbdmon is
+# the lone C++ piece; no manual keeps po4a, xsltproc, and the docbook
+# network fetch out of the build.
 RUN tar xf drbd-utils-${DRBD_UTILS_VERSION}.tar.gz \
 	&& cd drbd-utils-${DRBD_UTILS_VERSION} \
-	&& ./configure --enable-spec && make rpm
+	&& ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc \
+		--without-drbdmon --without-manual \
+	&& make && make install DESTDIR=/out/utils
 
 FROM scratch AS kmod
 COPY --from=build /root/rpmbuild/RPMS /out/rpms
+COPY --from=build /out/utils /out/utils
