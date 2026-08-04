@@ -7,10 +7,14 @@
 # storage stack: drbd kmod, piraeus + LINSTOR, a StoragePool converging on
 # the scratch disk, a PVC binding through LINSTOR CSI, and the UI.
 #
-# The guest network is restrict=on: no outbound at all, only the hostfwd
-# ports in. The appliance must function fully air-gapped (DESIGN.md);
-# a kubelet quietly pulling a missing embedded image must fail the test,
-# not paper over it.
+# AIRGAP=1 boots the guest with restrict=on: no outbound at all, only
+# the hostfwd ports in. Full air gap is the goal (DESIGN.md) but today
+# it blocks on the distro: microshift's own release images (release.json:
+# ovn-k, coredns, pause, ...) are not embedded there, so the CNI cannot
+# start without a registry and the node never goes Ready. Until the
+# distro embeds them, the default run keeps outbound open and instead
+# asserts that no stornas, piraeus, or sig-storage image was pulled at
+# runtime: our half of the air-gap contract, tested unconditionally.
 #
 # Needs a root-capable podman (PODMAN='sudo podman' in CI) and
 # qemu-system-x86_64. KVM is used when present, TCG otherwise.
@@ -124,7 +128,7 @@ qemu-system-x86_64 \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \
-	-netdev "user,id=n0,restrict=on,hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
+	-netdev "user,id=n0${AIRGAP:+,restrict=on},hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
 	-device virtio-rng-pci \
 	-serial "file:$WORKDIR/console.log" \
@@ -203,6 +207,11 @@ curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
 	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
 curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
+
+log "no stornas, piraeus, or sig-storage image was pulled at runtime"
+pulled=$(vssh journalctl -u crio --no-pager 2>/dev/null \
+	| grep -E 'Pulling image.*(epheo/stornas|piraeusdatastore|sig-storage)' || true)
+[ -z "$pulled" ] || { printf '%s\n' "$pulled"; die "embedded images were pulled from a registry"; }
 
 log "greenboot reports healthy"
 vssh journalctl -b -u greenboot-healthcheck 2>/dev/null | grep -qiE 'GREEN|health-check passed' \
