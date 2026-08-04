@@ -5,8 +5,12 @@ resources:
   - crd/storage.stornas.io_targets.yaml
   - crd/storage.stornas.io_shares.yaml
   - crd/storage.stornas.io_localusers.yaml
-  - linstorcluster.yaml
+  - crd/storage.stornas.io_nodeinventories.yaml
+  # The satellite configuration must exist before the cluster CR: the
+  # operator renders satellites on the cluster's first reconcile, and a
+  # render without the loader-delete patch pulls drbd9-* from quay.
   - linstorsatellite.yaml
+  - linstorcluster.yaml
   - storageclasses.yaml
   - snapshotclass.yaml
   - agent.yaml

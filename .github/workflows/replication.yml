@@ -1,0 +1,48 @@
+# Two-VM replication acceptance: the heaviest gate, dispatch-only until
+# it has proven itself on runner-sized hardware (2 x 5GB VMs).
+name: replication-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  replication:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: free runner disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: enable KVM for the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: install qemu and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: build the appliance image
+        run: make image PODMAN=podman
+      - name: replication test
+        run: make replication-test PODMAN='sudo podman'
+      - name: collect console logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repl-consoles
+          path: /tmp/stornas-repl*/console*.log
+          if-no-files-found: ignore

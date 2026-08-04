@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test clean
+.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test replication-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets.
 # Only the image build stays out: it pulls the base image and kernel-devel.
@@ -88,6 +88,11 @@ smoke:
 
 vm-test:
 	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/boot-test.sh
+
+# Two VMs on a shared mcast segment; microshift multinode join; a
+# replicated PVC surviving peer loss and resyncing. Heaviest gate.
+replication-test:
+	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/replication-test.sh
 
 clean:
 	rm -f stornas stornas-agent
