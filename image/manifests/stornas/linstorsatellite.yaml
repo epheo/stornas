@@ -6,16 +6,21 @@ spec:
   # The DRBD 9 kmod ships in the bootc image, matched to the kernel at
   # build time; the satellite's compile-on-node loader must not run (it
   # would need a registry and a compiler, both absent by design).
+  # Target the DaemonSet, not the legacy Pod name: a Pod-targeted patch
+  # only lands on a later reconcile, and the first render's loader pulls
+  # drbd9-* from the registry, breaking the air gap.
   patches:
     - target:
-        kind: Pod
-        name: satellite
+        kind: DaemonSet
+        name: linstor-satellite
       patch: |
-        apiVersion: v1
-        kind: Pod
+        apiVersion: apps/v1
+        kind: DaemonSet
         metadata:
-          name: satellite
+          name: linstor-satellite
         spec:
-          initContainers:
-            - name: drbd-module-loader
-              $patch: delete
+          template:
+            spec:
+              initContainers:
+                - name: drbd-module-loader
+                  $patch: delete
