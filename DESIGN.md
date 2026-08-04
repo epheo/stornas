@@ -35,6 +35,9 @@ Everything ships inside the bootc image:
 
 No registry pull, package install, or download happens at runtime.
 Updates arrive as a new bootc image; greenboot gates, bootc rolls back.
+Greenboot requires the piraeus operator, linstor-controller, and the
+stornas operator, server, and agent; the distro's TopoLVM check is
+erased with its RPM.
 
 ## Storage planes
 
