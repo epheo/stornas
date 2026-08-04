@@ -105,6 +105,12 @@ cat > "$WORKDIR/config.toml" <<EOF
 [[customizations.user]]
 name = "root"
 key = "$(cat "$WORKDIR/id.pub")"
+
+# The image plus its imported embedded images plus the distro's pulled
+# release images overflow bib's default root; 8.4G filled to 100%.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "30 GiB"
 EOF
 # Sync the image into rootful storage by ID, not mere existence: a stale
 # rootful copy would boot silently and old bugs would resurface.

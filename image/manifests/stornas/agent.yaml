@@ -113,6 +113,7 @@ spec:
         - name: agent
           # Pin by digest before release; :latest only while bootstrapping.
           image: ghcr.io/epheo/stornas-agent:latest
+          imagePullPolicy: Never # embedded via /usr/lib/embedded-images
           env:
             - name: NODE_NAME
               valueFrom:
