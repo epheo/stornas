@@ -75,7 +75,10 @@ func main() {
 		return snap
 	}
 
-	kinds := []eventbus.Kind{eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged, eventbus.ShareChanged}
+	kinds := []eventbus.Kind{
+		eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged,
+		eventbus.ShareChanged, eventbus.TargetChanged, eventbus.SnapshotChanged,
+	}
 	wake, cancel := bus.Subscribe(kinds...)
 	defer cancel()
 	hub := stream.NewHub(snapFn, wake, func() uint64 { return bus.Version(kinds...) })
@@ -97,9 +100,17 @@ func main() {
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
 	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace}
-	mux.Handle("POST /api/v1/pools", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreatePool)))
-	mux.Handle("POST /api/v1/volumes", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreateVolume)))
-	mux.Handle("POST /api/v1/shares", sessions.RequireRole("admin", http.HandlerFunc(mutate.CreateShare)))
+	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireRole("admin", h) }
+	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
+	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
+	mux.Handle("DELETE /api/v1/volumes/{name}", admin(mutate.DeleteVolume))
+	mux.Handle("POST /api/v1/volumes/{name}/resize", admin(mutate.ResizeVolume))
+	mux.Handle("POST /api/v1/shares", admin(mutate.CreateShare))
+	mux.Handle("DELETE /api/v1/shares/{name}", admin(mutate.DeleteShare))
+	mux.Handle("POST /api/v1/targets", admin(mutate.CreateTarget))
+	mux.Handle("DELETE /api/v1/targets/{name}", admin(mutate.DeleteTarget))
+	mux.Handle("POST /api/v1/snapshots", admin(mutate.CreateSnapshot))
+	mux.Handle("DELETE /api/v1/snapshots/{name}", admin(mutate.DeleteSnapshot))
 	mux.Handle("GET /", spaHandler(*webDir))
 
 	srv := &http.Server{Addr: *addr, Handler: mux}

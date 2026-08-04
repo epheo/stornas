@@ -16,6 +16,10 @@
 	let shareClaim = $state('');
 	let shareNFS = $state('');
 	let shareSMB = $state(false);
+	let targetName = $state('');
+	let targetVIP = $state('');
+	let targetLUNs = $state<string[]>([]);
+	let targetInitiators = $state('');
 	let error = $state('');
 	let notice = $state('');
 
@@ -23,6 +27,7 @@
 		(snap.nodes.find((n) => n.name === poolNode)?.disks ?? []).filter((d) => !d.claimed),
 	);
 	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));
+	const blockVolumes = $derived(snap.volumes.filter((v) => v.block));
 
 	async function submit(path: string, body: unknown, what: string) {
 		error = '';
@@ -61,6 +66,19 @@
 			'Share',
 		);
 	}
+	function createTarget(e: Event) {
+		e.preventDefault();
+		submit(
+			'/api/v1/targets',
+			{
+				name: targetName,
+				vip: targetVIP,
+				luns: targetLUNs.map((claim, i) => ({ id: i, claim })),
+				initiators: targetInitiators ? targetInitiators.split(',').map((s) => s.trim()) : [],
+			},
+			'Target',
+		);
+	}
 </script>
 
 <section class="space-y-3">
@@ -68,7 +86,7 @@
 	{#if error}<p class="text-sm text-red-600">{error}</p>{/if}
 	{#if notice}<p class="text-sm text-emerald-700">{notice}</p>{/if}
 
-	<div class="grid gap-4 md:grid-cols-3">
+	<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 		<form onsubmit={createPool} class="space-y-2 rounded border border-gray-200 p-4">
 			<h3 class="text-sm font-semibold">Pool</h3>
 			<input
@@ -145,6 +163,38 @@
 			</label>
 			<button class="w-full rounded bg-gray-900 px-2 py-1 text-sm text-white" type="submit"
 				>Create share</button
+			>
+		</form>
+
+		<form onsubmit={createTarget} class="space-y-2 rounded border border-gray-200 p-4">
+			<h3 class="text-sm font-semibold">iSCSI target</h3>
+			<input
+				class="w-full rounded border px-2 py-1 text-sm"
+				placeholder="Name"
+				bind:value={targetName}
+			/>
+			<input
+				class="w-full rounded border px-2 py-1 text-sm"
+				placeholder="VIP CIDR (for replicated LUNs)"
+				bind:value={targetVIP}
+			/>
+			<div class="max-h-28 space-y-1 overflow-y-auto text-sm">
+				{#each blockVolumes as v (v.namespace + '/' + v.name)}
+					<label class="flex items-center gap-2">
+						<input type="checkbox" value={v.name} bind:group={targetLUNs} />
+						<span class="truncate">{v.name}</span>
+					</label>
+				{:else}
+					<p class="text-xs opacity-60">No block volumes; create one first.</p>
+				{/each}
+			</div>
+			<input
+				class="w-full rounded border px-2 py-1 text-sm"
+				placeholder="Initiator IQNs (comma separated)"
+				bind:value={targetInitiators}
+			/>
+			<button class="w-full rounded bg-gray-900 px-2 py-1 text-sm text-white" type="submit"
+				>Create target</button
 			>
 		</form>
 	</div>

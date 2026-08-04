@@ -14,7 +14,11 @@ import (
 
 func stateWith(t *testing.T, pools []*storagev1alpha1.StoragePool, nodes []*corev1.Node, pvcs []*corev1.PersistentVolumeClaim) *State {
 	t.Helper()
-	s := &State{pools: newIndexer(), shares: newIndexer(), inventories: newIndexer(), nodes: newIndexer(), pvcs: newIndexer()}
+	s := &State{
+		pools: newIndexer(), shares: newIndexer(), inventories: newIndexer(),
+		targets: newIndexer(), snapshots: newIndexer(),
+		nodes: newIndexer(), pvcs: newIndexer(),
+	}
 	for _, p := range pools {
 		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(p)
 		if err != nil {

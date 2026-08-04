@@ -32,6 +32,8 @@ const (
 	TargetChanged
 	// ShareChanged: an NFS/SMB Share moved - placement or state.
 	ShareChanged
+	// SnapshotChanged: a VolumeSnapshot moved - readiness or existence.
+	SnapshotChanged
 	// TaskChanged: the recent-tasks feed moved - an operation was recorded.
 	TaskChanged
 

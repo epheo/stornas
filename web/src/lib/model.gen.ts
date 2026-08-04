@@ -103,6 +103,42 @@ export interface Share {
   reason: string;
 }
 /**
+ * Target is one iSCSI target: spec identity plus the operator's placement
+ * and the agent's LIO state.
+ */
+export interface Target {
+  namespace: string;
+  name: string;
+  iqn: string;
+  vip: string;
+  activeNode: string;
+  sessions: number /* int32 */;
+  state: string; // Pending | Exported | Failed
+  luns: TargetLUN[];
+  available: boolean;
+  reason: string;
+}
+/**
+ * TargetLUN is one logical unit: the claim it exposes and the device the
+ * operator resolved for the agent.
+ */
+export interface TargetLUN {
+  id: number /* int32 */;
+  claim: string;
+  device: string;
+}
+/**
+ * VolumeSnapshot is one CSI snapshot of a volume.
+ */
+export interface VolumeSnapshot {
+  namespace: string;
+  name: string;
+  source: string; // source PVC name
+  ready: boolean;
+  sizeBytes: number /* int64 */;
+  createdAt: string; // RFC3339; empty until bound
+}
+/**
  * Snapshot is one consistent frame of everything the UI shows; the WS hub
  * sends a full frame per change rather than diffs.
  */
@@ -111,4 +147,6 @@ export interface Snapshot {
   nodes: Node[];
   volumes: Volume[];
   shares: Share[];
+  targets: Target[];
+  snapshots: VolumeSnapshot[];
 }

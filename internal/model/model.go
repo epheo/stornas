@@ -91,11 +91,46 @@ type Share struct {
 	Reason    string `json:"reason"`
 }
 
+// Target is one iSCSI target: spec identity plus the operator's placement
+// and the agent's LIO state.
+type Target struct {
+	Namespace  string      `json:"namespace"`
+	Name       string      `json:"name"`
+	IQN        string      `json:"iqn"`
+	VIP        string      `json:"vip"`
+	ActiveNode string      `json:"activeNode"`
+	Sessions   int32       `json:"sessions"`
+	State      string      `json:"state"` // Pending | Exported | Failed
+	LUNs       []TargetLUN `json:"luns"`
+	Available  bool        `json:"available"`
+	Reason     string      `json:"reason"`
+}
+
+// TargetLUN is one logical unit: the claim it exposes and the device the
+// operator resolved for the agent.
+type TargetLUN struct {
+	ID     int32  `json:"id"`
+	Claim  string `json:"claim"`
+	Device string `json:"device"`
+}
+
+// VolumeSnapshot is one CSI snapshot of a volume.
+type VolumeSnapshot struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Source    string `json:"source"` // source PVC name
+	Ready     bool   `json:"ready"`
+	SizeBytes int64  `json:"sizeBytes"`
+	CreatedAt string `json:"createdAt"` // RFC3339; empty until bound
+}
+
 // Snapshot is one consistent frame of everything the UI shows; the WS hub
 // sends a full frame per change rather than diffs.
 type Snapshot struct {
-	Pools   []Pool   `json:"pools"`
-	Nodes   []Node   `json:"nodes"`
-	Volumes []Volume `json:"volumes"`
-	Shares  []Share  `json:"shares"`
+	Pools     []Pool           `json:"pools"`
+	Nodes     []Node           `json:"nodes"`
+	Volumes   []Volume         `json:"volumes"`
+	Shares    []Share          `json:"shares"`
+	Targets   []Target         `json:"targets"`
+	Snapshots []VolumeSnapshot `json:"snapshots"`
 }

@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -14,13 +15,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
 var (
-	poolGVR  = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "storagepools"}
-	shareGVR = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "shares"}
+	poolGVR   = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "storagepools"}
+	shareGVR  = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "shares"}
+	targetGVR = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "targets"}
+	snapGVR   = schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshots"}
 )
 
 // API creates appliance objects. Namespace scopes everything namespaced:
@@ -62,12 +66,29 @@ type volumeRequest struct {
 	Size         string `json:"size"`
 	StorageClass string `json:"storageClass"`
 	Block        bool   `json:"block"`
+	// FromSnapshot restores: the new volume starts as a copy of this
+	// VolumeSnapshot instead of empty.
+	FromSnapshot string `json:"fromSnapshot"`
 }
 
 func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 	var req volumeRequest
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.Size == "" && req.FromSnapshot != "" {
+		// Restores default to the snapshot's own size.
+		snap, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Get(r.Context(), req.FromSnapshot, metav1.GetOptions{})
+		if err != nil {
+			http.Error(w, "snapshot: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		restore, ok, _ := unstructured.NestedString(snap.Object, "status", "restoreSize")
+		if !ok {
+			http.Error(w, "snapshot has no restoreSize yet; pass an explicit size", http.StatusBadRequest)
+			return
+		}
+		req.Size = restore
 	}
 	size, err := resource.ParseQuantity(req.Size)
 	if err != nil {
@@ -91,8 +112,156 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 	if req.StorageClass != "" {
 		pvc.Spec.StorageClassName = &req.StorageClass
 	}
+	if req.FromSnapshot != "" {
+		group := "snapshot.storage.k8s.io"
+		pvc.Spec.DataSource = &corev1.TypedLocalObjectReference{
+			APIGroup: &group,
+			Kind:     "VolumeSnapshot",
+			Name:     req.FromSnapshot,
+		}
+	}
 	created, cerr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Create(r.Context(), pvc, metav1.CreateOptions{})
 	respond(w, created, cerr)
+}
+
+// DeleteVolume refuses while a Share or Target still references the claim:
+// deleting the PVC under an export strands the client, and the CRDs cannot
+// express cross-object liveness.
+func (a *API) DeleteVolume(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if ref, err := a.claimReferenced(r.Context(), name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} else if ref != "" {
+		http.Error(w, "volume is in use by "+ref, http.StatusConflict)
+		return
+	}
+	err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{})
+	respondDelete(w, err)
+}
+
+func (a *API) claimReferenced(ctx context.Context, claim string) (string, error) {
+	shares, err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, s := range shares.Items {
+		if c, _, _ := unstructured.NestedString(s.Object, "spec", "claimName"); c == claim {
+			return "share " + s.GetName(), nil
+		}
+	}
+	targets, err := a.Dyn.Resource(targetGVR).Namespace(a.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, t := range targets.Items {
+		luns, _, _ := unstructured.NestedSlice(t.Object, "spec", "luns")
+		for _, l := range luns {
+			m, ok := l.(map[string]any)
+			if ok && m["claimName"] == claim {
+				return "target " + t.GetName(), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+type resizeRequest struct {
+	Size string `json:"size"`
+}
+
+func (a *API) ResizeVolume(w http.ResponseWriter, r *http.Request) {
+	var req resizeRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	size, err := resource.ParseQuantity(req.Size)
+	if err != nil {
+		http.Error(w, "invalid size: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	patch := []byte(`{"spec":{"resources":{"requests":{"storage":"` + size.String() + `"}}}}`)
+	_, perr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Patch(
+		r.Context(), r.PathValue("name"), types.MergePatchType, patch, metav1.PatchOptions{})
+	respondDelete(w, perr)
+}
+
+func (a *API) DeleteShare(w http.ResponseWriter, r *http.Request) {
+	err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	respondDelete(w, err)
+}
+
+type targetRequest struct {
+	Name string `json:"name"`
+	VIP  string `json:"vip"`
+	LUNs []struct {
+		ID    int32  `json:"id"`
+		Claim string `json:"claim"`
+	} `json:"luns"`
+	Initiators []string `json:"initiators"`
+}
+
+func (a *API) CreateTarget(w http.ResponseWriter, r *http.Request) {
+	var req targetRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	luns := make([]any, 0, len(req.LUNs))
+	for _, l := range req.LUNs {
+		luns = append(luns, map[string]any{"id": int64(l.ID), "claimName": l.Claim})
+	}
+	spec := map[string]any{"luns": luns}
+	if req.VIP != "" {
+		spec["vip"] = req.VIP
+	}
+	if len(req.Initiators) > 0 {
+		inits := make([]any, 0, len(req.Initiators))
+		for _, iqn := range req.Initiators {
+			inits = append(inits, map[string]any{"iqn": iqn})
+		}
+		spec["initiators"] = inits
+	}
+	target := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "storage.stornas.io/v1alpha1",
+		"kind":       "Target",
+		"metadata":   map[string]any{"name": req.Name, "namespace": a.Namespace},
+		"spec":       spec,
+	}}
+	created, err := a.Dyn.Resource(targetGVR).Namespace(a.Namespace).Create(r.Context(), target, metav1.CreateOptions{})
+	respond(w, created, err)
+}
+
+func (a *API) DeleteTarget(w http.ResponseWriter, r *http.Request) {
+	err := a.Dyn.Resource(targetGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	respondDelete(w, err)
+}
+
+type snapshotRequest struct {
+	Name   string `json:"name"`
+	Volume string `json:"volume"`
+}
+
+func (a *API) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	var req snapshotRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	snap := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "snapshot.storage.k8s.io/v1",
+		"kind":       "VolumeSnapshot",
+		"metadata":   map[string]any{"name": req.Name, "namespace": a.Namespace},
+		"spec": map[string]any{
+			"volumeSnapshotClassName": "stornas",
+			"source":                  map[string]any{"persistentVolumeClaimName": req.Volume},
+		},
+	}}
+	created, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Create(r.Context(), snap, metav1.CreateOptions{})
+	respond(w, created, err)
+}
+
+func (a *API) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	respondDelete(w, err)
 }
 
 type shareRequest struct {
@@ -150,6 +319,22 @@ func respond(w http.ResponseWriter, created any, err error) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case apierrors.IsAlreadyExists(err):
 		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// respondDelete maps mutation errors for delete/patch verbs: NotFound is
+// the client's stale view, not a server fault.
+func respondDelete(w http.ResponseWriter, err error) {
+	switch {
+	case err == nil:
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	case apierrors.IsNotFound(err):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case apierrors.IsInvalid(err), apierrors.IsBadRequest(err), apierrors.IsForbidden(err):
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

@@ -1,12 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { HardDrive, Server, Database } from 'lucide-svelte';
+	import { HardDrive, Server, Database, Camera, Cable } from 'lucide-svelte';
 	import type { Snapshot } from '$lib/model.gen';
 	import { connectState, formatBytes } from '$lib/stream';
+	import { post, del } from '$lib/api';
 	import CreateForms from '$lib/CreateForms.svelte';
 
-	let snap = $state<Snapshot>({ pools: [], nodes: [], volumes: [], shares: [] });
+	let snap = $state<Snapshot>({
+		pools: [],
+		nodes: [],
+		volumes: [],
+		shares: [],
+		targets: [],
+		snapshots: [],
+	});
 	let role = $state('');
+	let actionError = $state('');
 
 	onMount(() => {
 		fetch('/api/v1/session')
@@ -21,13 +30,62 @@
 		Failed: 'bg-red-100 text-red-800',
 		Unknown: 'bg-gray-100 text-gray-600',
 	};
+
+	async function run(fn: () => Promise<string>) {
+		actionError = (await fn()) ?? '';
+	}
+	function deleteVolume(name: string) {
+		if (confirm(`Delete volume ${name}? Data is lost.`)) {
+			run(() => del(`/api/v1/volumes/${name}`));
+		}
+	}
+	function resizeVolume(name: string, current: number) {
+		const size = prompt(`New size for ${name} (currently ${formatBytes(current)}):`, '');
+		if (size) run(() => post(`/api/v1/volumes/${name}/resize`, { size }));
+	}
+	function snapshotVolume(name: string) {
+		const snapName = prompt('Snapshot name:', `${name}-${new Date().toISOString().slice(0, 10)}`);
+		if (snapName) run(() => post('/api/v1/snapshots', { name: snapName, volume: name }));
+	}
+	function restoreSnapshot(name: string) {
+		const volName = prompt('New volume name (restored from snapshot):', `${name}-restore`);
+		if (volName) {
+			run(() => post('/api/v1/volumes', { name: volName, size: '', fromSnapshot: name }));
+		}
+	}
+	function deleteSnapshot(name: string) {
+		if (confirm(`Delete snapshot ${name}?`)) run(() => del(`/api/v1/snapshots/${name}`));
+	}
+	function deleteShare(name: string) {
+		if (confirm(`Delete share ${name}? Clients lose access.`)) {
+			run(() => del(`/api/v1/shares/${name}`));
+		}
+	}
+	function deleteTarget(name: string) {
+		if (confirm(`Delete target ${name}? Initiators lose access.`)) {
+			run(() => del(`/api/v1/targets/${name}`));
+		}
+	}
 </script>
 
-<main class="mx-auto max-w-5xl space-y-8 p-6">
+{#snippet actionButton(label: string, danger: boolean, onclick: () => void)}
+	<button
+		class="rounded px-1.5 py-0.5 text-xs {danger
+			? 'bg-red-50 text-red-700 hover:bg-red-100'
+			: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+		{onclick}
+	>
+		{label}
+	</button>
+{/snippet}
+
+<main class="mx-auto max-w-6xl space-y-8 p-6">
 	<header class="flex items-center gap-2">
 		<HardDrive size={22} />
 		<h1 class="text-xl font-semibold">stornas</h1>
 	</header>
+
+	{#if actionError}<p class="text-sm text-red-600">{actionError}</p>{/if}
 
 	{#if role === 'admin'}
 		<CreateForms {snap} />
@@ -82,60 +140,65 @@
 
 	<section>
 		<h2 class="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide opacity-60">
-			<Server size={14} /> Nodes
+			<Server size={14} /> Nodes and disks
 		</h2>
-		<ul class="flex flex-wrap gap-2">
+		<div class="space-y-3">
 			{#each snap.nodes as node (node.name)}
-				<li class="rounded border border-gray-200 px-3 py-2 text-sm">
-					<span
-						class="mr-2 inline-block h-2 w-2 rounded-full {node.ready
-							? 'bg-emerald-500'
-							: 'bg-red-500'}"
-					></span>
-					<span class="font-medium">{node.name}</span>
-					<span class="ml-2 opacity-60">{node.roles.join(', ')}</span>
-					<span class="ml-2 opacity-60">{node.addresses.join(' ')}</span>
-				</li>
+				<div class="rounded border border-gray-200">
+					<div class="flex items-center gap-2 px-3 py-2 text-sm">
+						<span
+							class="inline-block h-2 w-2 rounded-full {node.ready
+								? 'bg-emerald-500'
+								: 'bg-red-500'}"
+						></span>
+						<span class="font-medium">{node.name}</span>
+						<span class="opacity-60">{node.roles.join(', ')}</span>
+						<span class="opacity-60">{node.addresses.join(' ')}</span>
+						<span class="ml-auto text-xs opacity-50">{node.kubeletVersion}</span>
+					</div>
+					{#if (node.disks ?? []).length > 0}
+						<table class="w-full border-t border-gray-100 text-sm">
+							<thead class="bg-gray-50 text-left text-xs">
+								<tr>
+									<th class="px-3 py-1.5">Device</th>
+									<th class="px-3 py-1.5">Model</th>
+									<th class="px-3 py-1.5">Serial</th>
+									<th class="px-3 py-1.5">Size</th>
+									<th class="px-3 py-1.5">Type</th>
+									<th class="px-3 py-1.5">Use</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each node.disks as d (d.path)}
+									<tr class="border-t border-gray-100">
+										<td class="px-3 py-1.5 font-mono text-xs">{d.path}</td>
+										<td class="px-3 py-1.5">{d.model || '-'}</td>
+										<td class="px-3 py-1.5 font-mono text-xs">{d.serial || '-'}</td>
+										<td class="px-3 py-1.5">{formatBytes(d.sizeBytes)}</td>
+										<td class="px-3 py-1.5">{d.rotational ? 'HDD' : 'SSD'}</td>
+										<td class="px-3 py-1.5">
+											<span
+												class="rounded px-1.5 py-0.5 text-xs {d.claimed
+													? 'bg-blue-100 text-blue-800'
+													: 'bg-gray-100 text-gray-600'}"
+											>
+												{d.claimed ? 'in pool' : 'free'}
+											</span>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{:else}
+						<p class="border-t border-gray-100 px-3 py-1.5 text-xs opacity-60">
+							No disks reported.
+						</p>
+					{/if}
+				</div>
 			{:else}
-				<li class="text-sm opacity-60">No nodes.</li>
+				<p class="text-sm opacity-60">No nodes.</p>
 			{/each}
-		</ul>
-	</section>
-
-	<section>
-		<h2 class="mb-2 text-sm font-medium uppercase tracking-wide opacity-60">Shares</h2>
-		{#if snap.shares.length === 0}
-			<p class="text-sm opacity-60">No shares yet.</p>
-		{:else}
-			<div class="overflow-x-auto rounded border border-gray-200">
-				<table class="w-full text-sm">
-					<thead class="bg-gray-50 text-left">
-						<tr>
-							<th class="px-3 py-2">Name</th>
-							<th class="px-3 py-2">Claim</th>
-							<th class="px-3 py-2">Protocols</th>
-							<th class="px-3 py-2">Node</th>
-							<th class="px-3 py-2">State</th>
-							<th class="px-3 py-2">Status</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each snap.shares as s (s.namespace + '/' + s.name)}
-							<tr class="border-t border-gray-100">
-								<td class="px-3 py-2 font-medium">{s.name}</td>
-								<td class="px-3 py-2">{s.claim}</td>
-								<td class="px-3 py-2"
-									>{[s.nfs && 'NFS', s.smb && 'SMB'].filter(Boolean).join(' + ')}</td
-								>
-								<td class="px-3 py-2">{s.node || '-'}</td>
-								<td class="px-3 py-2">{s.state}</td>
-								<td class="px-3 py-2 text-xs opacity-70">{s.available ? 'Available' : s.reason}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
+		</div>
 	</section>
 
 	<section>
@@ -154,6 +217,7 @@
 							<th class="px-3 py-2">Size</th>
 							<th class="px-3 py-2">Phase</th>
 							<th class="px-3 py-2">Replication</th>
+							{#if role === 'admin'}<th class="px-3 py-2">Actions</th>{/if}
 						</tr>
 					</thead>
 					<tbody>
@@ -181,6 +245,154 @@
 										<span class="opacity-50">local</span>
 									{/if}
 								</td>
+								{#if role === 'admin'}
+									<td class="space-x-1 px-3 py-2">
+										{@render actionButton('snapshot', false, () => snapshotVolume(vol.name))}
+										{@render actionButton('resize', false, () =>
+											resizeVolume(vol.name, vol.capacityBytes),
+										)}
+										{@render actionButton('delete', true, () => deleteVolume(vol.name))}
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</section>
+
+	<section>
+		<h2 class="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide opacity-60">
+			<Camera size={14} /> Snapshots
+		</h2>
+		{#if snap.snapshots.length === 0}
+			<p class="text-sm opacity-60">No snapshots yet.</p>
+		{:else}
+			<div class="overflow-x-auto rounded border border-gray-200">
+				<table class="w-full text-sm">
+					<thead class="bg-gray-50 text-left">
+						<tr>
+							<th class="px-3 py-2">Name</th>
+							<th class="px-3 py-2">Volume</th>
+							<th class="px-3 py-2">Size</th>
+							<th class="px-3 py-2">Created</th>
+							<th class="px-3 py-2">Ready</th>
+							{#if role === 'admin'}<th class="px-3 py-2">Actions</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each snap.snapshots as s (s.namespace + '/' + s.name)}
+							<tr class="border-t border-gray-100">
+								<td class="px-3 py-2 font-medium">{s.name}</td>
+								<td class="px-3 py-2">{s.source}</td>
+								<td class="px-3 py-2">{formatBytes(s.sizeBytes)}</td>
+								<td class="px-3 py-2 text-xs">{s.createdAt ? s.createdAt.slice(0, 19) : '-'}</td>
+								<td class="px-3 py-2">
+									<span
+										class="rounded px-1.5 py-0.5 text-xs {s.ready
+											? 'bg-emerald-100 text-emerald-800'
+											: 'bg-amber-100 text-amber-800'}"
+									>
+										{s.ready ? 'ready' : 'pending'}
+									</span>
+								</td>
+								{#if role === 'admin'}
+									<td class="space-x-1 px-3 py-2">
+										{@render actionButton('restore', false, () => restoreSnapshot(s.name))}
+										{@render actionButton('delete', true, () => deleteSnapshot(s.name))}
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</section>
+
+	<section>
+		<h2 class="mb-2 text-sm font-medium uppercase tracking-wide opacity-60">Shares</h2>
+		{#if snap.shares.length === 0}
+			<p class="text-sm opacity-60">No shares yet.</p>
+		{:else}
+			<div class="overflow-x-auto rounded border border-gray-200">
+				<table class="w-full text-sm">
+					<thead class="bg-gray-50 text-left">
+						<tr>
+							<th class="px-3 py-2">Name</th>
+							<th class="px-3 py-2">Claim</th>
+							<th class="px-3 py-2">Protocols</th>
+							<th class="px-3 py-2">Node</th>
+							<th class="px-3 py-2">State</th>
+							<th class="px-3 py-2">Status</th>
+							{#if role === 'admin'}<th class="px-3 py-2">Actions</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each snap.shares as s (s.namespace + '/' + s.name)}
+							<tr class="border-t border-gray-100">
+								<td class="px-3 py-2 font-medium">{s.name}</td>
+								<td class="px-3 py-2">{s.claim}</td>
+								<td class="px-3 py-2"
+									>{[s.nfs && 'NFS', s.smb && 'SMB'].filter(Boolean).join(' + ')}</td
+								>
+								<td class="px-3 py-2">{s.node || '-'}</td>
+								<td class="px-3 py-2">{s.state}</td>
+								<td class="px-3 py-2 text-xs opacity-70">{s.available ? 'Available' : s.reason}</td>
+								{#if role === 'admin'}
+									<td class="px-3 py-2">
+										{@render actionButton('delete', true, () => deleteShare(s.name))}
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</section>
+
+	<section>
+		<h2 class="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide opacity-60">
+			<Cable size={14} /> iSCSI targets
+		</h2>
+		{#if snap.targets.length === 0}
+			<p class="text-sm opacity-60">No targets yet.</p>
+		{:else}
+			<div class="overflow-x-auto rounded border border-gray-200">
+				<table class="w-full text-sm">
+					<thead class="bg-gray-50 text-left">
+						<tr>
+							<th class="px-3 py-2">Name</th>
+							<th class="px-3 py-2">IQN</th>
+							<th class="px-3 py-2">LUNs</th>
+							<th class="px-3 py-2">Active node</th>
+							<th class="px-3 py-2">VIP</th>
+							<th class="px-3 py-2">Sessions</th>
+							<th class="px-3 py-2">State</th>
+							{#if role === 'admin'}<th class="px-3 py-2">Actions</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each snap.targets as t (t.namespace + '/' + t.name)}
+							<tr class="border-t border-gray-100">
+								<td class="px-3 py-2 font-medium">{t.name}</td>
+								<td class="px-3 py-2 font-mono text-xs">{t.iqn || '-'}</td>
+								<td class="px-3 py-2 text-xs">
+									{#each t.luns ?? [] as l (l.id)}
+										<span class="mr-1 rounded bg-gray-100 px-1 py-0.5">{l.id}: {l.claim}</span>
+									{/each}
+								</td>
+								<td class="px-3 py-2">{t.activeNode || '-'}</td>
+								<td class="px-3 py-2 font-mono text-xs">{t.vip || '-'}</td>
+								<td class="px-3 py-2">{t.sessions}</td>
+								<td class="px-3 py-2">{t.state}</td>
+								{#if role === 'admin'}
+									<td class="px-3 py-2">
+										{@render actionButton('delete', true, () => deleteTarget(t.name))}
+									</td>
+								{/if}
 							</tr>
 						{/each}
 					</tbody>
