@@ -31,7 +31,12 @@ RUN tar xf drbd-utils-${DRBD_UTILS_VERSION}.tar.gz \
 	&& cd drbd-utils-${DRBD_UTILS_VERSION} \
 	&& ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc \
 		--without-drbdmon --without-manual \
-	&& make && make install DESTDIR=/out/utils
+	&& make && make install DESTDIR=/out/utils \
+	&& rm -rf /out/utils/var
+# /out/utils/var holds only empty runtime dirs, and copying it into the OS
+# image replaces the /var/run -> /run symlink with a real directory, which
+# strands every pidfile written via the legacy path (ovsdb-server first).
+# tmpfiles.d in the OS image recreates what drbd needs.
 
 FROM scratch AS kmod
 COPY --from=build /root/rpmbuild/RPMS /out/rpms

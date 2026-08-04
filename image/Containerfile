@@ -41,5 +41,10 @@ COPY files/50_stornas_storage_check.sh /etc/greenboot/check/required.d/
 # images do not ship /var content.
 COPY files/smb.conf /etc/samba/smb.conf
 RUN touch /etc/samba/stornas-shares.conf \
-	&& echo 'd /var/lib/stornas 0755 root root -' > /usr/lib/tmpfiles.d/stornas.conf \
+	&& printf '%s\n' \
+		'd /var/lib/stornas 0755 root root -' \
+		'd /var/lib/drbd 0755 root root -' \
+		'd /run/drbd 0755 root root -' \
+		'd /run/drbd/lock 0755 root root -' \
+		> /usr/lib/tmpfiles.d/stornas.conf \
 	&& systemctl enable smb nfs-server
