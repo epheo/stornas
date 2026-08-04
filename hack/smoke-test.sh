@@ -89,7 +89,11 @@ $PODMAN run --privileged -d \
 	"$IMAGE" >/dev/null
 
 retry 60 "dbus up" pexec systemctl is-active -q dbus.service
-retry 300 "microshift service active" pexec systemctl is-active -q microshift.service
+# The embedded-image import (1.5GB unpack, Before=microshift) dominates
+# cold start on small runners; wait for it separately so the microshift
+# budget measures microshift.
+retry 600 "embedded images imported" pexec systemctl is-active -q import-embedded-images.service
+retry 600 "microshift service active" pexec systemctl is-active -q microshift.service
 
 log "assert: /var/run is still a symlink (drbd-utils tree regression)"
 pexec test -L /var/run || die "/var/run is a real directory"
