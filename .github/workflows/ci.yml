@@ -1,3 +1,5 @@
+# Every job calls the same Makefile targets `make ci` runs locally;
+# keep the two in lockstep by changing the Makefile, not this file.
 name: ci
 
 on:
@@ -13,7 +15,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go build ./...
+      - run: make build
+      - run: make lint
       - run: go test ./...
 
   operator:
@@ -23,7 +26,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: operator/go.mod
-      - run: make -C operator manifests generate
+      - run: make generate
       - name: fail on uncommitted generated diffs
         run: git diff --exit-code
       - run: make -C operator test
@@ -35,27 +38,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
-      - run: npm run check
-        working-directory: web
-      - run: npm run build
-        working-directory: web
+      - run: make web
 
-  # Compile gate for the out-of-tree DRBD 9 kmod against the base image
-  # kernel. A mismatched image must never publish; this job is the gate.
-  kmod:
+  # Builds the DRBD 9 kmod against the base image kernel, then the full
+  # bootc layer. A kernel/kmod mismatch must never publish; this is the gate.
+  image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: extract kernel version from base image
-        id: kernel
-        run: |
-          podman pull ghcr.io/epheo/microshift:latest
-          KVER=$(podman run --rm ghcr.io/epheo/microshift:latest rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)
-          echo "version=$KVER" >> "$GITHUB_OUTPUT"
-      - name: build kmod
-        run: |
-          podman build --target kmod \
-            --build-arg KERNEL_VERSION=${{ steps.kernel.outputs.version }} \
-            -f image/kmod/Containerfile image/kmod
+      - run: make image

@@ -20,7 +20,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"version": version})
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": version})
 	})
 
 	log.Printf("stornas %s listening on %s", version, *addr)
