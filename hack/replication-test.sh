@@ -160,6 +160,17 @@ boot_vm 2 "$DISK2" "$SSH2" STORNAS2 52:54:00:44:00:02
 retry 600 "node1 ssh reachable" v1 true
 retry 600 "node2 ssh reachable" v2 true
 
+# First boot must converge before the cluster route change: it pulls
+# the OKD release images over user-net, cleanup keeps them local, and
+# after the change the only gateway is the (routeless) peer.
+settled() { # settled <vssh-fn>
+	$1 sh -c 'k="kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig"; $k get pods -A --no-headers 2>/dev/null | grep -q . || exit 1; $k get pods -A --no-headers | grep -vE "Running|Completed" | grep -q . && exit 1; exit 0'
+}
+node1_settled() { settled v1; }
+node2_settled() { settled v2; }
+retry 900 "node1 first boot settled" node1_settled
+retry 900 "node2 first boot settled" node2_settled
+
 # The cluster NIC gets a static IP, found by MAC: interface naming is
 # not stable across qemu machine types. It also takes the default route
 # (metric below user-net's DHCP route): configure-ovs homes br-ex on
