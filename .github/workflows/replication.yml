@@ -21,10 +21,14 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: install qemu and UEFI firmware
+      - name: install qemu, UEFI firmware, dnsmasq
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf
+          sudo apt-get install -y qemu-system-x86 ovmf dnsmasq
+          # ubuntu's dnsmasq package starts a global instance; the test
+          # runs its own on the bridge.
+          sudo systemctl stop dnsmasq 2>/dev/null || true
+          sudo systemctl disable dnsmasq 2>/dev/null || true
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
