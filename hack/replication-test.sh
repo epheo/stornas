@@ -58,7 +58,7 @@ diagnostics() {
 	done
 	log "DIAGNOSTICS: ovn state per node"
 	for fn in v1 v2; do
-		$fn sh -c 'hostname; ip -br addr show br-ex 2>/dev/null; ls /etc/cni/net.d/ 2>/dev/null' 2>&1 || true
+		$fn sh -c 'hostname; ip -br addr show br-ex 2>/dev/null; ip route show default 2>/dev/null; ls /etc/cni/net.d/ 2>/dev/null; echo "-- ovs-init + rehome journals:"; journalctl -u microshift-ovs-init -u rehome-brex --no-pager 2>/dev/null | tail -25' 2>&1 || true
 	done
 	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
 		echo "--- ${p}"
@@ -228,7 +228,7 @@ node_config() { # node_config <vssh-fn> <hostname> <ip>
 	# path for a moment (its IP rides br-ex), hence detached via
 	# systemd-run, then verify the bridge came back on the cluster IP.
 	step "rehome br-ex (detached)" systemd-run --unit=rehome-brex --collect \
-		bash -c 'nmcli -g NAME con show | grep -E "^(br-ex|ovs-)" | while read -r c; do nmcli con delete "$c"; done; ovs-vsctl --if-exists del-br br-ex; sleep 2; systemctl restart microshift-ovs-init; sleep 3; nmcli -t -f DEVICE,STATE dev | awk -F: "\$2==\"disconnected\"{print \$1}" | while read -r d; do nmcli dev connect "$d" || true; done'
+		bash -c 'nmcli -g NAME con show | grep -E "^(br-ex|ovs-)" | while read -r c; do nmcli con delete "$c"; done; ovs-vsctl --if-exists del-br br-ex; sleep 2; nmcli con up cluster || true; systemctl restart microshift-ovs-init; sleep 3; nmcli con up cluster || true; nmcli -t -f DEVICE,STATE dev | awk -F: "\$2==\"disconnected\"{print \$1}" | while read -r d; do nmcli dev connect "$d" || true; done'
 	rehomed() { $fn sh -c "ip -o addr show br-ex 2>/dev/null | grep -q ' $ip/'"; }
 	retry 180 "[$host] br-ex on the cluster IP" rehomed
 	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
