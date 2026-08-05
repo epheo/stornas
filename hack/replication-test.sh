@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Two-node replication acceptance test: the first real exercise of the
 # stornas-replicated StorageClass and the DRBD kmod beyond modprobe.
+# The join is the distro's worker role (microshift-profile worker +
+# add-node --worker); firewalld and greenboot stay in place, so this
+# also proves the stornas firewall service and the role-aware check.
 #
 # Network shape follows upstream microshift's multinode docs exactly:
 # ONE network per VM that carries ssh, cluster traffic, and internet -
@@ -223,25 +226,20 @@ for fn in v1 v2; do
 	$fn sh -c "printf '$IP1 node1\n$IP2 node2\n' >> /etc/hosts"
 done
 
-# MicroShift multinode, upstream configure-node.sh shape: stop the
-# greenboot gate first (cleanup-data fights a running healthcheck),
-# stop firewalld (upstream does; the packaged rules only open apiserver
-# and etcd), distinct hostnames, wipe the single-node state the first
-# boot created, then run --multinode. Each step is logged so an ssh
-# rc=255 locates itself.
+# Distro worker-role flow (multinode-test.sh in epheo/microshift):
+# firewalld and greenboot stay in place; greenboot pauses only around
+# cleanup-data (a running health check fights the wipe). Each step is
+# logged so an ssh rc=255 locates itself.
 node_config() { # node_config <vssh-fn> <hostname> <ip>
 	local fn=$1 host=$2 ip=$3
 	step() { echo "  [$host] $1"; shift; "$fn" "$@" || die "[$host] failed: $*"; }
-	step "stop greenboot" sh -c 'systemctl stop greenboot-healthcheck 2>/dev/null; systemctl reset-failed greenboot-healthcheck 2>/dev/null; systemctl disable greenboot-healthcheck 2>/dev/null; true'
-	step "stop firewalld" sh -c 'systemctl stop firewalld 2>/dev/null; systemctl disable firewalld 2>/dev/null; true'
+	step "pause greenboot around the wipe" sh -c 'systemctl stop greenboot-healthcheck 2>/dev/null; systemctl reset-failed greenboot-healthcheck 2>/dev/null; true'
 	step "set hostname" hostnamectl set-hostname "$host"
-	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
+	step "write node config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
 	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
-	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
-	step "daemon-reload" systemctl daemon-reload
 }
 
-log "configuring node1 as the multinode primary"
+log "configuring node1 as the controller"
 node_config v1 node1 "$IP1"
 v1 systemctl enable --now microshift
 
@@ -250,17 +248,21 @@ retry 600 "microshift active on node1" microshift_ready
 node1_ready() { kc get node node1 --no-headers 2>/dev/null | grep -q ' Ready'; }
 retry 600 "node1 Ready" node1_ready
 
-log "joining node2 via microshift add-node"
+log "joining node2 as a worker (microshift-profile worker + add-node --worker)"
 node_config v2 node2 "$IP2"
+v2 microshift-profile worker
+v2 systemctl enable microshift
 BOOTSTRAP="/var/lib/microshift/resources/kubeadmin/$IP1/kubeconfig"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 	-i "$WORKDIR/id" "root@$IP1:$BOOTSTRAP" "$WORKDIR/bootstrap-kubeconfig"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 	-i "$WORKDIR/id" "$WORKDIR/bootstrap-kubeconfig" "root@$IP2:/root/bootstrap-kubeconfig"
-v2 microshift add-node --kubeconfig /root/bootstrap-kubeconfig
+v2 microshift add-node --worker --kubeconfig /root/bootstrap-kubeconfig
 
 both_ready() { [ "$(kc get nodes --no-headers 2>/dev/null | grep -c ' Ready')" -eq 2 ]; }
 retry 900 "both nodes Ready" both_ready
+kc get node node2 -o jsonpath='{.metadata.labels}' | grep -q 'node-role.kubernetes.io/worker' \
+	|| die "node2 is missing the worker role label"
 
 satellites_up() { [ "$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers 2>/dev/null | grep -c Running)" -eq 2 ]; }
 retry 900 "two linstor satellites Running" satellites_up
@@ -352,5 +354,19 @@ retry 900 "replicas resynced to UpToDate" resynced
 log "data intact after failover cycle"
 kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-failover \
 	|| die "marker written during failover is missing"
+
+# Run the packaged check scripts directly (distro multinode-test shape):
+# exactly what greenboot executes, and the stornas check must pass on
+# the controller (full stack) and short-circuit on the worker.
+log "greenboot health checks green on both roles"
+greenboot_checks() { # greenboot_checks <vssh-fn> <label>
+	$1 sh -c 'rc=0; for s in /usr/lib/greenboot/check/required.d/*.sh /etc/greenboot/check/required.d/*.sh; do
+		[ -e "$s" ] || continue
+		echo "== $s"
+		if ! "$s"; then echo "CHECK FAILED: $s"; rc=1; fi
+	done; exit $rc' || die "greenboot checks red on the $2"
+}
+greenboot_checks v1 controller
+greenboot_checks v2 worker
 
 log "REPLICATION TEST PASSED"

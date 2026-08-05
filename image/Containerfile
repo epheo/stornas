@@ -40,6 +40,11 @@ RUN rpm -e microshift-topolvm microshift-topolvm-release-info
 # Greenboot gates on the stornas stack instead.
 COPY files/50_stornas_storage_check.sh /etc/greenboot/check/required.d/
 
+# The base image runs firewalld; without these ports the appliance
+# cannot serve clients (UI NodePort, iSCSI, SMB, NFS).
+COPY files/stornas.xml /etc/firewalld/services/
+RUN firewall-offline-cmd --zone=public --add-service=stornas
+
 # NAS plane: the agent rewrites only the stornas include; the base config
 # stays image-owned. /var/lib/stornas is tmpfiles-created because bootc
 # images do not ship /var content.

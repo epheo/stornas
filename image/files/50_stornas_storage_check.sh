@@ -18,6 +18,14 @@ exit_if_fail_marker_exists
 
 echo "STARTED"
 
+# A worker holds only kubelet credentials and cannot query deployments;
+# the packaged role-aware healthcheck already gates on its node being
+# Ready, and the storage workloads live on the controller.
+if [ "$(microshift-profile 2>/dev/null)" = "worker" ]; then
+    echo "worker profile: storage plane gated on the controller"
+    exit 0
+fi
+
 WAIT_TIMEOUT_SECS=$(get_wait_timeout)
 
 if ! microshift healthcheck \
