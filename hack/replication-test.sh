@@ -50,6 +50,12 @@ diagnostics() {
 	log "DIAGNOSTICS: nodes and pods"
 	kc get nodes -o wide 2>&1 || true
 	kc get pods -A --no-headers 2>&1 | grep -vE 'Running|Completed' || true
+	log "DIAGNOSTICS: not-running pod logs"
+	for p in $(kc get pods -A --no-headers 2>/dev/null \
+			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
+		echo "--- ${p}"
+		kc -n "${p%/*}" logs "${p#*/}" --all-containers --tail=10 2>&1 | tail -12 || true
+	done
 	log "DIAGNOSTICS: linstor state"
 	linstor_cmd node list 2>&1 || true
 	linstor_cmd resource list 2>&1 || true
@@ -179,6 +185,10 @@ node_config() { # node_config <vssh-fn> <hostname> <ip>
 	local fn=$1 host=$2 ip=$3
 	step() { echo "  [$host] $1"; shift; "$fn" "$@" || die "[$host] failed: $*"; }
 	step "stop greenboot" sh -c 'systemctl stop greenboot-healthcheck 2>/dev/null; systemctl reset-failed greenboot-healthcheck 2>/dev/null; systemctl disable greenboot-healthcheck 2>/dev/null; true'
+	# Upstream configure-node.sh does the same: the distro firewall only
+	# opens apiserver and etcd, not OVN's DB and geneve ports, and
+	# ovnkube-node on the joined node crash-loops against them.
+	step "stop firewalld" sh -c 'systemctl stop firewalld 2>/dev/null; systemctl disable firewalld 2>/dev/null; true'
 	step "set hostname" hostnamectl set-hostname "$host"
 	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
 	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
