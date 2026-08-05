@@ -50,11 +50,11 @@ diagnostics() {
 	log "DIAGNOSTICS: nodes and pods"
 	kc get nodes -o wide 2>&1 || true
 	kc get pods -A --no-headers 2>&1 | grep -vE 'Running|Completed' || true
-	log "DIAGNOSTICS: not-running pod logs"
+	log "DIAGNOSTICS: not-running pod events"
 	for p in $(kc get pods -A --no-headers 2>/dev/null \
 			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
 		echo "--- ${p}"
-		kc -n "${p%/*}" logs "${p#*/}" --all-containers --tail=10 2>&1 | tail -12 || true
+		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
 	done
 	log "DIAGNOSTICS: linstor state"
 	linstor_cmd node list 2>&1 || true
@@ -175,6 +175,11 @@ log "configuring the cluster network"
 cluster_net v1 52:54:00:44:00:01 "$IP1"
 cluster_net v2 52:54:00:44:00:02 "$IP2"
 v1 ping -c1 -W3 "$IP2" || die "cluster segment not passing traffic"
+# The apiserver reaches kubelets by node name (logs, exec, metrics);
+# neither VM resolves the other's hostname without help.
+for fn in v1 v2; do
+	$fn sh -c "printf '$IP1 node1\n$IP2 node2\n' >> /etc/hosts"
+done
 
 # MicroShift multinode, upstream configure-node.sh shape: stop the
 # greenboot gate first (cleanup-data fights a running healthcheck),
