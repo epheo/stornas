@@ -170,17 +170,20 @@ cluster_net v1 52:54:00:44:00:01 "$IP1"
 cluster_net v2 52:54:00:44:00:02 "$IP2"
 v1 ping -c1 -W3 "$IP2" || die "cluster segment not passing traffic"
 
-# MicroShift multinode, upstream configure-node.sh shape: distinct
-# hostnames, nodeIP on the cluster NIC, wipe the single-node state that
-# the image's first boot created, then run --multinode on the primary.
+# MicroShift multinode, upstream configure-node.sh shape: stop the
+# greenboot gate first (cleanup-data fights a running healthcheck),
+# distinct hostnames, nodeIP on the cluster NIC, wipe the single-node
+# state the image's first boot created, then run --multinode on the
+# primary. Each step is logged so an ssh rc=255 locates itself.
 node_config() { # node_config <vssh-fn> <hostname> <ip>
 	local fn=$1 host=$2 ip=$3
-	$fn hostnamectl set-hostname "$host"
-	$fn sh -c "printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
-	$fn sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
-	$fn mkdir -p /etc/systemd/system/microshift.service.d
-	$fn sh -c 'printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
-	$fn systemctl daemon-reload
+	step() { echo "  [$host] $1"; shift; "$fn" "$@" || die "[$host] failed: $*"; }
+	step "stop greenboot" sh -c 'systemctl stop greenboot-healthcheck 2>/dev/null; systemctl reset-failed greenboot-healthcheck 2>/dev/null; systemctl disable greenboot-healthcheck 2>/dev/null; true'
+	step "set hostname" hostnamectl set-hostname "$host"
+	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
+	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
+	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
+	step "daemon-reload" systemctl daemon-reload
 }
 
 log "configuring node1 as the multinode primary"
