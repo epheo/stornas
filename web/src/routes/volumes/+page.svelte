@@ -5,6 +5,7 @@
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
 	const snap = $derived(app.snap);
+	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
 	let actionError = $state('');
 
 	let name = $state('');
@@ -100,8 +101,14 @@
 									{#each vol.replication.replicas ?? [] as r (r.node)}
 										<span class="mr-1 inline-block">
 											<StatusBadge
-												kind={r.diskState === 'UpToDate' ? 'ok' : 'warn'}
-												label="{r.node}: {r.diskState}{r.inUse ? ' *' : ''}"
+												kind={downNodes.has(r.node)
+													? 'bad'
+													: r.diskState === 'UpToDate'
+														? 'ok'
+														: 'warn'}
+												label="{r.node}: {downNodes.has(r.node) ? 'node down' : r.diskState}{r.inUse
+													? ' *'
+													: ''}"
 											/>
 										</span>
 									{/each}

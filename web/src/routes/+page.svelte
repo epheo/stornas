@@ -19,6 +19,15 @@
 	const sickPools = $derived(snap.pools.filter((p) => p.health !== 'Online' || !p.available));
 	const sickShares = $derived(snap.shares.filter((s) => !s.available));
 	const sickTargets = $derived(snap.targets.filter((t) => !t.available));
+	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
+	// Every replica on a down node = no path to the data (failure matrix:
+	// stated plainly, not hidden behind a stale phase).
+	const strandedVolumes = $derived(
+		snap.volumes.filter((v) => {
+			const reps = v.replication?.replicas ?? [];
+			return reps.length > 0 && reps.every((r) => downNodes.has(r.node));
+		}),
+	);
 	const syncingVolumes = $derived(
 		snap.volumes.filter((v) => v.replication?.replicas?.some((r) => r.diskState !== 'UpToDate')),
 	);
@@ -32,10 +41,16 @@
 			text: `Pool ${p.name}: ${p.health}${p.reason ? ` (${p.reason})` : ''}`,
 			href: '/pools',
 		})),
-		...syncingVolumes.map((v) => ({
-			text: `Volume ${v.name}: replica not UpToDate`,
+		...strandedVolumes.map((v) => ({
+			text: `Volume ${v.name} is unavailable: its node is down`,
 			href: '/volumes',
 		})),
+		...syncingVolumes
+			.filter((v) => !strandedVolumes.includes(v))
+			.map((v) => ({
+				text: `Volume ${v.name}: replica not UpToDate`,
+				href: '/volumes',
+			})),
 		...sickShares.map((s) => ({
 			text: `Share ${s.name}: ${s.reason || s.state}`,
 			href: '/shares',
