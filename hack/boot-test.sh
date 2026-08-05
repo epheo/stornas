@@ -273,9 +273,19 @@ EOF
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
-log "no stornas, piraeus, or sig-storage image was pulled at runtime"
-pulled=$(vssh journalctl -u crio --no-pager 2>/dev/null \
-	| grep -E 'Pulling image.*(epheo/stornas|piraeusdatastore|sig-storage)' || true)
+# The air-gap contract: every ref in the embedded manifest must come
+# from the store, never a registry. The drbd9-* loader is deliberately
+# outside the set: piraeus renders it once before the satellite patch
+# can exist (its webhook gates the config CR), the patched DaemonSet
+# replaces that pod seconds later, and the appliance never needs it.
+log "no embedded image was pulled at runtime"
+pull_lines=$(vssh journalctl -u crio --no-pager 2>/dev/null | grep 'Pulling image' || true)
+pulled=""
+while read -r _ ref; do
+	[ -z "$ref" ] && continue
+	hit=$(grep -F "$ref" <<<"$pull_lines" || true)
+	[ -n "$hit" ] && pulled="$pulled$hit"$'\n'
+done <<<"$(vssh cat /usr/lib/embedded-images/manifest)"
 [ -z "$pulled" ] || { printf '%s\n' "$pulled"; die "embedded images were pulled from a registry"; }
 
 log "greenboot reports healthy"
