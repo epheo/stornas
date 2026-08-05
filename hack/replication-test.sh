@@ -161,19 +161,25 @@ retry 600 "node1 ssh reachable" v1 true
 retry 600 "node2 ssh reachable" v2 true
 
 # The cluster NIC gets a static IP, found by MAC: interface naming is
-# not stable across qemu machine types.
-cluster_net() { # cluster_net <vssh-fn> <mac> <ip>
-	local fn=$1 mac=$2 ip=$3
+# not stable across qemu machine types. It also takes the default route
+# (metric below user-net's DHCP route): configure-ovs homes br-ex on
+# the default-route interface, and OVN's host-to-service path only
+# works between nodes when br-ex sits on the shared segment. The
+# gateway is the peer: nothing routes off-segment at runtime, the
+# route only has to exist and win.
+cluster_net() { # cluster_net <vssh-fn> <mac> <ip> <peer-ip>
+	local fn=$1 mac=$2 ip=$3 peer=$4
 	local dev
 	dev=$($fn sh -c "ip -o link | awk -F': ' 'tolower(\$0) ~ /$mac/ {print \$2}'")
 	[ -n "$dev" ] || die "cluster NIC with MAC $mac not found"
 	$fn nmcli con add type ethernet ifname "$dev" con-name cluster \
-		ipv4.method manual ipv4.addresses "$ip/24" autoconnect yes
+		ipv4.method manual ipv4.addresses "$ip/24" \
+		ipv4.gateway "$peer" ipv4.route-metric 50 autoconnect yes
 	$fn nmcli con up cluster
 }
 log "configuring the cluster network"
-cluster_net v1 52:54:00:44:00:01 "$IP1"
-cluster_net v2 52:54:00:44:00:02 "$IP2"
+cluster_net v1 52:54:00:44:00:01 "$IP1" "$IP2"
+cluster_net v2 52:54:00:44:00:02 "$IP2" "$IP1"
 v1 ping -c1 -W3 "$IP2" || die "cluster segment not passing traffic"
 # The apiserver reaches kubelets by node name (logs, exec, metrics);
 # neither VM resolves the other's hostname without help.
@@ -197,6 +203,9 @@ node_config() { # node_config <vssh-fn> <hostname> <ip>
 	step "set hostname" hostnamectl set-hostname "$host"
 	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
 	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
+	# br-ex was built on the user-net NIC at first boot (it held the
+	# default route then); rebuild it on the cluster NIC.
+	step "rehome br-ex" sh -c 'systemctl restart microshift-ovs-init || { journalctl -u microshift-ovs-init --no-pager | tail -15; exit 1; }'
 	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
 	step "daemon-reload" systemctl daemon-reload
 }
