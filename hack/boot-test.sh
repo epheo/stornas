@@ -12,6 +12,9 @@
 # MicroShift payload since 2026-08). AIRGAP=0 reopens outbound for
 # debugging. The pull assert stays unconditional: no stornas, piraeus,
 # or sig-storage image may be fetched at runtime.
+# ipv6=off matches the distro's vm-test: slirp's fec0:: RA can land
+# before the DHCPv4 lease and MicroShift then picks IPv6 single-stack,
+# where OVN-K never reaches node readiness.
 #
 # Needs a root-capable podman (PODMAN='sudo podman' in CI) and
 # qemu-system-x86_64. KVM is used when present, TCG otherwise.
@@ -157,7 +160,7 @@ qemu-system-x86_64 \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \
-	-netdev "user,id=n0$([ "$AIRGAP" = 1 ] && echo ,restrict=on),hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
+	-netdev "user,id=n0,ipv6=off$([ "$AIRGAP" = 1 ] && echo ,restrict=on),hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
 	-device virtio-rng-pci \
 	-serial "file:$WORKDIR/console.log" \
