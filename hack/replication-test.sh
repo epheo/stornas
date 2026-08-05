@@ -56,6 +56,14 @@ diagnostics() {
 		echo "--- ${p}"
 		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
 	done
+	log "DIAGNOSTICS: ovn state per node"
+	for fn in v1 v2; do
+		$fn sh -c 'hostname; ip -br addr show br-ex 2>/dev/null; ls /etc/cni/net.d/ 2>/dev/null' 2>&1 || true
+	done
+	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
+		echo "--- ${p}"
+		kc -n openshift-ovn-kubernetes logs "${p#pod/}" --all-containers --tail=8 2>&1 | tail -10 || true
+	done
 	log "DIAGNOSTICS: linstor state"
 	linstor_cmd node list 2>&1 || true
 	linstor_cmd resource list 2>&1 || true
@@ -215,8 +223,14 @@ node_config() { # node_config <vssh-fn> <hostname> <ip>
 	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
 	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
 	# br-ex was built on the user-net NIC at first boot (it held the
-	# default route then); rebuild it on the cluster NIC.
-	step "rehome br-ex" sh -c 'systemctl restart microshift-ovs-init || { journalctl -u microshift-ovs-init --no-pager | tail -15; exit 1; }'
+	# default route then). configure-ovs keeps an existing healthy
+	# br-ex, so tear the OVS bridge down first; that drops our own ssh
+	# path for a moment (its IP rides br-ex), hence detached via
+	# systemd-run, then verify the bridge came back on the cluster IP.
+	step "rehome br-ex (detached)" systemd-run --unit=rehome-brex --collect \
+		bash -c 'nmcli -g NAME con show | grep -E "^(br-ex|ovs-)" | while read -r c; do nmcli con delete "$c"; done; ovs-vsctl --if-exists del-br br-ex; sleep 2; systemctl restart microshift-ovs-init; sleep 3; nmcli -t -f DEVICE,STATE dev | awk -F: "\$2==\"disconnected\"{print \$1}" | while read -r d; do nmcli dev connect "$d" || true; done'
+	rehomed() { $fn sh -c "ip -o addr show br-ex 2>/dev/null | grep -q ' $ip/'"; }
+	retry 180 "[$host] br-ex on the cluster IP" rehomed
 	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
 	step "daemon-reload" systemctl daemon-reload
 }
