@@ -7,14 +7,11 @@
 # storage stack: drbd kmod, piraeus + LINSTOR, a StoragePool converging on
 # the scratch disk, a PVC binding through LINSTOR CSI, and the UI.
 #
-# AIRGAP=1 boots the guest with restrict=on: no outbound at all, only
-# the hostfwd ports in. Full air gap is the goal (DESIGN.md) but today
-# it blocks on the distro: microshift's own release images (release.json:
-# ovn-k, coredns, pause, ...) are not embedded there, so the CNI cannot
-# start without a registry and the node never goes Ready. Until the
-# distro embeds them, the default run keeps outbound open and instead
-# asserts that no stornas, piraeus, or sig-storage image was pulled at
-# runtime: our half of the air-gap contract, tested unconditionally.
+# The guest boots with restrict=on by default: no outbound at all, only
+# the hostfwd ports in (DESIGN.md air gap; the distro embeds the full
+# MicroShift payload since 2026-08). AIRGAP=0 reopens outbound for
+# debugging. The pull assert stays unconditional: no stornas, piraeus,
+# or sig-storage image may be fetched at runtime.
 #
 # Needs a root-capable podman (PODMAN='sudo podman' in CI) and
 # qemu-system-x86_64. KVM is used when present, TCG otherwise.
@@ -28,6 +25,7 @@ SSH_PORT=${SSH_PORT:-2222}
 UI_PORT=${UI_PORT:-8080}
 VM_MEM=${VM_MEM:-8192}
 KEEP=${KEEP:-0}
+AIRGAP=${AIRGAP:-1}
 QEMU_PID=""
 
 log() { printf '\n== %s\n' "$*"; }
@@ -159,7 +157,7 @@ qemu-system-x86_64 \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \
-	-netdev "user,id=n0${AIRGAP:+,restrict=on},hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
+	-netdev "user,id=n0$([ "$AIRGAP" = 1 ] && echo ,restrict=on),hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
 	-device virtio-rng-pci \
 	-serial "file:$WORKDIR/console.log" \
