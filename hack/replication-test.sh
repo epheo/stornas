@@ -107,7 +107,13 @@ diagnostics() {
 	v2 sh -c 'journalctl -u microshift --no-pager -p err -n 20' 2>&1 || true
 	log "DIAGNOSTICS: linstor state"
 	linstor_cmd node list 2>&1 || true
+	linstor_cmd storage-pool list 2>&1 || true
 	linstor_cmd resource list 2>&1 || true
+	log "DIAGNOSTICS: CSI capacity view"
+	kc get csistoragecapacities -A 2>&1 || true
+	kc -n stornas-system describe pvc repl-test 2>&1 | sed -n '/Events:/,$p' | tail -8 || true
+	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=25 2>&1 \
+		| grep -iE 'error|fail|capacity' | tail -12 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
 	tail -15 "$WORKDIR/console1.log" 2>/dev/null || true
 	tail -15 "$WORKDIR/console2.log" 2>/dev/null || true
@@ -284,6 +290,14 @@ pools_available() {
 	[ "$(kc get storagepool -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Available")].status}{"\n"}{end}' 2>/dev/null | grep -c True)" -eq 2 ]
 }
 retry 600 "both storage pools Available" pools_available
+
+# The scheduler's CSI capacity check sits between pool and PVC; assert
+# the raw LINSTOR view first so a capacity failure names itself.
+pools_have_capacity() {
+	out=$(linstor_cmd -m storage-pool list -s stornas 2>/dev/null) || return 1
+	[ "$(grep -oE '"free_capacity": *[1-9][0-9]*' <<<"$out" | wc -l)" -ge 2 ]
+}
+retry 120 "LINSTOR reports free capacity on both pools" pools_have_capacity
 
 log "provisioning a replicated PVC, consumer pinned to node1"
 kc apply -f - <<'EOF'
