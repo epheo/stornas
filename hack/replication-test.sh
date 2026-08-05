@@ -4,7 +4,9 @@
 #
 # One bib build, two qemu VMs booted from copies of the qcow2. Each VM
 # has its user-net NIC (ssh hostfwd) plus a second NIC on a qemu socket
-# mcast segment: the cluster network (10.44.0.0/24). MicroShift joins
+# mcast segment: the cluster network (192.168.144.0/24; 10.44.0.0 is
+# microshift's default apiserver advertise address on br-ex, so the
+# segment must stay out of 10.44.0.0/24). MicroShift joins
 # them with its own multinode flow (microshift run --multinode on the
 # primary, microshift add-node on the worker - upstream
 # scripts/multinode/configure-node.sh is the reference).
@@ -25,8 +27,8 @@ SSH1=${SSH1:-2232}
 SSH2=${SSH2:-2233}
 VM_MEM=${VM_MEM:-5120}
 MCAST=${MCAST:-239.42.0.1:42424}
-IP1=10.44.0.1
-IP2=10.44.0.2
+IP1=192.168.144.1
+IP2=192.168.144.2
 KEEP=${KEEP:-0}
 PIDS=()
 
@@ -56,6 +58,8 @@ diagnostics() {
 		echo "--- ${p}"
 		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
 	done
+	log "DIAGNOSTICS: kubernetes service endpoints"
+	kc get endpoints kubernetes -o wide 2>&1 || true
 	log "DIAGNOSTICS: ovn state per node"
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ip -br addr show br-ex 2>/dev/null; ip route show default 2>/dev/null; ls /etc/cni/net.d/ 2>/dev/null; echo "-- ovs-init + rehome journals:"; journalctl -u microshift-ovs-init -u rehome-brex --no-pager 2>/dev/null | tail -25' 2>&1 || true
@@ -180,12 +184,11 @@ retry 900 "node1 first boot settled" node1_settled
 retry 900 "node2 first boot settled" node2_settled
 
 # The cluster NIC gets a static IP, found by MAC: interface naming is
-# not stable across qemu machine types. It also takes the default route
-# (metric below user-net's DHCP route): configure-ovs homes br-ex on
-# the default-route interface, and OVN's host-to-service path only
-# works between nodes when br-ex sits on the shared segment. The
-# gateway is the peer: nothing routes off-segment at runtime, the
-# route only has to exist and win.
+# not stable across qemu machine types. It also takes the winning
+# default route (gateway = the peer, nothing routes off-segment): the
+# multinode phase then runs fully offline, which is the air-gap shape
+# a real deployment has. MicroShift's br-ex stays virtual and needs no
+# rehoming; it never enslaves a physical NIC.
 cluster_net() { # cluster_net <vssh-fn> <mac> <ip> <peer-ip>
 	local fn=$1 mac=$2 ip=$3 peer=$4
 	local dev
@@ -222,15 +225,6 @@ node_config() { # node_config <vssh-fn> <hostname> <ip>
 	step "set hostname" hostnamectl set-hostname "$host"
 	step "write multinode config" sh -c "mkdir -p /etc/microshift/config.d && printf 'node:\n  hostnameOverride: $host\n  nodeIP: $ip\napiServer:\n  subjectAltNames:\n  - $ip\n' > /etc/microshift/config.d/20-multinode.yaml"
 	step "wipe single-node state" sh -c 'echo 1 | microshift-cleanup-data --all --keep-images'
-	# br-ex was built on the user-net NIC at first boot (it held the
-	# default route then). configure-ovs keeps an existing healthy
-	# br-ex, so tear the OVS bridge down first; that drops our own ssh
-	# path for a moment (its IP rides br-ex), hence detached via
-	# systemd-run, then verify the bridge came back on the cluster IP.
-	step "rehome br-ex (detached)" systemd-run --unit=rehome-brex --collect \
-		bash -c 'nmcli -g NAME con show | grep -E "^(br-ex|ovs-)" | while read -r c; do nmcli con delete "$c"; done; ovs-vsctl --if-exists del-br br-ex; sleep 2; nmcli con up cluster || true; systemctl restart microshift-ovs-init; sleep 3; nmcli con up cluster || true; nmcli -t -f DEVICE,STATE dev | awk -F: "\$2==\"disconnected\"{print \$1}" | while read -r d; do nmcli dev connect "$d" || true; done'
-	rehomed() { $fn sh -c "ip -o addr show br-ex 2>/dev/null | grep -q ' $ip/'"; }
-	retry 180 "[$host] br-ex on the cluster IP" rehomed
 	step "multinode unit override" sh -c 'mkdir -p /etc/systemd/system/microshift.service.d && printf "[Service]\nExecStart=\nExecStart=microshift run --multinode\n" > /etc/systemd/system/microshift.service.d/multinode.conf'
 	step "daemon-reload" systemctl daemon-reload
 }
