@@ -9,8 +9,10 @@
 # greenboot actually gating a boot, and the embedded-image import on a
 # cold /var (the container starts with the image's /var).
 #
-# Requires a root-capable podman: PODMAN='sudo podman' on a host,
-# plain podman in CI. Rootless distrobox cannot run it.
+# Requires a root-capable podman: PODMAN='sudo podman' on a real host.
+# Not run in CI: microshift-in-container crash-loops on GitHub runners
+# (etcd cannot hold localhost:2379), so CI trusts vm-test instead,
+# same as the distro's own CI.
 #
 # Usage: make smoke PODMAN='sudo podman'
 #        CLEAN=1 ./hack/smoke-test.sh   # tear down a kept container

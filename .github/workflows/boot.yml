@@ -41,8 +41,9 @@ jobs:
         working-directory: web
       - name: build the appliance image
         run: make image PODMAN=podman
-      - name: smoke test (privileged container, fails fast)
-        run: make smoke PODMAN='sudo podman'
+      # No smoke step: microshift-in-container crash-loops on GH runners
+      # (etcd/localhost churn); the distro's CI also runs only vm-test.
+      # smoke stays a host-side dev tool.
       - name: boot and validate
         run: make vm-test PODMAN='sudo podman'
       - name: collect console log on failure
