@@ -94,10 +94,14 @@ diagnostics() {
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ip -br addr show br-ex 2>/dev/null; ip route show default 2>/dev/null; ls /etc/cni/net.d/ 2>/dev/null' 2>&1 || true
 	done
-	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
-		echo "--- ${p}"
-		kc -n openshift-ovn-kubernetes logs "${p#pod/}" --all-containers --tail=8 2>&1 | tail -10 || true
-	done
+	log "DIAGNOSTICS: node2 apiserver reachability (advertise address)"
+	v2 sh -c 'ss -ltn | grep 6443 || echo "nothing listening on 6443"; curl -ks -m3 https://10.44.0.0:6443/healthz || echo " (advertise address unreachable)"; systemctl is-active microshift' 2>&1 || true
+	log "DIAGNOSTICS: node2 ovnkube-controller log"
+	p2=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node2" {print $1}')
+	[ -n "${p2:-}" ] && kc -n openshift-ovn-kubernetes logs "$p2" -c ovnkube-controller --tail=60 2>&1 \
+		| grep -iE 'error|fail|wait|timed|zone|transit|gateway' | tail -25 || true
+	log "DIAGNOSTICS: node2 microshift journal errors"
+	v2 sh -c 'journalctl -u microshift --no-pager -p err -n 20' 2>&1 || true
 	log "DIAGNOSTICS: linstor state"
 	linstor_cmd node list 2>&1 || true
 	linstor_cmd resource list 2>&1 || true
