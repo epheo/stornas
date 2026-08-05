@@ -6,6 +6,18 @@
 	const snap = $derived(app.snap);
 	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));
 
+	// Agent conventions: NFS exports /var/lib/stornas/shares/<ns>-<name>,
+	// the SMB section is the share name.
+	function nodeIP(name: string): string {
+		return snap.nodes.find((n) => n.name === name)?.addresses?.[0] ?? name;
+	}
+	function nfsPath(s: { namespace: string; name: string; node: string }): string {
+		return `${nodeIP(s.node)}:/var/lib/stornas/shares/${s.namespace}-${s.name}`;
+	}
+	function smbPath(s: { name: string; node: string }): string {
+		return `\\\\${nodeIP(s.node)}\\${s.name}`;
+	}
+
 	let actionError = $state('');
 	let notice = $state('');
 	let name = $state('');
@@ -51,7 +63,7 @@
 					<tr class="border-b border-slate-800">
 						<th class="px-3 py-2 font-medium">Name</th>
 						<th class="px-3 py-2 font-medium">Volume</th>
-						<th class="px-3 py-2 font-medium">Protocols</th>
+						<th class="px-3 py-2 font-medium">Access</th>
 						<th class="px-3 py-2 font-medium">Node</th>
 						<th class="px-3 py-2 font-medium">State</th>
 						{#if app.role === 'admin'}<th class="px-3 py-2 font-medium">Actions</th>{/if}
@@ -62,8 +74,19 @@
 						<tr class="border-t border-slate-800/60">
 							<td class="px-3 py-2 font-medium text-slate-200">{s.name}</td>
 							<td class="px-3 py-2 text-slate-400">{s.claim}</td>
-							<td class="px-3 py-2 text-slate-300">
-								{[s.nfs && 'NFS', s.smb && 'SMB'].filter(Boolean).join(' + ')}
+							<td class="px-3 py-2">
+								{#if s.node}
+									{#if s.nfs}
+										<div class="font-mono text-xs text-slate-300">{nfsPath(s)}</div>
+									{/if}
+									{#if s.smb}
+										<div class="font-mono text-xs text-slate-300">{smbPath(s)}</div>
+									{/if}
+								{:else}
+									<span class="text-slate-500">
+										{[s.nfs && 'NFS', s.smb && 'SMB'].filter(Boolean).join(' + ')} (not placed)
+									</span>
+								{/if}
 							</td>
 							<td class="px-3 py-2 text-slate-400">{s.node || '-'}</td>
 							<td class="px-3 py-2">

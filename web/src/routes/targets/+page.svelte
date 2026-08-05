@@ -6,6 +6,14 @@
 	const snap = $derived(app.snap);
 	const blockVolumes = $derived(snap.volumes.filter((v) => v.block));
 
+	// What an initiator discovers against: the VIP when the target has
+	// one, else the active node's address.
+	function portal(t: { vip: string; activeNode: string }): string {
+		if (t.vip) return t.vip.split('/')[0];
+		const n = snap.nodes.find((n) => n.name === t.activeNode);
+		return n?.addresses?.[0] ?? '-';
+	}
+
 	let actionError = $state('');
 	let notice = $state('');
 	let name = $state('');
@@ -54,7 +62,7 @@
 						<th class="px-3 py-2 font-medium">IQN</th>
 						<th class="px-3 py-2 font-medium">LUNs</th>
 						<th class="px-3 py-2 font-medium">Active node</th>
-						<th class="px-3 py-2 font-medium">VIP</th>
+						<th class="px-3 py-2 font-medium">Portal</th>
 						<th class="px-3 py-2 font-medium">Sessions</th>
 						<th class="px-3 py-2 font-medium">State</th>
 						{#if app.role === 'admin'}<th class="px-3 py-2 font-medium">Actions</th>{/if}
@@ -73,7 +81,7 @@
 								{/each}
 							</td>
 							<td class="px-3 py-2 text-slate-400">{t.activeNode || '-'}</td>
-							<td class="px-3 py-2 font-mono text-xs text-slate-400">{t.vip || '-'}</td>
+							<td class="px-3 py-2 font-mono text-xs text-slate-400">{portal(t)}</td>
 							<td class="px-3 py-2 tabular-nums text-slate-300">{t.sessions}</td>
 							<td class="px-3 py-2">
 								<StatusBadge
