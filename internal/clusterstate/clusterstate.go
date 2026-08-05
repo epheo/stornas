@@ -13,6 +13,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apiresource "k8s.io/apimachinery/pkg/api/resource"
@@ -72,11 +73,12 @@ type State struct {
 	snapshots   cache.Indexer // *unstructured.Unstructured (CSI snapshots via dynamic client)
 	nodes       cache.Indexer // *corev1.Node
 	pvcs        cache.Indexer // *corev1.PersistentVolumeClaim
+	events      cache.Indexer // *corev1.Event (Warning only)
 
 	specs []reflectorSpec
 
 	poolsSynced, sharesSynced, invSynced, nodesSynced, pvcsSynced atomic.Bool
-	targetsSynced, snapsSynced                                    atomic.Bool
+	targetsSynced, snapsSynced, eventsSynced                      atomic.Bool
 	syncedOnce                                                    sync.Once
 	allSynced                                                     chan struct{}
 
@@ -102,6 +104,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 	s.snapshots = newIndexer()
 	s.nodes = newIndexer()
 	s.pvcs = newIndexer()
+	s.events = newIndexer()
 	s.healthy.Store(true)
 
 	pool := func() { bus.Publish(eventbus.PoolChanged) }
@@ -110,6 +113,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 	volume := func() { bus.Publish(eventbus.VolumeChanged) }
 	target := func() { bus.Publish(eventbus.TargetChanged) }
 	snapFn := func() { bus.Publish(eventbus.SnapshotChanged) }
+	alert := func() { bus.Publish(eventbus.AlertChanged) }
 
 	s.specs = []reflectorSpec{
 		{
@@ -198,6 +202,22 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 				},
 			}, &s.healthy),
 		},
+		{
+			// Warning-only server side: Normal events churn constantly and
+			// would rebroadcast a frame per pod tick.
+			reflect.NewStore(s.events, alert, func() { s.eventsSynced.Store(true); s.checkSynced() }),
+			&corev1.Event{},
+			reflect.TrackHealth(&cache.ListWatch{
+				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+					o.FieldSelector = "type=Warning"
+					return cs.CoreV1().Events(metav1.NamespaceAll).List(ctx, o)
+				},
+				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+					o.FieldSelector = "type=Warning"
+					return cs.CoreV1().Events(metav1.NamespaceAll).Watch(ctx, o)
+				},
+			}, &s.healthy),
+		},
 	}
 	return s
 }
@@ -229,7 +249,7 @@ func (s *State) WaitForSync(ctx context.Context) error {
 
 func (s *State) checkSynced() {
 	if s.poolsSynced.Load() && s.sharesSynced.Load() && s.invSynced.Load() &&
-		s.targetsSynced.Load() && s.snapsSynced.Load() &&
+		s.targetsSynced.Load() && s.snapsSynced.Load() && s.eventsSynced.Load() &&
 		s.nodesSynced.Load() && s.pvcsSynced.Load() {
 		s.syncedOnce.Do(func() { close(s.allSynced) })
 	}
@@ -305,6 +325,24 @@ func (s *State) Snapshot() model.Snapshot {
 	}
 	for _, u := range reflect.List(s.snapshots) {
 		snap.Snapshots = append(snap.Snapshots, snapshotModel(u))
+	}
+	for _, obj := range s.events.List() {
+		ev, ok := obj.(*corev1.Event)
+		if !ok {
+			continue
+		}
+		snap.Alerts = append(snap.Alerts, alertModel(ev))
+	}
+	// Newest first, capped: the feed is a trouble log, not an archive.
+	sort.Slice(snap.Alerts, func(i, j int) bool {
+		if snap.Alerts[i].LastSeen != snap.Alerts[j].LastSeen {
+			return snap.Alerts[i].LastSeen > snap.Alerts[j].LastSeen
+		}
+		a, b := snap.Alerts[i], snap.Alerts[j]
+		return a.Namespace+a.Object+a.Reason < b.Namespace+b.Object+b.Reason
+	})
+	if len(snap.Alerts) > 100 {
+		snap.Alerts = snap.Alerts[:100]
 	}
 	sort.Slice(snap.Targets, func(i, j int) bool {
 		a, b := snap.Targets[i], snap.Targets[j]
@@ -436,6 +474,29 @@ func snapshotModel(u *unstructured.Unstructured) model.VolumeSnapshot {
 	}
 	if t, ok, _ := unstructured.NestedString(u.Object, "status", "creationTime"); ok {
 		out.CreatedAt = t
+	}
+	return out
+}
+
+func alertModel(ev *corev1.Event) model.Alert {
+	out := model.Alert{
+		Namespace: ev.Namespace,
+		Object:    ev.InvolvedObject.Kind + "/" + ev.InvolvedObject.Name,
+		Reason:    ev.Reason,
+		Message:   ev.Message,
+		Count:     ev.Count,
+	}
+	// events.k8s.io-originated objects leave the legacy fields empty.
+	last := ev.LastTimestamp.Time
+	if last.IsZero() {
+		last = ev.EventTime.Time
+	}
+	if ev.Series != nil {
+		last = ev.Series.LastObservedTime.Time
+		out.Count = ev.Series.Count
+	}
+	if !last.IsZero() {
+		out.LastSeen = last.UTC().Format(time.RFC3339)
 	}
 	return out
 }

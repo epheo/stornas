@@ -17,7 +17,7 @@ rules:
     resources: [volumesnapshots]
     verbs: [get, list, watch]
   - apiGroups: [""]
-    resources: [nodes, persistentvolumeclaims]
+    resources: [nodes, persistentvolumeclaims, events]
     verbs: [get, list, watch]
   # Mutations: pools are cluster-scoped; everything else the API creates
   # is namespace-confined (see the auth Role).

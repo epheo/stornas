@@ -139,6 +139,18 @@ export interface VolumeSnapshot {
   createdAt: string; // RFC3339; empty until bound
 }
 /**
+ * Alert is one Warning event: the appliance's trouble feed. Kubernetes
+ * aggregates repeats, so Count and LastSeen carry the recurrence story.
+ */
+export interface Alert {
+  namespace: string;
+  object: string; // Kind/name of the involved object
+  reason: string;
+  message: string;
+  count: number /* int32 */;
+  lastSeen: string; // RFC3339
+}
+/**
  * Snapshot is one consistent frame of everything the UI shows; the WS hub
  * sends a full frame per change rather than diffs.
  */
@@ -149,4 +161,5 @@ export interface Snapshot {
   shares: Share[];
   targets: Target[];
   snapshots: VolumeSnapshot[];
+  alerts: Alert[];
 }

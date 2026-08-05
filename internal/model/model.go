@@ -124,6 +124,17 @@ type VolumeSnapshot struct {
 	CreatedAt string `json:"createdAt"` // RFC3339; empty until bound
 }
 
+// Alert is one Warning event: the appliance's trouble feed. Kubernetes
+// aggregates repeats, so Count and LastSeen carry the recurrence story.
+type Alert struct {
+	Namespace string `json:"namespace"`
+	Object    string `json:"object"` // Kind/name of the involved object
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+	Count     int32  `json:"count"`
+	LastSeen  string `json:"lastSeen"` // RFC3339
+}
+
 // Snapshot is one consistent frame of everything the UI shows; the WS hub
 // sends a full frame per change rather than diffs.
 type Snapshot struct {
@@ -133,4 +144,5 @@ type Snapshot struct {
 	Shares    []Share          `json:"shares"`
 	Targets   []Target         `json:"targets"`
 	Snapshots []VolumeSnapshot `json:"snapshots"`
+	Alerts    []Alert          `json:"alerts"`
 }

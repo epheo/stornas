@@ -34,6 +34,8 @@ const (
 	ShareChanged
 	// SnapshotChanged: a VolumeSnapshot moved - readiness or existence.
 	SnapshotChanged
+	// AlertChanged: a Warning event moved - the alerts feed changed.
+	AlertChanged
 	// TaskChanged: the recent-tasks feed moved - an operation was recorded.
 	TaskChanged
 

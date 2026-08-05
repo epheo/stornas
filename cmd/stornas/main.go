@@ -78,6 +78,7 @@ func main() {
 	kinds := []eventbus.Kind{
 		eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged,
 		eventbus.ShareChanged, eventbus.TargetChanged, eventbus.SnapshotChanged,
+		eventbus.AlertChanged,
 	}
 	wake, cancel := bus.Subscribe(kinds...)
 	defer cancel()
