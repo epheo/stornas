@@ -1,0 +1,45 @@
+<script lang="ts">
+	import { app } from '$lib/state.svelte';
+
+	const snap = $derived(app.snap);
+</script>
+
+<div class="space-y-6">
+	<h1 class="text-xl font-semibold text-slate-100">Alerts</h1>
+	<p class="text-sm text-slate-500">
+		Warning events from the cluster, newest first. Normal activity is not shown.
+	</p>
+
+	{#if snap.alerts.length === 0}
+		<p class="text-sm text-slate-500">No warnings.</p>
+	{:else}
+		<div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900">
+			<table class="w-full text-sm">
+				<thead class="text-left text-xs text-slate-400">
+					<tr class="border-b border-slate-800">
+						<th class="px-3 py-2 font-medium">Last seen</th>
+						<th class="px-3 py-2 font-medium">Count</th>
+						<th class="px-3 py-2 font-medium">Namespace</th>
+						<th class="px-3 py-2 font-medium">Object</th>
+						<th class="px-3 py-2 font-medium">Reason</th>
+						<th class="px-3 py-2 font-medium">Message</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each snap.alerts as a (a.namespace + a.object + a.reason + a.lastSeen)}
+						<tr class="border-t border-slate-800/60 align-top">
+							<td class="px-3 py-2 text-xs whitespace-nowrap tabular-nums text-slate-400">
+								{a.lastSeen ? a.lastSeen.slice(0, 19).replace('T', ' ') : '-'}
+							</td>
+							<td class="px-3 py-2 tabular-nums text-slate-400">{a.count > 1 ? a.count : '-'}</td>
+							<td class="px-3 py-2 text-slate-400">{a.namespace || '-'}</td>
+							<td class="px-3 py-2 font-mono text-xs text-slate-300">{a.object}</td>
+							<td class="px-3 py-2 font-medium whitespace-nowrap text-amber-400">{a.reason}</td>
+							<td class="px-3 py-2 text-slate-300">{a.message}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
+</div>
