@@ -63,5 +63,11 @@ RUN touch /etc/samba/stornas-shares.conf \
 # (the compile-on-node loader is removed for the air gap), and lvcreate
 # runs inside the satellite container whose modprobe cannot see the
 # host tree (dm-snapshot for LVM snapshots, dm-thin-pool for pools).
+# usermode_helper=disabled is what the deleted loader would have set:
+# SELinux confines kernel-spawned helpers (kernel_generic_helper_t
+# cannot exec bash), each resync handler then exits 1 and DRBD drops
+# the fresh connection; LINSTOR handles these events itself.
 RUN printf '%s\n' drbd drbd_transport_tcp dm-snapshot dm-thin-pool \
-	> /usr/lib/modules-load.d/stornas-storage.conf
+		> /usr/lib/modules-load.d/stornas-storage.conf \
+	&& echo 'options drbd usermode_helper=disabled' \
+		> /usr/lib/modprobe.d/stornas-drbd.conf
