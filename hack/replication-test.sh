@@ -327,11 +327,16 @@ spec:
   restartPolicy: Never
   nodeSelector:
     kubernetes.io/hostname: node1
+  # The agent SA's privileged SCC lets the consumer write the volume as
+  # root; restricted-v2 left the mount root-owned (no fsGroup applied).
+  serviceAccountName: stornas-agent
   containers:
     - name: c
       image: ghcr.io/epheo/stornas:latest
       imagePullPolicy: Never
       command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
       volumeMounts:
         - name: v
           mountPath: /data
