@@ -58,7 +58,10 @@ RUN touch /etc/samba/stornas-shares.conf \
 		> /usr/lib/tmpfiles.d/stornas.conf \
 	&& systemctl enable smb nfs-server
 
-# The LINSTOR satellite probes DRBD at startup and reports the layer
-# unsupported if the module is absent; with the compile-on-node loader
-# removed (air gap), boot must load it.
-RUN printf 'drbd\ndrbd_transport_tcp\n' > /usr/lib/modules-load.d/stornas-drbd.conf
+# Storage kernel modules load at boot, not on demand: the satellite
+# probes DRBD at startup and reports the layer unsupported if absent
+# (the compile-on-node loader is removed for the air gap), and lvcreate
+# runs inside the satellite container whose modprobe cannot see the
+# host tree (dm-snapshot for LVM snapshots, dm-thin-pool for pools).
+RUN printf '%s\n' drbd drbd_transport_tcp dm-snapshot dm-thin-pool \
+	> /usr/lib/modules-load.d/stornas-storage.conf
