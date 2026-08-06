@@ -21,6 +21,13 @@ spec:
         spec:
           template:
             spec:
+              # DRBD replicates on the host plane, not the geneve overlay:
+              # node IPs survive pod restarts, and a storage appliance's
+              # replication belongs next to its future dedicated NIC/VIP
+              # story. Ports: satellite 3366-3367, DRBD 7000-7999
+              # (image/files/stornas.xml).
+              hostNetwork: true
+              dnsPolicy: ClusterFirstWithHostNet
               initContainers:
                 - name: drbd-module-loader
                   $patch: delete

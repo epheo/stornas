@@ -109,6 +109,11 @@ diagnostics() {
 	linstor_cmd node list 2>&1 || true
 	linstor_cmd storage-pool list 2>&1 || true
 	linstor_cmd resource list 2>&1 || true
+	linstor_cmd err list 2>&1 | tail -12 || true
+	log "DIAGNOSTICS: DRBD kernel view per node"
+	for fn in v1 v2; do
+		$fn sh -c 'hostname; drbdsetup status --verbose 2>/dev/null; dmesg | grep -i drbd | tail -25' 2>&1 || true
+	done
 	log "DIAGNOSTICS: CSI capacity view"
 	kc get csistoragecapacities -A 2>&1 || true
 	kc -n stornas-system describe pvc repl-test 2>&1 | sed -n '/Events:/,$p' | tail -8 || true

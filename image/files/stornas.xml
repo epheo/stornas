@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <service>
   <short>stornas storage plane</short>
-  <description>Client-facing storage protocols and the management UI. DRBD replication rides the container network (geneve, opened by microshift-node); the 7000 range covers a future host-network satellite mode.</description>
+  <description>Client-facing storage protocols, the management UI, and the host-network replication plane: LINSTOR satellite and the DRBD port range.</description>
   <port protocol="tcp" port="30080"/>
   <port protocol="tcp" port="3260"/>
   <port protocol="tcp" port="445"/>
   <port protocol="tcp" port="2049"/>
+  <port protocol="tcp" port="3366-3367"/>
   <port protocol="tcp" port="7000-7999"/>
 </service>
