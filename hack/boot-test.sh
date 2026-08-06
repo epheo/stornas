@@ -46,6 +46,12 @@ diagnostics() {
 	kc get linstorcluster -o yaml 2>&1 | sed -n '/status:/,$p' | tail -25 || true
 	log "DIAGNOSTICS: piraeus operator log tail"
 	kc -n piraeus-datastore logs deploy/piraeus-operator-controller-manager --tail=25 2>&1 || true
+	log "DIAGNOSTICS: snapshot path"
+	kc get volumesnapshot,volumesnapshotcontent -A 2>&1 || true
+	kc -n stornas-system describe volumesnapshot boot-snap 2>&1 | sed -n '/Status:/,$p' | tail -12 || true
+	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-snapshotter --tail=20 2>&1 | tail -15 || true
+	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor snapshot list 2>&1 || true
+	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err list 2>&1 | tail -15 || true
 	log "DIAGNOSTICS: import-embedded-images"
 	vssh journalctl -u import-embedded-images --no-pager 2>&1 | tail -10 || true
 	log "DIAGNOSTICS: crio image pulls"
