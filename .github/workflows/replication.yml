@@ -1,9 +1,11 @@
-# Two-VM replication acceptance: the heaviest gate, dispatch-only until
-# it has proven itself on runner-sized hardware (2 x 5GB VMs).
+# Two-VM replication acceptance: the heaviest gate (2 x 5GB VMs),
+# nightly since it went green on runner-sized hardware (2026-08-06).
 name: replication-test
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "47 4 * * *"
 
 jobs:
   replication:
