@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -22,6 +23,7 @@ import (
 	"github.com/epheo/stornas/internal/linstorpoll"
 	"github.com/epheo/stornas/internal/model"
 	"github.com/epheo/stornas/internal/stream"
+	"github.com/epheo/stornas/internal/tasks"
 )
 
 var version = "dev"
@@ -69,16 +71,18 @@ func main() {
 		poller = p
 		go poller.Run(ctx)
 	}
+	feed := tasks.New(bus)
 	snapFn := func() model.Snapshot {
 		snap := state.Snapshot()
 		poller.Decorate(&snap)
+		snap.Tasks = taskModels(feed)
 		return snap
 	}
 
 	kinds := []eventbus.Kind{
 		eventbus.PoolChanged, eventbus.NodeChanged, eventbus.VolumeChanged,
 		eventbus.ShareChanged, eventbus.TargetChanged, eventbus.SnapshotChanged,
-		eventbus.AlertChanged,
+		eventbus.AlertChanged, eventbus.TaskChanged,
 	}
 	wake, cancel := bus.Subscribe(kinds...)
 	defer cancel()
@@ -100,7 +104,7 @@ func main() {
 	})))
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
-	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace}
+	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed}
 	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireRole("admin", h) }
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
 	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
@@ -163,4 +167,23 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// taskModels maps the feed into wire form here rather than in the tasks
+// package, which stays a verbatim dotvirt copy (CLAUDE.md provenance).
+// Ops() is newest-first and append-ordered, so the frame is deterministic
+// and the hub's byte-level dedupe holds.
+func taskModels(f *tasks.Feed) []model.Task {
+	ops := f.Ops()
+	out := make([]model.Task, 0, len(ops))
+	for _, op := range ops {
+		out = append(out, model.Task{
+			Verb:   op.Verb,
+			Object: op.Name,
+			By:     op.By,
+			OK:     op.OK,
+			At:     op.At.UTC().Format(time.RFC3339),
+		})
+	}
+	return out
 }

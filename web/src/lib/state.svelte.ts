@@ -12,6 +12,7 @@ export const app = $state({
 		targets: [],
 		snapshots: [],
 		alerts: [],
+		tasks: [],
 	} as Snapshot,
 	who: '',
 	role: '',
@@ -28,6 +29,7 @@ export function startStream(): () => void {
 			targets: s.targets ?? [],
 			snapshots: s.snapshots ?? [],
 			alerts: s.alerts ?? [],
+			tasks: s.tasks ?? [],
 		};
 	});
 }

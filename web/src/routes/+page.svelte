@@ -161,25 +161,53 @@
 		</section>
 	</div>
 
-	<section class="rounded-lg border border-slate-800 bg-slate-900 p-4">
-		<div class="mb-3 flex items-baseline justify-between">
-			<h2 class="text-sm font-medium text-slate-300">Recent alerts</h2>
-			<a class="text-xs text-sky-400 hover:underline" href="/alerts">View all</a>
-		</div>
-		{#if snap.alerts.length === 0}
-			<p class="text-sm text-slate-500">No warnings.</p>
-		{:else}
-			<ul class="space-y-1.5">
-				{#each snap.alerts.slice(0, 5) as a (a.namespace + a.object + a.reason + a.lastSeen)}
-					<li class="flex items-baseline gap-2 text-sm">
-						<span class="shrink-0 text-xs tabular-nums text-slate-500">
-							{a.lastSeen ? a.lastSeen.slice(5, 16).replace('T', ' ') : '-'}
-						</span>
-						<span class="shrink-0 font-medium text-amber-400">{a.reason}</span>
-						<span class="truncate text-slate-400">{a.object}: {a.message}</span>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
+	<div class="grid gap-4 lg:grid-cols-2">
+		<section class="rounded-lg border border-slate-800 bg-slate-900 p-4">
+			<div class="mb-3 flex items-baseline justify-between">
+				<h2 class="text-sm font-medium text-slate-300">Recent alerts</h2>
+				<a class="text-xs text-sky-400 hover:underline" href="/alerts">View all</a>
+			</div>
+			{#if snap.alerts.length === 0}
+				<p class="text-sm text-slate-500">No warnings.</p>
+			{:else}
+				<ul class="space-y-1.5">
+					{#each snap.alerts.slice(0, 5) as a (a.namespace + a.object + a.reason + a.lastSeen)}
+						<li class="flex items-baseline gap-2 text-sm">
+							<span class="shrink-0 text-xs tabular-nums text-slate-500">
+								{a.lastSeen ? a.lastSeen.slice(5, 16).replace('T', ' ') : '-'}
+							</span>
+							<span class="shrink-0 font-medium text-amber-400">{a.reason}</span>
+							<span class="truncate text-slate-400">{a.object}: {a.message}</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+
+		<section class="rounded-lg border border-slate-800 bg-slate-900 p-4">
+			<div class="mb-3 flex items-baseline justify-between">
+				<h2 class="text-sm font-medium text-slate-300">Recent activity</h2>
+				<a class="text-xs text-sky-400 hover:underline" href="/alerts">View all</a>
+			</div>
+			{#if snap.tasks.length === 0}
+				<p class="text-sm text-slate-500">No actions yet.</p>
+			{:else}
+				<ul class="space-y-1.5">
+					{#each snap.tasks.slice(0, 5) as t (t.at + t.verb + t.object)}
+						<li class="flex items-baseline gap-2 text-sm">
+							<span class="shrink-0 text-xs tabular-nums text-slate-500">
+								{t.at ? t.at.slice(5, 16).replace('T', ' ') : '-'}
+							</span>
+							<span class="truncate text-slate-400">
+								<span class="text-slate-300">{t.by || 'system'}</span>
+								{t.verb}
+								<span class="font-mono text-xs text-slate-300">{t.object}</span>
+							</span>
+							{#if !t.ok}<span class="shrink-0 text-xs font-medium text-red-400">failed</span>{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	</div>
 </div>

@@ -154,6 +154,17 @@ export interface Alert {
   lastSeen: string; // RFC3339
 }
 /**
+ * Task is one recorded admin action: the appliance's audit trail, newest
+ * first, in-memory only (reboot starts it fresh).
+ */
+export interface Task {
+  verb: string;
+  object: string;
+  by: string;
+  ok: boolean;
+  at: string; // RFC3339
+}
+/**
  * Snapshot is one consistent frame of everything the UI shows; the WS hub
  * sends a full frame per change rather than diffs.
  */
@@ -165,4 +176,5 @@ export interface Snapshot {
   targets: Target[];
   snapshots: VolumeSnapshot[];
   alerts: Alert[];
+  tasks: Task[];
 }

@@ -23,6 +23,15 @@ type User struct {
 	Role string `json:"role"` // admin | viewer
 }
 
+type ctxKey struct{}
+
+// FromContext returns the identity Require/RequireRole stored; zero when
+// the handler runs outside those gates.
+func FromContext(ctx context.Context) User {
+	u, _ := ctx.Value(ctxKey{}).(User)
+	return u
+}
+
 // Source looks up one user and its expected password. Password comparison
 // stays in the Manager so every Source gets constant-time treatment.
 type Source interface {
@@ -99,14 +108,16 @@ func (m *Manager) Session(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, user)
 }
 
-// Require gates a handler behind a valid session.
+// Require gates a handler behind a valid session and puts the identity on
+// the request context for handlers that attribute actions.
 func (m *Manager) Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := m.userFor(r); !ok {
+		user, ok := m.userFor(r)
+		if !ok {
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, user)))
 	})
 }
 
@@ -123,7 +134,7 @@ func (m *Manager) RequireRole(role string, next http.Handler) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, user)))
 	})
 }
 

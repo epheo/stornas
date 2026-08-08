@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { app } from '$lib/state.svelte';
+	import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
 	const snap = $derived(app.snap);
 </script>
@@ -42,4 +43,43 @@
 			</table>
 		</div>
 	{/if}
+
+	<section>
+		<h2 class="mb-2 text-sm font-medium text-slate-300">Activity</h2>
+		<p class="mb-3 text-sm text-slate-500">
+			Admin actions since the server started; the feed is not persisted.
+		</p>
+		{#if snap.tasks.length === 0}
+			<p class="text-sm text-slate-500">No actions yet.</p>
+		{:else}
+			<div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900">
+				<table class="w-full text-sm">
+					<thead class="text-left text-xs text-slate-400">
+						<tr class="border-b border-slate-800">
+							<th class="px-3 py-2 font-medium">Time</th>
+							<th class="px-3 py-2 font-medium">User</th>
+							<th class="px-3 py-2 font-medium">Action</th>
+							<th class="px-3 py-2 font-medium">Object</th>
+							<th class="px-3 py-2 font-medium">Result</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each snap.tasks as t (t.at + t.verb + t.object)}
+							<tr class="border-t border-slate-800/60">
+								<td class="px-3 py-2 text-xs whitespace-nowrap tabular-nums text-slate-400">
+									{t.at ? t.at.slice(0, 19).replace('T', ' ') : '-'}
+								</td>
+								<td class="px-3 py-2 text-slate-300">{t.by || 'system'}</td>
+								<td class="px-3 py-2 text-slate-400">{t.verb}</td>
+								<td class="px-3 py-2 font-mono text-xs text-slate-300">{t.object}</td>
+								<td class="px-3 py-2">
+									<StatusBadge kind={t.ok ? 'ok' : 'bad'} label={t.ok ? 'ok' : 'failed'} />
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</section>
 </div>

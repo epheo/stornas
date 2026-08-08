@@ -7,7 +7,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +20,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/epheo/stornas/internal/auth"
+	"github.com/epheo/stornas/internal/tasks"
 )
 
 var (
@@ -34,6 +39,24 @@ type API struct {
 	Dyn       dynamic.Interface
 	CS        kubernetes.Interface
 	Namespace string
+	Tasks     *tasks.Feed
+}
+
+// record adds one row to the activity feed, attributed to the session
+// identity Require put on the context. Refused mutations record too, as
+// not-OK: the audit trail answers "who tried", not just "who succeeded".
+func (a *API) record(r *http.Request, verb, name string, err error) {
+	if a.Tasks == nil {
+		return
+	}
+	a.Tasks.RecordOp(tasks.Op{
+		Verb:      verb,
+		Namespace: a.Namespace,
+		Name:      name,
+		By:        auth.FromContext(r.Context()).Name,
+		OK:        err == nil,
+		At:        time.Now().UTC(),
+	})
 }
 
 type poolRequest struct {
@@ -59,6 +82,7 @@ func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 		},
 	}}
 	created, err := a.Dyn.Resource(poolGVR).Create(r.Context(), pool, metav1.CreateOptions{})
+	a.record(r, "create pool", req.Name, err)
 	respond(w, created, err)
 }
 
@@ -122,6 +146,11 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	created, cerr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Create(r.Context(), pvc, metav1.CreateOptions{})
+	verb := "create volume"
+	if req.FromSnapshot != "" {
+		verb = "restore volume"
+	}
+	a.record(r, verb, req.Name, cerr)
 	respond(w, created, cerr)
 }
 
@@ -134,12 +163,18 @@ func (a *API) DeleteVolume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	} else if ref != "" {
+		a.record(r, "delete volume", name, errInUse)
 		http.Error(w, "volume is in use by "+ref, http.StatusConflict)
 		return
 	}
 	err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{})
+	a.record(r, "delete volume", name, err)
 	respondDelete(w, err)
 }
+
+// errInUse marks a refused mutation in the activity feed; the HTTP answer
+// carries the real message.
+var errInUse = errors.New("in use")
 
 func (a *API) claimReferenced(ctx context.Context, claim string) (string, error) {
 	shares, err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).List(ctx, metav1.ListOptions{})
@@ -184,11 +219,13 @@ func (a *API) ResizeVolume(w http.ResponseWriter, r *http.Request) {
 	patch := []byte(`{"spec":{"resources":{"requests":{"storage":"` + size.String() + `"}}}}`)
 	_, perr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Patch(
 		r.Context(), r.PathValue("name"), types.MergePatchType, patch, metav1.PatchOptions{})
+	a.record(r, "resize volume", r.PathValue("name"), perr)
 	respondDelete(w, perr)
 }
 
 func (a *API) DeleteShare(w http.ResponseWriter, r *http.Request) {
 	err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	a.record(r, "delete share", r.PathValue("name"), err)
 	respondDelete(w, err)
 }
 
@@ -229,11 +266,13 @@ func (a *API) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		"spec":       spec,
 	}}
 	created, err := a.Dyn.Resource(targetGVR).Namespace(a.Namespace).Create(r.Context(), target, metav1.CreateOptions{})
+	a.record(r, "create target", req.Name, err)
 	respond(w, created, err)
 }
 
 func (a *API) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	err := a.Dyn.Resource(targetGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	a.record(r, "delete target", r.PathValue("name"), err)
 	respondDelete(w, err)
 }
 
@@ -257,11 +296,13 @@ func (a *API) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		},
 	}}
 	created, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Create(r.Context(), snap, metav1.CreateOptions{})
+	a.record(r, "create snapshot", req.Name, err)
 	respond(w, created, err)
 }
 
 func (a *API) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
+	a.record(r, "delete snapshot", r.PathValue("name"), err)
 	respondDelete(w, err)
 }
 
@@ -296,6 +337,7 @@ func (a *API) CreateShare(w http.ResponseWriter, r *http.Request) {
 		"spec":       spec,
 	}}
 	created, err := a.Dyn.Resource(shareGVR).Namespace(a.Namespace).Create(r.Context(), share, metav1.CreateOptions{})
+	a.record(r, "create share", req.Name, err)
 	respond(w, created, err)
 }
 
@@ -341,6 +383,7 @@ func (a *API) CreateUser(w http.ResponseWriter, r *http.Request) {
 		// Roll the Secret back so a retry with a fixed spec starts clean.
 		_ = a.CS.CoreV1().Secrets(a.Namespace).Delete(r.Context(), secretName, metav1.DeleteOptions{})
 	}
+	a.record(r, "create user", req.Name, err)
 	respond(w, created, err)
 }
 
@@ -358,7 +401,9 @@ func (a *API) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if ref, _, _ := unstructured.NestedString(u.Object, "spec", "passwordSecretRef"); ref != "" {
 		_ = a.CS.CoreV1().Secrets(a.Namespace).Delete(r.Context(), ref, metav1.DeleteOptions{})
 	}
-	respondDelete(w, a.Dyn.Resource(userGVR).Namespace(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{}))
+	derr := a.Dyn.Resource(userGVR).Namespace(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{})
+	a.record(r, "delete user", name, derr)
+	respondDelete(w, derr)
 }
 
 // ListUsers returns identity only; password material never leaves the

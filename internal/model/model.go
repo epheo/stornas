@@ -138,6 +138,16 @@ type Alert struct {
 	LastSeen  string `json:"lastSeen"` // RFC3339
 }
 
+// Task is one recorded admin action: the appliance's audit trail, newest
+// first, in-memory only (reboot starts it fresh).
+type Task struct {
+	Verb   string `json:"verb"`
+	Object string `json:"object"`
+	By     string `json:"by"`
+	OK     bool   `json:"ok"`
+	At     string `json:"at"` // RFC3339
+}
+
 // Snapshot is one consistent frame of everything the UI shows; the WS hub
 // sends a full frame per change rather than diffs.
 type Snapshot struct {
@@ -148,4 +158,5 @@ type Snapshot struct {
 	Targets   []Target         `json:"targets"`
 	Snapshots []VolumeSnapshot `json:"snapshots"`
 	Alerts    []Alert          `json:"alerts"`
+	Tasks     []Task           `json:"tasks"`
 }
