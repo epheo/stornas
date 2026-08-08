@@ -383,6 +383,10 @@ func poolModel(p *storagev1alpha1.StoragePool) model.Pool {
 	if p.Status.Free != nil {
 		out.FreeBytes = p.Status.Free.Value()
 	}
+	if p.Status.RebuildPercent != nil {
+		pct := int(*p.Status.RebuildPercent)
+		out.RebuildPercent = &pct
+	}
 	observed := map[string]storagev1alpha1.DeviceStatus{}
 	for _, d := range p.Status.Devices {
 		observed[d.Path] = d

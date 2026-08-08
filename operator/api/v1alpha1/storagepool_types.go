@@ -30,10 +30,12 @@ type StoragePoolSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="node is immutable"
 	Node string `json:"node"`
 
-	// devices by stable path (/dev/disk/by-id/...); immutable once set.
+	// devices by stable path (/dev/disk/by-id/...). Members may be swapped
+	// one for one (the disk replace flow); the count is fixed so the raid
+	// geometry never changes under a live pool.
 	// +required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="devices are immutable"
+	// +kubebuilder:validation:XValidation:rule="size(self) == size(oldSelf)",message="devices may be swapped one for one, not added or removed"
 	Devices []string `json:"devices"`
 
 	// raid level, implemented as LVM raid types.
@@ -81,6 +83,10 @@ type StoragePoolStatus struct {
 	Health string `json:"health,omitempty"`
 	// +optional
 	Devices []DeviceStatus `json:"devices,omitempty"`
+	// rebuildPercent tracks an active raid repair or device evacuation;
+	// absent when nothing is rebuilding.
+	// +optional
+	RebuildPercent *int32 `json:"rebuildPercent,omitempty"`
 }
 
 // +kubebuilder:object:root=true

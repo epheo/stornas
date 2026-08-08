@@ -23,7 +23,7 @@ rules:
   # is namespace-confined (see the auth Role).
   - apiGroups: [storage.stornas.io]
     resources: [storagepools]
-    verbs: [create]
+    verbs: [create, get, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

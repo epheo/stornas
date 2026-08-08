@@ -56,15 +56,17 @@ spec:
             description: spec defines the desired state of StoragePool
             properties:
               devices:
-                description: devices by stable path (/dev/disk/by-id/...); immutable
-                  once set.
+                description: |-
+                  devices by stable path (/dev/disk/by-id/...). Members may be swapped
+                  one for one (the disk replace flow); the count is fixed so the raid
+                  geometry never changes under a live pool.
                 items:
                   type: string
                 minItems: 1
                 type: array
                 x-kubernetes-validations:
-                - message: devices are immutable
-                  rule: self == oldSelf
+                - message: devices may be swapped one for one, not added or removed
+                  rule: size(self) == size(oldSelf)
               node:
                 description: node that owns the devices; immutable once set.
                 type: string
@@ -196,6 +198,12 @@ spec:
                 type: string
               linstorPool:
                 type: string
+              rebuildPercent:
+                description: |-
+                  rebuildPercent tracks an active raid repair or device evacuation;
+                  absent when nothing is rebuilding.
+                format: int32
+                type: integer
               vg:
                 type: string
             type: object

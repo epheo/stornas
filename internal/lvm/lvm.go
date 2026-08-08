@@ -82,6 +82,68 @@ func (l *LVM) CreateThinPool(ctx context.Context, vg, lv, raid string) error {
 	return err
 }
 
+// IsBlockDev reports whether the path is a live block device on the host.
+func (l *LVM) IsBlockDev(ctx context.Context, dev string) bool {
+	_, err := l.run.Run(ctx, "test", "-b", dev)
+	return err == nil
+}
+
+// ResolvePath follows by-id symlinks to the kernel device so spec paths
+// compare against pvs output. A path that cannot resolve (device gone)
+// comes back unchanged.
+func (l *LVM) ResolvePath(ctx context.Context, dev string) string {
+	out, err := l.run.Run(ctx, "readlink", "-f", dev)
+	if err != nil {
+		return dev
+	}
+	if r := strings.TrimSpace(string(out)); r != "" {
+		return r
+	}
+	return dev
+}
+
+func (l *LVM) VGExtend(ctx context.Context, vg, dev string) error {
+	_, err := l.run.Run(ctx, "vgextend", vg, dev)
+	return err
+}
+
+func (l *LVM) VGReduce(ctx context.Context, vg, dev string) error {
+	_, err := l.run.Run(ctx, "vgreduce", vg, dev)
+	return err
+}
+
+func (l *LVM) VGReduceMissing(ctx context.Context, vg string) error {
+	_, err := l.run.Run(ctx, "vgreduce", "--removemissing", vg)
+	return err
+}
+
+func (l *LVM) PVRemove(ctx context.Context, dev string) error {
+	_, err := l.run.Run(ctx, "pvremove", dev)
+	return err
+}
+
+// RepairLV rebuilds a degraded raid (sub-)LV onto free PVs; the caller
+// extends the VG with the replacement first.
+func (l *LVM) RepairLV(ctx context.Context, vg, lv string) error {
+	_, err := l.run.Run(ctx, "lvconvert", "--repair", "--yes", vg+"/"+lv)
+	return err
+}
+
+// PVMove starts a background evacuation of dev, onto dst when given,
+// else wherever the allocator finds room; "already in progress" from a
+// previous pass is not an error.
+func (l *LVM) PVMove(ctx context.Context, dev, dst string) error {
+	args := []string{"--background", dev}
+	if dst != "" {
+		args = append(args, dst)
+	}
+	out, err := l.run.Run(ctx, "pvmove", args...)
+	if err != nil && strings.Contains(string(out), "in progress") {
+		return nil
+	}
+	return err
+}
+
 type VGInfo struct {
 	SizeBytes int64
 	FreeBytes int64
@@ -90,6 +152,8 @@ type VGInfo struct {
 type PV struct {
 	Name    string
 	Missing bool
+	// UsedBytes is allocated extents; zero means safe to vgreduce.
+	UsedBytes int64
 }
 
 // lvmReport matches the --reportformat json shape shared by vgs and pvs.
@@ -129,8 +193,8 @@ func (l *LVM) VGInfo(ctx context.Context, vg string) (VGInfo, error) {
 }
 
 func (l *LVM) PVs(ctx context.Context, vg string) ([]PV, error) {
-	out, err := l.run.Run(ctx, "pvs", "--reportformat", "json",
-		"--options", "pv_name,pv_missing", "--select", "vg_name="+vg)
+	out, err := l.run.Run(ctx, "pvs", "--reportformat", "json", "--units", "b", "--nosuffix",
+		"--options", "pv_name,pv_missing,pv_used", "--select", "vg_name="+vg)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +205,46 @@ func (l *LVM) PVs(ctx context.Context, vg string) ([]PV, error) {
 	var pvs []PV
 	for _, r := range rep.Report {
 		for _, row := range r.PV {
-			pvs = append(pvs, PV{Name: row["pv_name"], Missing: row["pv_missing"] != ""})
+			used, _ := strconv.ParseInt(row["pv_used"], 10, 64)
+			pvs = append(pvs, PV{Name: row["pv_name"], Missing: row["pv_missing"] != "", UsedBytes: used})
 		}
 	}
 	return pvs, nil
+}
+
+// SyncPercent reports the lowest completion across raid resyncs and
+// pvmove copies in the VG: nil when nothing is rebuilding. lvs shows
+// sync_percent on raid LVs and copy_percent on active pvmove LVs.
+func (l *LVM) SyncPercent(ctx context.Context, vg string) (*int32, error) {
+	out, err := l.run.Run(ctx, "lvs", "--reportformat", "json", "-a",
+		"--options", "lv_name,sync_percent,copy_percent", vg)
+	if err != nil {
+		return nil, err
+	}
+	var rep struct {
+		Report []struct {
+			LV []map[string]string `json:"lv"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(out, &rep); err != nil {
+		return nil, fmt.Errorf("parse lvs report for %s: %w", vg, err)
+	}
+	var lowest *int32
+	consider := func(s string) {
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil || f >= 100 {
+			return
+		}
+		p := int32(f)
+		if lowest == nil || p < *lowest {
+			lowest = &p
+		}
+	}
+	for _, r := range rep.Report {
+		for _, row := range r.LV {
+			consider(row["sync_percent"])
+			consider(row["copy_percent"])
+		}
+	}
+	return lowest, nil
 }

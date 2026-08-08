@@ -26,23 +26,26 @@ type Report struct {
 	Free     int64
 	Health   string
 	Devices  []storagev1alpha1.DeviceStatus
+	// Rebuild is the lowest raid-sync/pvmove completion, nil when idle.
+	Rebuild *int32
 }
 
 // EnsurePool converges LVM state for one pool and reports what it saw.
-// It never removes or shrinks anything: pool deletion stays a human
-// decision, so the agent only creates and observes.
+// It never deletes volumes or shrinks the pool: pool deletion stays a
+// human decision. Membership does converge to spec.devices, which is how
+// a swapped entry (the disk replace flow) reaches the host.
 func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePool) (Report, error) {
 	vg := pool.VGName()
 	rep := Report{VG: vg, Health: "Failed"}
 
-	for _, dev := range pool.Spec.Devices {
-		if !l.IsPV(ctx, dev) {
-			if err := l.CreatePV(ctx, dev); err != nil {
-				return rep, err
+	if !l.VGExists(ctx, vg) {
+		for _, dev := range pool.Spec.Devices {
+			if !l.IsPV(ctx, dev) {
+				if err := l.CreatePV(ctx, dev); err != nil {
+					return rep, err
+				}
 			}
 		}
-	}
-	if !l.VGExists(ctx, vg) {
 		if err := l.CreateVG(ctx, vg, pool.Spec.Devices); err != nil {
 			return rep, err
 		}
@@ -53,11 +56,46 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 		}
 	}
 
+	pvs, err := l.PVs(ctx, vg)
+	if err != nil {
+		return rep, err
+	}
+	resolved := map[string]string{}
+	for _, dev := range pool.Spec.Devices {
+		resolved[dev] = l.ResolvePath(ctx, dev)
+	}
+	plan := planDevices(pool.Spec.Devices, resolved, pvs)
+	// A dead member still in the spec plans as an add; a device absent
+	// from the host cannot join, so it stays a Missing report until the
+	// spec swaps in a real disk. Repair likewise waits for one.
+	live := plan.Add[:0]
+	for _, dev := range plan.Add {
+		if l.IsBlockDev(ctx, dev) {
+			live = append(live, dev)
+		}
+	}
+	plan.Add = live
+	if len(plan.Add) == 0 {
+		plan.Missing = false
+	}
+	added := map[string]bool{}
+	if !plan.empty() {
+		if err := convergeDevices(ctx, l, pool, plan); err != nil {
+			return rep, err
+		}
+		for _, dev := range plan.Add {
+			added[resolved[dev]] = true
+		}
+		if pvs, err = l.PVs(ctx, vg); err != nil {
+			return rep, err
+		}
+	}
+
 	info, err := l.VGInfo(ctx, vg)
 	if err != nil {
 		return rep, err
 	}
-	pvs, err := l.PVs(ctx, vg)
+	rep.Rebuild, err = l.SyncPercent(ctx, vg)
 	if err != nil {
 		return rep, err
 	}
@@ -65,13 +103,26 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 	rep.Capacity = info.SizeBytes
 	rep.Free = info.FreeBytes
 	rep.Health = "Online"
+	// Report under the spec's path (often by-id) rather than the kernel
+	// path pvs prints, so status joins back onto spec.devices.
+	specPath := map[string]string{}
+	for dev, r := range resolved {
+		specPath[r] = dev
+	}
 	for _, pv := range pvs {
 		state := "InSync"
-		if pv.Missing {
+		switch {
+		case pv.Missing:
 			state = "Missing"
 			rep.Health = "Degraded"
+		case rep.Rebuild != nil && added[pv.Name]:
+			state = "Rebuilding"
 		}
-		rep.Devices = append(rep.Devices, storagev1alpha1.DeviceStatus{Path: pv.Name, State: state})
+		path := pv.Name
+		if sp, ok := specPath[pv.Name]; ok {
+			path = sp
+		}
+		rep.Devices = append(rep.Devices, storagev1alpha1.DeviceStatus{Path: path, State: state})
 	}
 	return rep, nil
 }
@@ -89,6 +140,9 @@ type PoolReconciler struct {
 // between spec-driven reconciles.
 const refreshInterval = time.Minute
 
+// rebuildInterval paces status while a repair or evacuation runs.
+const rebuildInterval = 10 * time.Second
+
 func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var pool storagev1alpha1.StoragePool
 	if err := r.Get(ctx, req.NamespacedName, &pool); err != nil {
@@ -103,6 +157,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	pool.Status.VG = rep.VG
 	pool.Status.Health = rep.Health
 	pool.Status.Devices = rep.Devices
+	pool.Status.RebuildPercent = rep.Rebuild
 	if rep.Capacity > 0 {
 		pool.Status.Capacity = resource.NewQuantity(rep.Capacity, resource.BinarySI)
 		pool.Status.Free = resource.NewQuantity(rep.Free, resource.BinarySI)
@@ -129,6 +184,10 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 	if ensureErr != nil {
 		return ctrl.Result{}, ensureErr
+	}
+	if rep.Rebuild != nil {
+		// A live rebuild deserves live progress.
+		return ctrl.Result{RequeueAfter: rebuildInterval}, nil
 	}
 	return ctrl.Result{RequeueAfter: refreshInterval}, nil
 }

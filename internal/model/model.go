@@ -15,6 +15,8 @@ type Pool struct {
 	CapacityBytes int64  `json:"capacityBytes"`
 	FreeBytes     int64  `json:"freeBytes"`
 	Health        string `json:"health"` // Online | Degraded | Failed | Unknown
+	// RebuildPercent is set while a raid repair or evacuation runs.
+	RebuildPercent *int `json:"rebuildPercent"`
 
 	Available bool   `json:"available"`
 	Reason    string `json:"reason"` // Available condition reason; explains false

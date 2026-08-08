@@ -21,6 +21,10 @@ export interface Pool {
   capacityBytes: number /* int64 */;
   freeBytes: number /* int64 */;
   health: string; // Online | Degraded | Failed | Unknown
+  /**
+   * RebuildPercent is set while a raid repair or evacuation runs.
+   */
+  rebuildPercent?: number /* int */;
   available: boolean;
   reason: string; // Available condition reason; explains false
   linstor: string;

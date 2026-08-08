@@ -51,18 +51,27 @@ func pool(name, raid string, devices ...string) *storagev1alpha1.StoragePool {
 
 var errExit = fmt.Errorf("exit status 5")
 
+const (
+	vgsCmd     = "vgs --reportformat json --units b --nosuffix --options vg_size,vg_free stornas-tank"
+	pvsCmd     = "pvs --reportformat json --units b --nosuffix --options pv_name,pv_missing,pv_used --select vg_name=stornas-tank"
+	lvsSyncCmd = "lvs --reportformat json -a --options lv_name,sync_percent,copy_percent stornas-tank"
+	vgsOut     = `{"report":[{"vg":[{"vg_size":"100","vg_free":"90"}]}]}`
+	lvsIdle    = `{"report":[{"lv":[{"lv_name":"thin","sync_percent":"","copy_percent":""}]}]}`
+)
+
 func TestEnsurePoolFreshCreate(t *testing.T) {
-	vgs := `{"report":[{"vg":[{"vg_size":"100","vg_free":"90"}]}]}`
-	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":""}]}]}`
+	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
+		"vgs stornas-tank":               {err: errExit},
 		"pvs /dev/sda":                   {err: errExit},
 		"pvcreate /dev/sda":              {},
-		"vgs stornas-tank":               {err: errExit},
 		"vgcreate stornas-tank /dev/sda": {},
 		"lvs stornas-tank/thin":          {err: errExit},
-		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank":                  {},
-		"vgs --reportformat json --units b --nosuffix --options vg_size,vg_free stornas-tank": {out: vgs},
-		"pvs --reportformat json --options pv_name,pv_missing --select vg_name=stornas-tank":  {out: pvs},
+		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank": {},
+		"readlink -f /dev/sda": {out: "/dev/sda\n"},
+		vgsCmd:                 {out: vgsOut},
+		pvsCmd:                 {out: pvs},
+		lvsSyncCmd:             {out: lvsIdle},
 	}}
 
 	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "none", "/dev/sda"))
@@ -75,18 +84,21 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 	if len(rep.Devices) != 1 || rep.Devices[0].State != "InSync" {
 		t.Fatalf("devices = %+v", rep.Devices)
 	}
+	if rep.Rebuild != nil {
+		t.Fatalf("rebuild = %v", *rep.Rebuild)
+	}
 }
 
 func TestEnsurePoolIdempotent(t *testing.T) {
-	vgs := `{"report":[{"vg":[{"vg_size":"100","vg_free":"90"}]}]}`
-	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":""},{"pv_name":"/dev/sdb","pv_missing":""}]}]}`
+	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdb","pv_missing":"","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"pvs /dev/sda":          {},
-		"pvs /dev/sdb":          {},
 		"vgs stornas-tank":      {},
 		"lvs stornas-tank/thin": {},
-		"vgs --reportformat json --units b --nosuffix --options vg_size,vg_free stornas-tank": {out: vgs},
-		"pvs --reportformat json --options pv_name,pv_missing --select vg_name=stornas-tank":  {out: pvs},
+		"readlink -f /dev/sda":  {out: "/dev/sda\n"},
+		"readlink -f /dev/sdb":  {out: "/dev/sdb\n"},
+		vgsCmd:                  {out: vgsOut},
+		pvsCmd:                  {out: pvs},
+		lvsSyncCmd:              {out: lvsIdle},
 	}}
 
 	if _, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb")); err != nil {
@@ -99,16 +111,19 @@ func TestEnsurePoolIdempotent(t *testing.T) {
 	}
 }
 
+// A dead member with no replacement yet stays a Missing report; nothing
+// tries to re-add the corpse or repair without a target.
 func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
-	vgs := `{"report":[{"vg":[{"vg_size":"100","vg_free":"90"}]}]}`
-	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":""},{"pv_name":"/dev/sdb","pv_missing":"missing"}]}]}`
+	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"[unknown]","pv_missing":"missing","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"pvs /dev/sda":          {},
-		"pvs /dev/sdb":          {},
 		"vgs stornas-tank":      {},
 		"lvs stornas-tank/thin": {},
-		"vgs --reportformat json --units b --nosuffix --options vg_size,vg_free stornas-tank": {out: vgs},
-		"pvs --reportformat json --options pv_name,pv_missing --select vg_name=stornas-tank":  {out: pvs},
+		"readlink -f /dev/sda":  {out: "/dev/sda\n"},
+		"readlink -f /dev/sdb":  {out: "/dev/sdb\n"},
+		"test -b /dev/sdb":      {err: errExit},
+		vgsCmd:                  {out: vgsOut},
+		pvsCmd:                  {out: pvs},
+		lvsSyncCmd:              {out: lvsIdle},
 	}}
 
 	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
@@ -118,10 +133,85 @@ func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
 	if rep.Health != "Degraded" {
 		t.Fatalf("health = %s", rep.Health)
 	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "lvconvert") || strings.HasPrefix(c, "vgreduce") || strings.HasPrefix(c, "pvcreate") {
+			t.Fatalf("no replacement present, must not act: %s", c)
+		}
+	}
+}
+
+// The replace flow: spec swapped the dead sdb for sdc. The new disk
+// joins, the raid legs repair, the ghost leaves, and the new member
+// reports Rebuilding with pool-level progress.
+func TestEnsurePoolRepairsWithReplacement(t *testing.T) {
+	pvsBefore := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"[unknown]","pv_missing":"missing","pv_used":"10"}]}]}`
+	pvsAfter := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdc","pv_missing":"","pv_used":"10"}]}]}`
+	lvsSyncing := `{"report":[{"lv":[{"lv_name":"thin_tdata","sync_percent":"37.50","copy_percent":""}]}]}`
+	f := &fakeRunner{results: map[string]result{
+		"vgs stornas-tank":                                 {},
+		"lvs stornas-tank/thin":                            {},
+		"readlink -f /dev/sda":                             {out: "/dev/sda\n"},
+		"readlink -f /dev/sdc":                             {out: "/dev/sdc\n"},
+		"test -b /dev/sdc":                                 {},
+		"pvs /dev/sdc":                                     {err: errExit},
+		"pvcreate /dev/sdc":                                {},
+		"vgextend stornas-tank /dev/sdc":                   {},
+		"lvconvert --repair --yes stornas-tank/thin_tdata": {},
+		"lvconvert --repair --yes stornas-tank/thin_tmeta": {},
+		"vgreduce --removemissing stornas-tank":            {},
+		vgsCmd:                                             {out: vgsOut},
+		lvsSyncCmd:                                         {out: lvsSyncing},
+	}}
+	// First pvs read sees the ghost, the re-read after convergence sees
+	// the new member.
+	first := true
+	base := f.results
+	f.results = nil
+	runner := runnerFunc(func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		cmd := strings.Join(append([]string{name}, args...), " ")
+		if cmd == pvsCmd {
+			if first {
+				first = false
+				return []byte(pvsBefore), nil
+			}
+			return []byte(pvsAfter), nil
+		}
+		f.calls = append(f.calls, cmd)
+		r, ok := base[cmd]
+		if !ok {
+			return nil, fmt.Errorf("unexpected command: %s", cmd)
+		}
+		return []byte(r.out), r.err
+	})
+
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(runner), pool("tank", "raid1", "/dev/sda", "/dev/sdc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Health != "Online" {
+		t.Fatalf("health = %s", rep.Health)
+	}
+	if rep.Rebuild == nil || *rep.Rebuild != 37 {
+		t.Fatalf("rebuild = %v", rep.Rebuild)
+	}
+	states := map[string]string{}
+	for _, d := range rep.Devices {
+		states[d.Path] = d.State
+	}
+	if states["/dev/sdc"] != "Rebuilding" || states["/dev/sda"] != "InSync" {
+		t.Fatalf("devices = %+v", rep.Devices)
+	}
+}
+
+type runnerFunc func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+func (f runnerFunc) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return f(ctx, name, args...)
 }
 
 func TestEnsurePoolFailsClosed(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
+		"vgs stornas-tank":  {err: errExit},
 		"pvs /dev/sda":      {err: errExit},
 		"pvcreate /dev/sda": {err: errExit},
 	}}

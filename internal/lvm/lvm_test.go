@@ -68,9 +68,9 @@ func TestVGInfo(t *testing.T) {
 }
 
 func TestPVsMissing(t *testing.T) {
-	out := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":""},{"pv_name":"/dev/sdb","pv_missing":"missing"}]}]}`
+	out := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"1024"},{"pv_name":"/dev/sdb","pv_missing":"missing","pv_used":"0"}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"pvs --reportformat json --options pv_name,pv_missing --select vg_name=vg0": {out: out},
+		"pvs --reportformat json --units b --nosuffix --options pv_name,pv_missing,pv_used --select vg_name=vg0": {out: out},
 	}}
 	pvs, err := NewWithRunner(f).PVs(context.Background(), "vg0")
 	if err != nil {
@@ -78,6 +78,37 @@ func TestPVsMissing(t *testing.T) {
 	}
 	if len(pvs) != 2 || pvs[0].Missing || !pvs[1].Missing {
 		t.Fatalf("pvs = %+v", pvs)
+	}
+	if pvs[0].UsedBytes != 1024 {
+		t.Fatalf("used = %d", pvs[0].UsedBytes)
+	}
+}
+
+func TestSyncPercentLowestWins(t *testing.T) {
+	out := `{"report":[{"lv":[{"lv_name":"thin_tdata","sync_percent":"62.10","copy_percent":""},{"lv_name":"[pvmove0]","sync_percent":"","copy_percent":"41.90"},{"lv_name":"thin","sync_percent":"100.00","copy_percent":""}]}]}`
+	f := &fakeRunner{results: map[string]result{
+		"lvs --reportformat json -a --options lv_name,sync_percent,copy_percent vg0": {out: out},
+	}}
+	pct, err := NewWithRunner(f).SyncPercent(context.Background(), "vg0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pct == nil || *pct != 41 {
+		t.Fatalf("pct = %v", pct)
+	}
+}
+
+func TestSyncPercentIdle(t *testing.T) {
+	out := `{"report":[{"lv":[{"lv_name":"thin","sync_percent":"","copy_percent":""}]}]}`
+	f := &fakeRunner{results: map[string]result{
+		"lvs --reportformat json -a --options lv_name,sync_percent,copy_percent vg0": {out: out},
+	}}
+	pct, err := NewWithRunner(f).SyncPercent(context.Background(), "vg0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pct != nil {
+		t.Fatalf("pct = %v", *pct)
 	}
 }
 

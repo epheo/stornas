@@ -86,6 +86,48 @@ func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 	respond(w, created, err)
 }
 
+type replaceRequest struct {
+	Old string `json:"old"`
+	New string `json:"new"`
+}
+
+// ReplacePoolDevice swaps one member of spec.devices; the agent converges
+// the VG (extend, repair or evacuate, reduce). The CRD's same-size CEL
+// rule keeps this a swap, never a grow or shrink.
+func (a *API) ReplacePoolDevice(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req replaceRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Old == "" || req.New == "" {
+		http.Error(w, "old and new device paths required", http.StatusBadRequest)
+		return
+	}
+	pool, err := a.Dyn.Resource(poolGVR).Get(r.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		a.record(r, "replace disk", name, err)
+		respondDelete(w, err)
+		return
+	}
+	devices, _, _ := unstructured.NestedStringSlice(pool.Object, "spec", "devices")
+	replaced := false
+	for i, dev := range devices {
+		if dev == req.Old {
+			devices[i] = req.New
+			replaced = true
+		}
+	}
+	if !replaced {
+		http.Error(w, req.Old+" is not a member of pool "+name, http.StatusConflict)
+		return
+	}
+	_ = unstructured.SetNestedStringSlice(pool.Object, devices, "spec", "devices")
+	_, uerr := a.Dyn.Resource(poolGVR).Update(r.Context(), pool, metav1.UpdateOptions{})
+	a.record(r, "replace disk", name, uerr)
+	respondDelete(w, uerr)
+}
+
 type volumeRequest struct {
 	Name         string `json:"name"`
 	Size         string `json:"size"`

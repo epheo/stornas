@@ -108,6 +108,7 @@ func main() {
 	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed}
 	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireRole("admin", h) }
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
+	mux.Handle("POST /api/v1/pools/{name}/replace", admin(mutate.ReplacePoolDevice))
 	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
 	mux.Handle("DELETE /api/v1/volumes/{name}", admin(mutate.DeleteVolume))
 	mux.Handle("POST /api/v1/volumes/{name}/resize", admin(mutate.ResizeVolume))
