@@ -50,7 +50,8 @@ export interface Node {
 }
 /**
  * Disk is one observed block device on a node; unclaimed disks feed the
- * create-pool form.
+ * create-pool form. SMART detail is nil until the agent's first sweep,
+ * and stays cached while a drive sleeps (the sweep never spins disks up).
  */
 export interface Disk {
   path: string;
@@ -59,6 +60,9 @@ export interface Disk {
   sizeBytes: number /* int64 */;
   rotational: boolean;
   claimed: boolean;
+  smart: string; // Passed | Failed | Unknown | ""
+  tempCelsius?: number /* int */;
+  powerOnHours?: number /* int64 */;
 }
 /**
  * Volume is one PVC: the unit everything else references (LUNs, shares,

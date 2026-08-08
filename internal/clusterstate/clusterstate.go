@@ -274,6 +274,7 @@ func (s *State) Snapshot() model.Snapshot {
 		snap.Pools = append(snap.Pools, poolModel(&pool))
 	}
 	disksByNode := map[string][]model.Disk{}
+	var smartAlerts []model.Alert
 	for _, u := range reflect.List(s.inventories) {
 		var inv storagev1alpha1.NodeInventory
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &inv); err != nil {
@@ -286,11 +287,29 @@ func (s *State) Snapshot() model.Snapshot {
 				Serial:     d.Serial,
 				Rotational: d.Rotational,
 				Claimed:    d.Claimed,
+				Smart:      d.Smart,
 			}
 			if d.Size != nil {
 				disk.SizeBytes = d.Size.Value()
 			}
+			if d.TempCelsius != nil {
+				t := int(*d.TempCelsius)
+				disk.TempCelsius = &t
+			}
+			disk.PowerOnHours = d.PowerOnHours
 			disksByNode[inv.Name] = append(disksByNode[inv.Name], disk)
+			if d.Smart == "Failed" {
+				// Synthetic alert: smartctl has no event path into the
+				// cluster, and a failing disk must lead the trouble feed.
+				// LastSeen stays empty so the frame does not churn on
+				// every inventory tick.
+				smartAlerts = append(smartAlerts, model.Alert{
+					Object:  "Disk/" + inv.Name + ":" + d.Path,
+					Reason:  "SmartFailed",
+					Message: "SMART health check failed on " + inv.Name + " (" + d.Path + "); replace the disk",
+					Count:   1,
+				})
+			}
 		}
 	}
 	for _, obj := range s.nodes.List() {
@@ -344,6 +363,9 @@ func (s *State) Snapshot() model.Snapshot {
 	if len(snap.Alerts) > 100 {
 		snap.Alerts = snap.Alerts[:100]
 	}
+	// Failing disks lead the feed regardless of event timestamps.
+	sort.Slice(smartAlerts, func(i, j int) bool { return smartAlerts[i].Object < smartAlerts[j].Object })
+	snap.Alerts = append(smartAlerts, snap.Alerts...)
 	sort.Slice(snap.Targets, func(i, j int) bool {
 		a, b := snap.Targets[i], snap.Targets[j]
 		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name

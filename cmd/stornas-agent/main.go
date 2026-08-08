@@ -42,7 +42,8 @@ func main() {
 	}
 
 	host := agent.HostRunner{}
-	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.NewWithRunner(host)}
+	smart := agent.NewSmartStore()
+	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.NewWithRunner(host), Smart: smart}
 	if err := r.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func main() {
 	if err := users.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
-	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host}
+	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host, Smart: smart}
 	if err := mgr.Add(inv); err != nil {
 		log.Fatal(err)
 	}

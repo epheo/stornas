@@ -41,14 +41,18 @@ type Node struct {
 }
 
 // Disk is one observed block device on a node; unclaimed disks feed the
-// create-pool form.
+// create-pool form. SMART detail is nil until the agent's first sweep,
+// and stays cached while a drive sleeps (the sweep never spins disks up).
 type Disk struct {
-	Path       string `json:"path"`
-	Model      string `json:"model"`
-	Serial     string `json:"serial"`
-	SizeBytes  int64  `json:"sizeBytes"`
-	Rotational bool   `json:"rotational"`
-	Claimed    bool   `json:"claimed"`
+	Path         string `json:"path"`
+	Model        string `json:"model"`
+	Serial       string `json:"serial"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	Rotational   bool   `json:"rotational"`
+	Claimed      bool   `json:"claimed"`
+	Smart        string `json:"smart"` // Passed | Failed | Unknown | ""
+	TempCelsius  *int   `json:"tempCelsius"`
+	PowerOnHours *int64 `json:"powerOnHours"`
 }
 
 // Volume is one PVC: the unit everything else references (LUNs, shares,

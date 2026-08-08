@@ -66,6 +66,9 @@ spec:
                         path is the stable identifier pools should reference
                         (/dev/disk/by-id/... when the device carries a WWN or serial).
                       type: string
+                    powerOnHours:
+                      format: int64
+                      type: integer
                     rotational:
                       type: boolean
                     serial:
@@ -82,6 +85,9 @@ spec:
                       - Failed
                       - Unknown
                       type: string
+                    tempCelsius:
+                      format: int32
+                      type: integer
                   required:
                   - path
                   type: object

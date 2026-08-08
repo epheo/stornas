@@ -134,6 +134,8 @@ type PoolReconciler struct {
 	client.Client
 	Node string
 	LVM  *lvm.LVM
+	// Smart joins the inventory sweep's verdicts onto device status.
+	Smart *SmartStore
 }
 
 // refreshInterval bounds how stale capacity and device health can get
@@ -153,6 +155,14 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	rep, ensureErr := EnsurePool(ctx, r.LVM, &pool)
+
+	if r.Smart != nil {
+		for i := range rep.Devices {
+			if info, ok := r.Smart.Get(rep.Devices[i].Path); ok {
+				rep.Devices[i].Smart = info.Verdict
+			}
+		}
+	}
 
 	pool.Status.VG = rep.VG
 	pool.Status.Health = rep.Health

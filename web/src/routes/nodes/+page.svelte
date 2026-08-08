@@ -4,6 +4,15 @@
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
 
 	const snap = $derived(app.snap);
+
+	function smartKind(s: string): 'ok' | 'bad' | 'neutral' {
+		return s === 'Passed' ? 'ok' : s === 'Failed' ? 'bad' : 'neutral';
+	}
+	function powerOn(hours: number): string {
+		if (hours < 48) return `${hours}h`;
+		const days = Math.round(hours / 24);
+		return days < 365 ? `${days}d` : `${(days / 365).toFixed(1)}y`;
+	}
 </script>
 
 <div class="space-y-6">
@@ -29,6 +38,9 @@
 									<th class="px-3 py-1.5 font-medium">Serial</th>
 									<th class="px-3 py-1.5 font-medium">Size</th>
 									<th class="px-3 py-1.5 font-medium">Type</th>
+									<th class="px-3 py-1.5 font-medium">SMART</th>
+									<th class="px-3 py-1.5 font-medium">Temp</th>
+									<th class="px-3 py-1.5 font-medium">Power on</th>
 									<th class="px-3 py-1.5 font-medium">Use</th>
 								</tr>
 							</thead>
@@ -42,6 +54,19 @@
 											{formatBytes(d.sizeBytes)}
 										</td>
 										<td class="px-3 py-1.5 text-slate-400">{d.rotational ? 'HDD' : 'SSD'}</td>
+										<td class="px-3 py-1.5">
+											{#if d.smart}
+												<StatusBadge kind={smartKind(d.smart)} label={d.smart} />
+											{:else}
+												<span class="text-xs text-slate-500">-</span>
+											{/if}
+										</td>
+										<td class="px-3 py-1.5 tabular-nums text-slate-400">
+											{d.tempCelsius != null ? `${d.tempCelsius} C` : '-'}
+										</td>
+										<td class="px-3 py-1.5 tabular-nums text-slate-400">
+											{d.powerOnHours != null ? powerOn(d.powerOnHours) : '-'}
+										</td>
 										<td class="px-3 py-1.5">
 											<span
 												class="rounded px-1.5 py-0.5 text-xs {d.claimed

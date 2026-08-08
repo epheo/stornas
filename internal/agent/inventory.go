@@ -22,9 +22,17 @@ type InventoryPublisher struct {
 	Client client.Client
 	Node   string
 	Run    Runner
+	// Smart caches verdicts between sweeps and feeds the pool reconciler.
+	Smart *SmartStore
+
+	lastSweep time.Time
 }
 
 const inventoryInterval = time.Minute
+
+// smartInterval spaces SMART sweeps out: health changes slowly and every
+// query is a host command per disk.
+const smartInterval = 5 * time.Minute
 
 type lsblkReport struct {
 	BlockDevices []struct {
@@ -59,6 +67,11 @@ func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Dis
 		}
 	}
 
+	sweep := p.Smart != nil && time.Since(p.lastSweep) >= smartInterval
+	if sweep {
+		p.lastSweep = time.Now()
+	}
+
 	var disks []storagev1alpha1.Disk
 	for _, d := range rep.BlockDevices {
 		if d.Type != "disk" {
@@ -68,14 +81,31 @@ func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Dis
 		if d.WWN != "" {
 			path = "/dev/disk/by-id/wwn-" + d.WWN
 		}
-		disks = append(disks, storagev1alpha1.Disk{
+		disk := storagev1alpha1.Disk{
 			Path:       path,
 			Model:      d.Model,
 			Serial:     d.Serial,
 			Size:       resource.NewQuantity(d.Size, resource.BinarySI),
 			Rotational: d.Rota,
 			Claimed:    claimed[d.Path],
-		})
+		}
+		if p.Smart != nil {
+			if sweep {
+				info := CheckSmart(ctx, p.Run, d.Path)
+				if info.Verdict != "Unknown" {
+					// Unknown often means standby (-n); keep the cache.
+					p.Smart.Put(info, d.Path, path)
+				} else if _, ok := p.Smart.Get(d.Path); !ok {
+					p.Smart.Put(info, d.Path, path)
+				}
+			}
+			if info, ok := p.Smart.Get(d.Path); ok {
+				disk.Smart = info.Verdict
+				disk.TempCelsius = info.TempCelsius
+				disk.PowerOnHours = info.PowerOnHours
+			}
+		}
+		disks = append(disks, disk)
 	}
 	return disks, nil
 }

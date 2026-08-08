@@ -45,6 +45,10 @@ type Disk struct {
 	// +optional
 	// +kubebuilder:validation:Enum=Passed;Failed;Unknown
 	Smart string `json:"smart,omitempty"`
+	// +optional
+	TempCelsius *int32 `json:"tempCelsius,omitempty"`
+	// +optional
+	PowerOnHours *int64 `json:"powerOnHours,omitempty"`
 }
 
 // NodeInventoryStatus is the agent's latest disk observation.
