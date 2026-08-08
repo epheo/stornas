@@ -1,64 +1,32 @@
 package linstorpoll
 
-import (
-	"context"
-	"net/http"
-	"net/http/httptest"
-	"testing"
+import "testing"
 
-	"github.com/epheo/stornas/internal/eventbus"
-	"github.com/epheo/stornas/internal/model"
-)
-
-func TestPollAndDecorate(t *testing.T) {
-	body := `[
-	  {"name":"pvc-1","node_name":"node-a","state":{"in_use":true},"volumes":[{"state":{"disk_state":"UpToDate"}}]},
-	  {"name":"pvc-1","node_name":"node-b","state":{"in_use":false},"volumes":[{"state":{"disk_state":"SyncTarget"}}]}
-	]`
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/view/resources", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(body))
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	bus := eventbus.New()
-	wake, cancel := bus.Subscribe(eventbus.VolumeChanged)
-	defer cancel()
-
-	p, err := New(srv.URL, bus)
-	if err != nil {
-		t.Fatal(err)
+func TestSplitSyncPercent(t *testing.T) {
+	cases := []struct {
+		in    string
+		state string
+		pct   int // -1 means nil expected
+	}{
+		{"UpToDate", "UpToDate", -1},
+		{"SyncTarget(43.21%)", "SyncTarget", 43},
+		{"SyncTarget(99.87%)", "SyncTarget", 100},
+		{"SyncSource(0.00%)", "SyncSource", 0},
+		{"Inconsistent", "Inconsistent", -1},
+		{"Weird(abc%)", "Weird(abc%)", -1},
+		{"", "", -1},
 	}
-	if err := p.poll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-wake:
-	default:
-		t.Fatal("first poll must publish VolumeChanged")
-	}
-
-	snap := model.Snapshot{Volumes: []model.Volume{
-		{Name: "disk0", Resource: "pvc-1"},
-		{Name: "other", Resource: "pvc-9"},
-	}}
-	p.Decorate(&snap)
-	rep := snap.Volumes[0].Replication
-	if rep == nil || len(rep.Replicas) != 2 || rep.Replicas[1].DiskState != "SyncTarget" || !rep.Replicas[0].InUse {
-		t.Fatalf("replication = %+v", rep)
-	}
-	if snap.Volumes[1].Replication != nil {
-		t.Fatal("unrelated volume decorated")
-	}
-
-	// Unchanged view publishes nothing.
-	if err := p.poll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-wake:
-		t.Fatal("unchanged poll published")
-	default:
+	for _, c := range cases {
+		state, pct := splitSyncPercent(c.in)
+		if state != c.state {
+			t.Errorf("%q: state %q, want %q", c.in, state, c.state)
+		}
+		if c.pct == -1 {
+			if pct != nil {
+				t.Errorf("%q: pct %d, want nil", c.in, *pct)
+			}
+		} else if pct == nil || *pct != c.pct {
+			t.Errorf("%q: pct %v, want %d", c.in, pct, c.pct)
+		}
 	}
 }

@@ -47,10 +47,15 @@
 		})),
 		...syncingVolumes
 			.filter((v) => !strandedVolumes.includes(v))
-			.map((v) => ({
-				text: `Volume ${v.name}: replica not UpToDate`,
-				href: '/volumes',
-			})),
+			.map((v) => {
+				const syncing = v.replication?.replicas?.find((r) => r.syncPercent != null);
+				return {
+					text: syncing
+						? `Volume ${v.name}: resyncing on ${syncing.node} (${syncing.syncPercent}%)`
+						: `Volume ${v.name}: replica not UpToDate`,
+					href: '/volumes',
+				};
+			}),
 		...sickShares.map((s) => ({
 			text: `Share ${s.name}: ${s.reason || s.state}`,
 			href: '/shares',

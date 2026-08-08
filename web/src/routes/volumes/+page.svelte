@@ -112,6 +112,14 @@
 											/>
 										</span>
 									{/each}
+									{#each (vol.replication.replicas ?? []).filter((r) => r.syncPercent != null) as r (r.node)}
+										<div class="mt-1 flex items-center gap-2">
+											<div class="h-1.5 w-28 overflow-hidden rounded-full bg-sky-500/15">
+												<div class="h-full rounded-full bg-sky-500" style="width:{r.syncPercent}%"></div>
+											</div>
+											<span class="tabular-nums text-slate-400">{r.node} {r.syncPercent}%</span>
+										</div>
+									{/each}
 								{:else}
 									<span class="text-slate-500">local</span>
 								{/if}

@@ -6,8 +6,11 @@ package linstorpoll
 
 import (
 	"context"
+	"math"
 	"net/url"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,7 +71,8 @@ func (p *Poller) poll(ctx context.Context) error {
 			rep = &model.Replication{}
 			next[res.Name] = rep
 		}
-		replica := model.Replica{Node: res.NodeName, DiskState: res.Volumes[0].State.DiskState}
+		state, pct := splitSyncPercent(res.Volumes[0].State.DiskState)
+		replica := model.Replica{Node: res.NodeName, DiskState: state, SyncPercent: pct}
 		if res.State != nil && res.State.InUse != nil {
 			replica.InUse = *res.State.InUse
 		}
@@ -83,6 +87,23 @@ func (p *Poller) poll(ctx context.Context) error {
 		p.bus.Publish(eventbus.VolumeChanged)
 	}
 	return nil
+}
+
+// splitSyncPercent separates "SyncTarget(43.21%)" into the bare state and
+// a whole percent. The satellite embeds progress in the disk_state string;
+// golinstor has no dedicated field for it. Whole percent keeps the frame
+// from re-broadcasting on every decimal tick.
+func splitSyncPercent(state string) (string, *int) {
+	open := strings.IndexByte(state, '(')
+	if open < 0 || !strings.HasSuffix(state, "%)") {
+		return state, nil
+	}
+	f, err := strconv.ParseFloat(state[open+1:len(state)-2], 64)
+	if err != nil {
+		return state, nil
+	}
+	pct := int(math.Round(f))
+	return state[:open], &pct
 }
 
 // Decorate attaches replication state to volumes by their PV name (the

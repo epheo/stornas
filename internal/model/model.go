@@ -71,10 +71,13 @@ type Replication struct {
 
 // Replica is one node's copy: disk state (UpToDate, Inconsistent,
 // SyncTarget...) and whether the node currently holds the resource open.
+// SyncPercent is set only while a resync runs, in whole percent so a
+// running sync does not push a frame per decimal tick.
 type Replica struct {
-	Node      string `json:"node"`
-	DiskState string `json:"diskState"`
-	InUse     bool   `json:"inUse"`
+	Node        string `json:"node"`
+	DiskState   string `json:"diskState"`
+	InUse       bool   `json:"inUse"`
+	SyncPercent *int   `json:"syncPercent"`
 }
 
 // Share is one NFS/SMB export: spec identity plus the operator's placement

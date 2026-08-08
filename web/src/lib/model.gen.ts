@@ -81,11 +81,14 @@ export interface Replication {
 /**
  * Replica is one node's copy: disk state (UpToDate, Inconsistent,
  * SyncTarget...) and whether the node currently holds the resource open.
+ * SyncPercent is set only while a resync runs, in whole percent so a
+ * running sync does not push a frame per decimal tick.
  */
 export interface Replica {
   node: string;
   diskState: string;
   inUse: boolean;
+  syncPercent?: number /* int */;
 }
 /**
  * Share is one NFS/SMB export: spec identity plus the operator's placement
