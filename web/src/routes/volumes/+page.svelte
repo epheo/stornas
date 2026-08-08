@@ -8,6 +8,7 @@
 	import Modal from '$lib/ui/Modal.svelte';
 	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
+	import type { Replica } from '$lib/model.gen';
 
 	const snap = $derived(app.snap);
 	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
@@ -28,8 +29,6 @@
 			name = '';
 		}
 	}
-
-	import type { Replica } from '$lib/model.gen';
 
 	type ModalState =
 		| { kind: 'delete-volume'; name: string }
@@ -123,7 +122,9 @@
 							<td class="px-3 py-2 text-xs">
 								{#if vol.replication}
 									{#if vol.replication.splitBrain}
-										<span class="mr-1 inline-block"><StatusBadge kind="bad" label="split brain" /></span>
+										<span class="mr-1 inline-block"
+											><StatusBadge kind="bad" label="split brain" /></span
+										>
 									{/if}
 									{#each vol.replication.replicas ?? [] as r (r.node)}
 										<span class="mr-1 inline-block">
@@ -142,7 +143,10 @@
 									{#each (vol.replication.replicas ?? []).filter((r) => r.syncPercent != null) as r (r.node)}
 										<div class="mt-1 flex items-center gap-2">
 											<div class="h-1.5 w-28 overflow-hidden rounded-full bg-sky-500/15">
-												<div class="h-full rounded-full bg-sky-500" style="width:{r.syncPercent}%"></div>
+												<div
+													class="h-full rounded-full bg-sky-500"
+													style="width:{r.syncPercent}%"
+												></div>
 											</div>
 											<span class="tabular-nums text-slate-400">{r.node} {r.syncPercent}%</span>
 										</div>
@@ -280,8 +284,8 @@
 		onclose={() => (modal = null)}
 	>
 		<p>
-			Volume <span class="font-mono text-slate-200">{m.name}</span> and all data on it will be
-			destroyed. Snapshots of it survive.
+			Volume <span class="font-mono text-slate-200">{m.name}</span> and all data on it will be destroyed.
+			Snapshots of it survive.
 		</p>
 	</ConfirmDelete>
 {:else if modal?.kind === 'resize'}
@@ -401,7 +405,8 @@
 			<button
 				onclick={() =>
 					perform(
-						() => post('/api/v1/volumes', { name: restoreName, size: '', fromSnapshot: m.snapshot }),
+						() =>
+							post('/api/v1/volumes', { name: restoreName, size: '', fromSnapshot: m.snapshot }),
 						`Volume ${restoreName} restored from ${m.snapshot}`,
 					)}
 				disabled={!validName(restoreName) || busy}
@@ -416,9 +421,8 @@
 	<Modal title="Resolve split brain on {m.name}" danger onclose={() => (modal = null)}>
 		<div class="px-5 py-4">
 			<p class="mb-3 text-sm text-slate-400">
-				The replicas diverged and refuse to reconnect. Pick the copy to keep: every other
-				replica is discarded and rebuilt from it. Writes that only reached a discarded replica
-				are lost.
+				The replicas diverged and refuse to reconnect. Pick the copy to keep: every other replica is
+				discarded and rebuilt from it. Writes that only reached a discarded replica are lost.
 			</p>
 			<div class="space-y-1.5 text-sm">
 				{#each m.replicas as r (r.node)}
@@ -427,9 +431,7 @@
 						<span class="font-medium text-slate-200">{r.node}</span>
 						<span class="text-xs text-slate-400">{r.diskState}</span>
 						{#if r.inUse}
-							<span class="rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-400">
-								in use
-							</span>
+							<span class="rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-400"> in use </span>
 						{/if}
 					</label>
 				{/each}
@@ -467,8 +469,8 @@
 		onclose={() => (modal = null)}
 	>
 		<p>
-			Snapshot <span class="font-mono text-slate-200">{m.name}</span> will be deleted. Volumes
-			restored from it are unaffected.
+			Snapshot <span class="font-mono text-slate-200">{m.name}</span> will be deleted. Volumes restored
+			from it are unaffected.
 		</p>
 	</ConfirmDialog>
 {/if}

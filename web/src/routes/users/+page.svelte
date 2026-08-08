@@ -140,8 +140,7 @@
 		onclose={() => (deleting = '')}
 	>
 		<p>
-			User <span class="font-mono text-slate-200">{deleting}</span> loses UI and SMB access
-			immediately.
+			User <span class="font-mono text-slate-200">{deleting}</span> loses UI and SMB access immediately.
 		</p>
 	</ConfirmDialog>
 {/if}

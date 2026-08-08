@@ -164,8 +164,8 @@
 		onclose={() => (deleting = '')}
 	>
 		<p>
-			Target <span class="font-mono text-slate-200">{deleting}</span> will stop being exported;
-			logged-in initiators lose their LUNs. The volumes and their data stay.
+			Target <span class="font-mono text-slate-200">{deleting}</span> will stop being exported; logged-in
+			initiators lose their LUNs. The volumes and their data stay.
 		</p>
 	</ConfirmDialog>
 {/if}

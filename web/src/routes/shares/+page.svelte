@@ -167,8 +167,8 @@
 		onclose={() => (deleting = '')}
 	>
 		<p>
-			Share <span class="font-mono text-slate-200">{deleting}</span> will stop being exported;
-			connected clients lose access. The volume and its data stay.
+			Share <span class="font-mono text-slate-200">{deleting}</span> will stop being exported; connected
+			clients lose access. The volume and its data stay.
 		</p>
 	</ConfirmDialog>
 {/if}

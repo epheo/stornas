@@ -39,9 +39,7 @@
 
 	const replacementDisks = $derived(
 		replacing
-			? (snap.nodes.find((n) => n.name === replacing?.node)?.disks ?? []).filter(
-					(d) => !d.claimed,
-				)
+			? (snap.nodes.find((n) => n.name === replacing?.node)?.disks ?? []).filter((d) => !d.claimed)
 			: [],
 	);
 
@@ -131,7 +129,8 @@
 								{/if}
 								{#if app.role === 'admin'}
 									<button
-										class="rounded px-1 py-0.5 text-xs {d.state === 'Missing' || d.state === 'Failed'
+										class="rounded px-1 py-0.5 text-xs {d.state === 'Missing' ||
+										d.state === 'Failed'
 											? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
 											: 'bg-slate-800 text-slate-400 hover:bg-slate-700'}"
 										onclick={() => openReplace(pool.name, pool.node, d.path)}
@@ -199,9 +198,9 @@
 	<Modal title="Replace disk in {rep.pool}" onclose={() => (replacing = null)}>
 		<div class="px-5 py-4">
 			<p class="mb-3 text-sm text-slate-400">
-				<span class="font-mono text-xs text-slate-300">{rep.old}</span> leaves the pool. A dead
-				member is repaired around; a live one is evacuated first, so data stays available either
-				way. The rebuild runs in the background.
+				<span class="font-mono text-xs text-slate-300">{rep.old}</span> leaves the pool. A dead member
+				is repaired around; a live one is evacuated first, so data stays available either way. The rebuild
+				runs in the background.
 			</p>
 			<span class="mb-1 block text-xs text-slate-400">Replacement disk on {rep.node}</span>
 			<div class="max-h-40 space-y-1 overflow-y-auto text-sm">
