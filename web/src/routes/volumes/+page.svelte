@@ -29,12 +29,15 @@
 		}
 	}
 
+	import type { Replica } from '$lib/model.gen';
+
 	type ModalState =
 		| { kind: 'delete-volume'; name: string }
 		| { kind: 'resize'; name: string; current: number }
 		| { kind: 'snapshot'; name: string }
 		| { kind: 'restore'; snapshot: string }
-		| { kind: 'delete-snapshot'; name: string };
+		| { kind: 'delete-snapshot'; name: string }
+		| { kind: 'resolve-split'; name: string; replicas: Replica[] };
 	let modal = $state<ModalState | null>(null);
 	let modalError = $state('');
 	let busy = $state(false);
@@ -43,6 +46,7 @@
 	let newSize = $state('');
 	let snapName = $state('');
 	let restoreName = $state('');
+	let survivor = $state('');
 
 	function open(m: ModalState) {
 		modal = m;
@@ -50,6 +54,7 @@
 		if (m.kind === 'resize') newSize = '';
 		if (m.kind === 'snapshot') snapName = `${m.name}-${new Date().toISOString().slice(0, 10)}`;
 		if (m.kind === 'restore') restoreName = `${m.snapshot}-restore`;
+		if (m.kind === 'resolve-split') survivor = '';
 	}
 
 	async function perform(fn: () => Promise<string>, done: string) {
@@ -117,6 +122,9 @@
 							</td>
 							<td class="px-3 py-2 text-xs">
 								{#if vol.replication}
+									{#if vol.replication.splitBrain}
+										<span class="mr-1 inline-block"><StatusBadge kind="bad" label="split brain" /></span>
+									{/if}
 									{#each vol.replication.replicas ?? [] as r (r.node)}
 										<span class="mr-1 inline-block">
 											<StatusBadge
@@ -145,6 +153,15 @@
 							</td>
 							{#if app.role === 'admin'}
 								<td class="space-x-1 px-3 py-2 whitespace-nowrap">
+									{#if vol.replication?.splitBrain}
+										{@render actionButton('resolve', true, () =>
+											open({
+												kind: 'resolve-split',
+												name: vol.name,
+												replicas: vol.replication?.replicas ?? [],
+											}),
+										)}
+									{/if}
 									{@render actionButton('snapshot', false, () =>
 										open({ kind: 'snapshot', name: vol.name }),
 									)}
@@ -391,6 +408,51 @@
 				class="rounded bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 			>
 				Restore
+			</button>
+		{/snippet}
+	</Modal>
+{:else if modal?.kind === 'resolve-split'}
+	{@const m = modal}
+	<Modal title="Resolve split brain on {m.name}" danger onclose={() => (modal = null)}>
+		<div class="px-5 py-4">
+			<p class="mb-3 text-sm text-slate-400">
+				The replicas diverged and refuse to reconnect. Pick the copy to keep: every other
+				replica is discarded and rebuilt from it. Writes that only reached a discarded replica
+				are lost.
+			</p>
+			<div class="space-y-1.5 text-sm">
+				{#each m.replicas as r (r.node)}
+					<label class="flex items-center gap-2.5 rounded border border-slate-800 px-3 py-2">
+						<input type="radio" name="survivor" value={r.node} bind:group={survivor} />
+						<span class="font-medium text-slate-200">{r.node}</span>
+						<span class="text-xs text-slate-400">{r.diskState}</span>
+						{#if r.inUse}
+							<span class="rounded bg-sky-500/10 px-1.5 py-0.5 text-xs text-sky-400">
+								in use
+							</span>
+						{/if}
+					</label>
+				{/each}
+			</div>
+			{#if modalError}<p class="mt-2 text-xs text-red-400">{modalError}</p>{/if}
+		</div>
+		{#snippet footer()}
+			<button
+				onclick={() => (modal = null)}
+				class="ml-auto rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:bg-slate-800"
+			>
+				Cancel
+			</button>
+			<button
+				onclick={() =>
+					perform(
+						() => post(`/api/v1/volumes/${m.name}/resolve-split`, { survivor }),
+						`Keeping ${survivor}; other replicas resync from it`,
+					)}
+				disabled={!survivor || busy}
+				class="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+			>
+				Keep {survivor || 'selected'} and discard others
 			</button>
 		{/snippet}
 	</Modal>

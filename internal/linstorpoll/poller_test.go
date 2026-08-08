@@ -1,6 +1,44 @@
 package linstorpoll
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/epheo/stornas/internal/model"
+)
+
+func TestDetectSplitBrain(t *testing.T) {
+	up := func(peers ...model.Peer) model.Replica {
+		return model.Replica{DiskState: "UpToDate", Peers: peers}
+	}
+	cases := []struct {
+		name     string
+		replicas []model.Replica
+		want     bool
+	}{
+		{"healthy pair", []model.Replica{
+			up(model.Peer{Node: "b", Connected: true, Status: "Connected"}),
+			up(model.Peer{Node: "a", Connected: true, Status: "Connected"}),
+		}, false},
+		{"peer down: Connecting is not split brain", []model.Replica{
+			up(model.Peer{Node: "b", Connected: false, Status: "Connecting"}),
+			up(model.Peer{Node: "a", Connected: false, Status: "Connecting"}),
+		}, false},
+		{"standalone after refused reconnect", []model.Replica{
+			up(model.Peer{Node: "b", Connected: false, Status: "StandAlone"}),
+			up(model.Peer{Node: "a", Connected: false, Status: "StandAlone"}),
+		}, true},
+		{"single replica cannot split", []model.Replica{
+			up(model.Peer{Node: "b", Connected: false, Status: "StandAlone"}),
+		}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := detectSplitBrain(c.replicas); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
 
 func TestSplitSyncPercent(t *testing.T) {
 	cases := []struct {

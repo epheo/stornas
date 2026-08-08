@@ -66,9 +66,11 @@ type Volume struct {
 }
 
 // Replication is the DRBD view of one volume, absent for non-replicated
-// or unresolved volumes.
+// or unresolved volumes. SplitBrain flags replicas that refuse to
+// reconnect after a partition; the UI owns the pick-survivor flow.
 type Replication struct {
-	Replicas []Replica `json:"replicas"`
+	Replicas   []Replica `json:"replicas"`
+	SplitBrain bool      `json:"splitBrain"`
 }
 
 // Replica is one node's copy: disk state (UpToDate, Inconsistent,
@@ -80,6 +82,14 @@ type Replica struct {
 	DiskState   string `json:"diskState"`
 	InUse       bool   `json:"inUse"`
 	SyncPercent *int   `json:"syncPercent"`
+	Peers       []Peer `json:"peers"`
+}
+
+// Peer is one DRBD connection as this replica sees it.
+type Peer struct {
+	Node      string `json:"node"`
+	Connected bool   `json:"connected"`
+	Status    string `json:"status"`
 }
 
 // Share is one NFS/SMB export: spec identity plus the operator's placement

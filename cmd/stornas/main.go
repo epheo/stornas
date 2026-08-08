@@ -105,13 +105,14 @@ func main() {
 	})))
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
-	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed}
+	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed, Linstor: poller.Client()}
 	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireRole("admin", h) }
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
 	mux.Handle("POST /api/v1/pools/{name}/replace", admin(mutate.ReplacePoolDevice))
 	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
 	mux.Handle("DELETE /api/v1/volumes/{name}", admin(mutate.DeleteVolume))
 	mux.Handle("POST /api/v1/volumes/{name}/resize", admin(mutate.ResizeVolume))
+	mux.Handle("POST /api/v1/volumes/{name}/resolve-split", admin(mutate.ResolveSplitBrain))
 	mux.Handle("POST /api/v1/shares", admin(mutate.CreateShare))
 	mux.Handle("DELETE /api/v1/shares/{name}", admin(mutate.DeleteShare))
 	mux.Handle("POST /api/v1/targets", admin(mutate.CreateTarget))

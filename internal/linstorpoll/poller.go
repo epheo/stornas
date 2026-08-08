@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/url"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,15 @@ func New(controllerURL string, bus *eventbus.Bus) (*Poller, error) {
 		return nil, err
 	}
 	return &Poller{client: c, bus: bus, data: map[string]*model.Replication{}}, nil
+}
+
+// Client exposes the LINSTOR client for mutation endpoints (split-brain
+// resolution); nil-safe like Decorate.
+func (p *Poller) Client() *lapi.Client {
+	if p == nil {
+		return nil
+	}
+	return p.client
 }
 
 // Run polls until ctx ends; a failed poll keeps the last-good view.
@@ -76,7 +86,11 @@ func (p *Poller) poll(ctx context.Context) error {
 		if res.State != nil && res.State.InUse != nil {
 			replica.InUse = *res.State.InUse
 		}
+		replica.Peers = peerLinks(res.LayerObject)
 		rep.Replicas = append(rep.Replicas, replica)
+	}
+	for _, rep := range next {
+		rep.SplitBrain = detectSplitBrain(rep.Replicas)
 	}
 
 	p.mu.Lock()
@@ -87,6 +101,38 @@ func (p *Poller) poll(ctx context.Context) error {
 		p.bus.Publish(eventbus.VolumeChanged)
 	}
 	return nil
+}
+
+// peerLinks flattens the DRBD connection map, sorted so the frame stays
+// deterministic for the hub's byte-level dedupe.
+func peerLinks(layer *lapi.ResourceLayer) []model.Peer {
+	if layer == nil || layer.Drbd == nil || len(layer.Drbd.Connections) == 0 {
+		return nil
+	}
+	peers := make([]model.Peer, 0, len(layer.Drbd.Connections))
+	for node, conn := range layer.Drbd.Connections {
+		peers = append(peers, model.Peer{Node: node, Connected: conn.Connected, Status: conn.Message})
+	}
+	sort.Slice(peers, func(i, j int) bool { return peers[i].Node < peers[j].Node })
+	return peers
+}
+
+// detectSplitBrain: replicas exist on both sides but a connection sits in
+// StandAlone, DRBD's verdict after refusing to reconnect diverged data.
+// A merely absent peer shows Connecting instead, so a plain node-down
+// never trips this.
+func detectSplitBrain(replicas []model.Replica) bool {
+	if len(replicas) < 2 {
+		return false
+	}
+	for _, r := range replicas {
+		for _, p := range r.Peers {
+			if !p.Connected && p.Status == "StandAlone" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // splitSyncPercent separates "SyncTarget(43.21%)" into the bare state and

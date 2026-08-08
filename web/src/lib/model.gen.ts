@@ -77,10 +77,12 @@ export interface Volume {
 }
 /**
  * Replication is the DRBD view of one volume, absent for non-replicated
- * or unresolved volumes.
+ * or unresolved volumes. SplitBrain flags replicas that refuse to
+ * reconnect after a partition; the UI owns the pick-survivor flow.
  */
 export interface Replication {
   replicas: Replica[];
+  splitBrain: boolean;
 }
 /**
  * Replica is one node's copy: disk state (UpToDate, Inconsistent,
@@ -93,6 +95,15 @@ export interface Replica {
   diskState: string;
   inUse: boolean;
   syncPercent?: number /* int */;
+  peers: Peer[];
+}
+/**
+ * Peer is one DRBD connection as this replica sees it.
+ */
+export interface Peer {
+  node: string;
+  connected: boolean;
+  status: string;
 }
 /**
  * Share is one NFS/SMB export: spec identity plus the operator's placement

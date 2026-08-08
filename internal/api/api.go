@@ -21,6 +21,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	lapi "github.com/LINBIT/golinstor/client"
+
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/tasks"
 )
@@ -35,11 +37,13 @@ var (
 
 // API creates appliance objects. Namespace scopes everything namespaced:
 // appliance-managed volumes and shares live in the system namespace.
+// Linstor is nil when LINSTOR_URL is unset; endpoints needing it 501.
 type API struct {
 	Dyn       dynamic.Interface
 	CS        kubernetes.Interface
 	Namespace string
 	Tasks     *tasks.Feed
+	Linstor   *lapi.Client
 }
 
 // record adds one row to the activity feed, attributed to the session
@@ -242,6 +246,86 @@ func (a *API) claimReferenced(ctx context.Context, claim string) (string, error)
 		}
 	}
 	return "", nil
+}
+
+type resolveSplitRequest struct {
+	Survivor string `json:"survivor"`
+}
+
+// ResolveSplitBrain is the failure matrix's pick-survivor flow: every
+// diskful replica except the survivor is deleted from LINSTOR and
+// autoplaced back, discarding the losing side's writes and resyncing in
+// full from the survivor. DRBD cannot merge diverged data; picking is
+// the only honest resolution.
+func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req resolveSplitRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if a.Linstor == nil {
+		http.Error(w, "LINSTOR is not configured", http.StatusNotImplemented)
+		return
+	}
+	if req.Survivor == "" {
+		http.Error(w, "survivor node required", http.StatusBadRequest)
+		return
+	}
+	pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		respondDelete(w, err)
+		return
+	}
+	res := pvc.Spec.VolumeName
+	if res == "" {
+		http.Error(w, "volume has no bound PV yet", http.StatusConflict)
+		return
+	}
+	resources, err := a.Linstor.Resources.GetAll(r.Context(), res)
+	if err != nil {
+		http.Error(w, "linstor: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	diskful := 0
+	survivorSeen := false
+	var victims []string
+	for _, rsc := range resources {
+		diskless := false
+		for _, f := range rsc.Flags {
+			if f == "DISKLESS" {
+				diskless = true
+			}
+		}
+		if diskless {
+			continue
+		}
+		diskful++
+		if rsc.NodeName == req.Survivor {
+			survivorSeen = true
+		} else {
+			victims = append(victims, rsc.NodeName)
+		}
+	}
+	if !survivorSeen {
+		http.Error(w, req.Survivor+" holds no replica of "+name, http.StatusConflict)
+		return
+	}
+	for _, node := range victims {
+		if err := a.Linstor.Resources.Delete(r.Context(), res, node); err != nil {
+			a.record(r, "resolve split-brain", name, err)
+			http.Error(w, "delete replica on "+node+": "+err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+	aerr := a.Linstor.Resources.Autoplace(r.Context(), res, lapi.AutoPlaceRequest{
+		SelectFilter: lapi.AutoSelectFilter{PlaceCount: int32(diskful)},
+	})
+	a.record(r, "resolve split-brain", name, aerr)
+	if aerr != nil {
+		http.Error(w, "replicas discarded but autoplace failed, retry resolves it: "+aerr.Error(), http.StatusBadGateway)
+		return
+	}
+	respondDelete(w, nil)
 }
 
 type resizeRequest struct {

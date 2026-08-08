@@ -59,6 +59,12 @@
 			text: `Pool ${p.name}: ${p.health}${p.reason ? ` (${p.reason})` : ''}`,
 			href: '/pools',
 		})),
+		...snap.volumes
+			.filter((v) => v.replication?.splitBrain)
+			.map((v) => ({
+				text: `Volume ${v.name}: split brain, pick a survivor on the volumes page`,
+				href: '/volumes',
+			})),
 		...strandedVolumes.map((v) => ({
 			text: `Volume ${v.name} is unavailable: its node is down`,
 			href: '/volumes',
