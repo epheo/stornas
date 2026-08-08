@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
@@ -17,6 +18,10 @@ import (
 var localUserGVR = schema.GroupVersionResource{
 	Group: "storage.stornas.io", Version: "v1alpha1", Resource: "localusers",
 }
+
+// annotGenerated marks a LocalUser still on its bootstrap-generated
+// password; cleared on the first self-service change.
+const annotGenerated = "stornas.io/generated-password"
 
 // KubeSource resolves users from LocalUser CRs and their password Secrets
 // in the appliance namespace. Login is rare, so every lookup is a live
@@ -67,7 +72,11 @@ func (s *KubeSource) Bootstrap(ctx context.Context) (string, error) {
 	admin := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "storage.stornas.io/v1alpha1",
 		"kind":       "LocalUser",
-		"metadata":   map[string]any{"name": "admin", "namespace": s.Namespace},
+		"metadata": map[string]any{
+			"name":        "admin",
+			"namespace":   s.Namespace,
+			"annotations": map[string]any{annotGenerated: "true"},
+		},
 		"spec": map[string]any{
 			"role":              "admin",
 			"passwordSecretRef": "admin-password",
@@ -77,4 +86,43 @@ func (s *KubeSource) Bootstrap(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return password, nil
+}
+
+// MustChange reports whether the user still runs on a generated password.
+func (s *KubeSource) MustChange(ctx context.Context, username string) bool {
+	u, err := s.Dyn.Resource(localUserGVR).Namespace(s.Namespace).Get(ctx, username, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+	return u.GetAnnotations()[annotGenerated] == "true"
+}
+
+// UpdatePassword rotates the referenced Secret in place (the agent's smb
+// reconciler watches it) and clears the generated-password mark.
+func (s *KubeSource) UpdatePassword(ctx context.Context, username, password string) error {
+	u, err := s.Dyn.Resource(localUserGVR).Namespace(s.Namespace).Get(ctx, username, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	ref, _, _ := unstructured.NestedString(u.Object, "spec", "passwordSecretRef")
+	if ref == "" {
+		return fmt.Errorf("localuser %s has no secret ref", username)
+	}
+	secret, err := s.CS.CoreV1().Secrets(s.Namespace).Get(ctx, ref, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if secret.Data == nil {
+		secret.Data = map[string][]byte{}
+	}
+	secret.Data["password"] = []byte(password)
+	if _, err := s.CS.CoreV1().Secrets(s.Namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		return err
+	}
+	if u.GetAnnotations()[annotGenerated] != "" {
+		patch := []byte(`{"metadata":{"annotations":{"` + annotGenerated + `":null}}}`)
+		_, err = s.Dyn.Resource(localUserGVR).Namespace(s.Namespace).Patch(
+			ctx, username, types.MergePatchType, patch, metav1.PatchOptions{})
+	}
+	return err
 }

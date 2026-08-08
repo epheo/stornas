@@ -99,6 +99,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/login", sessions.Login)
 	mux.HandleFunc("POST /api/v1/logout", sessions.Logout)
 	mux.HandleFunc("GET /api/v1/session", sessions.Session)
+	mux.HandleFunc("POST /api/v1/session/password", sessions.ChangePassword)
 	mux.Handle("GET /api/v1/state", sessions.Require(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, snapFn())
 	})))

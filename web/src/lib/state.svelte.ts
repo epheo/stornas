@@ -16,6 +16,9 @@ export const app = $state({
 	} as Snapshot,
 	who: '',
 	role: '',
+	// True while the account still runs on the console-logged generated
+	// password; the layout nudges a change.
+	mustChangePassword: false,
 });
 
 // Go marshals nil slices as null; normalize once so pages can iterate.
@@ -40,4 +43,5 @@ export async function loadSession(): Promise<void> {
 	const s = await r.json();
 	app.role = s?.role ?? '';
 	app.who = s?.username ?? s?.name ?? '';
+	app.mustChangePassword = s?.mustChangePassword ?? false;
 }

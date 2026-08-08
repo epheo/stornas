@@ -38,6 +38,13 @@ type Source interface {
 	Lookup(ctx context.Context, username string) (User, string, error)
 }
 
+// PasswordStore is the optional Source capability behind self-service
+// password change and the first-boot must-change nudge.
+type PasswordStore interface {
+	MustChange(ctx context.Context, username string) bool
+	UpdatePassword(ctx context.Context, username, password string) error
+}
+
 // Manager owns sessions. Sliding expiry: any authenticated request renews.
 type Manager struct {
 	src Source
@@ -98,14 +105,62 @@ func (m *Manager) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Session reports the caller's identity; the UI's login gate.
+// Session reports the caller's identity; the UI's login gate. The
+// mustChangePassword flag nudges first-boot admins off the console-logged
+// generated password.
 func (m *Manager) Session(w http.ResponseWriter, r *http.Request) {
 	user, ok := m.userFor(r)
 	if !ok {
 		http.Error(w, "unauthenticated", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, user)
+	resp := struct {
+		User
+		MustChangePassword bool `json:"mustChangePassword"`
+	}{User: user}
+	if ps, ok := m.src.(PasswordStore); ok {
+		resp.MustChangePassword = ps.MustChange(r.Context(), user.Name)
+	}
+	writeJSON(w, resp)
+}
+
+// ChangePassword lets any authenticated user rotate their own password
+// after proving they hold the current one.
+func (m *Manager) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	user, ok := m.userFor(r)
+	if !ok {
+		http.Error(w, "unauthenticated", http.StatusUnauthorized)
+		return
+	}
+	ps, ok := m.src.(PasswordStore)
+	if !ok {
+		http.Error(w, "password change not supported", http.StatusNotImplemented)
+		return
+	}
+	var req struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(req.New) < 8 {
+		http.Error(w, "new password needs at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	_, pw, err := m.src.Lookup(r.Context(), user.Name)
+	if err != nil || pw == "" ||
+		subtle.ConstantTimeCompare([]byte(pw), []byte(req.Current)) != 1 {
+		time.Sleep(failDelay)
+		http.Error(w, "current password is wrong", http.StatusForbidden)
+		return
+	}
+	if err := ps.UpdatePassword(r.Context(), user.Name, req.New); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Require gates a handler behind a valid session and puts the identity on

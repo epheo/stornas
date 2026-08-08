@@ -12,11 +12,19 @@
 		Bell,
 		Users,
 		LogOut,
+		KeyRound,
 	} from 'lucide-svelte';
 	import { app, startStream, loadSession } from '$lib/state.svelte';
 	import ToastHost from '$lib/ui/ToastHost.svelte';
+	import ChangePassword from '$lib/ui/ChangePassword.svelte';
 
 	let { children } = $props();
+	let showPassword = $state(false);
+
+	// Nudge once per page load while the generated password is still live.
+	$effect(() => {
+		if (app.mustChangePassword) showPassword = true;
+	});
 
 	let gate = $state<'loading' | 'anon' | 'in'>('loading');
 	let username = $state('');
@@ -108,6 +116,12 @@
 				{/if}
 				<button
 					class="mt-2 flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+					onclick={() => (showPassword = true)}
+				>
+					<KeyRound size={12} /> Change password
+				</button>
+				<button
+					class="mt-1.5 flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
 					onclick={logout}
 				>
 					<LogOut size={12} /> Sign out
@@ -118,6 +132,9 @@
 			{@render children()}
 		</main>
 		<ToastHost />
+		{#if showPassword}
+			<ChangePassword onclose={() => (showPassword = false)} />
+		{/if}
 	</div>
 {:else if gate === 'anon'}
 	<main class="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">

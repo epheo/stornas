@@ -7,6 +7,7 @@
 		Cable,
 		Camera,
 		CircleCheck,
+		Circle,
 		TriangleAlert,
 	} from 'lucide-svelte';
 	import { app } from '$lib/state.svelte';
@@ -31,6 +32,23 @@
 	const syncingVolumes = $derived(
 		snap.volumes.filter((v) => v.replication?.replicas?.some((r) => r.diskState !== 'UpToDate')),
 	);
+
+	// First-run walkthrough: shown until storage exists, gone once volumes
+	// do (exports stay a listed step, not a nag).
+	const setupSteps = $derived([
+		{
+			label: 'Create a storage pool from free disks',
+			href: '/pools',
+			done: snap.pools.length > 0,
+		},
+		{ label: 'Create a volume on it', href: '/volumes', done: snap.volumes.length > 0 },
+		{
+			label: 'Export it: NFS/SMB share or iSCSI target',
+			href: '/shares',
+			done: snap.shares.length > 0 || snap.targets.length > 0,
+		},
+	]);
+	const onboarding = $derived(snap.pools.length === 0 || snap.volumes.length === 0);
 
 	type Issue = { text: string; href: string };
 	const issues = $derived<Issue[]>([
@@ -69,6 +87,30 @@
 
 <div class="space-y-6">
 	<h1 class="text-xl font-semibold text-slate-100">Dashboard</h1>
+
+	{#if onboarding && app.role === 'admin'}
+		<section class="rounded-lg border border-sky-500/30 bg-slate-900 p-4">
+			<h2 class="mb-1 text-sm font-medium text-slate-100">Set up your storage</h2>
+			<p class="mb-3 text-sm text-slate-400">
+				Three steps take this appliance from empty to serving clients.
+			</p>
+			<ol class="space-y-2">
+				{#each setupSteps as step, i (step.href)}
+					<li>
+						<a class="flex items-center gap-2.5 text-sm hover:underline" href={step.href}>
+							{#if step.done}
+								<CircleCheck size={16} class="shrink-0 text-emerald-400" />
+								<span class="text-slate-500 line-through">{i + 1}. {step.label}</span>
+							{:else}
+								<Circle size={16} class="shrink-0 text-sky-400" />
+								<span class="text-slate-200">{i + 1}. {step.label}</span>
+							{/if}
+						</a>
+					</li>
+				{/each}
+			</ol>
+		</section>
+	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
 		<StatTile
