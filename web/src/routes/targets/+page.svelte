@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { app } from '$lib/state.svelte';
 	import { post, del } from '$lib/api';
+	import { toasts } from '$lib/toast.svelte';
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 
 	const snap = $derived(app.snap);
 	const blockVolumes = $derived(snap.volumes.filter((v) => v.block));
@@ -15,7 +17,6 @@
 	}
 
 	let actionError = $state('');
-	let notice = $state('');
 	let name = $state('');
 	let vip = $state('');
 	let luns = $state<string[]>([]);
@@ -24,7 +25,6 @@
 	async function createTarget(e: Event) {
 		e.preventDefault();
 		actionError = '';
-		notice = '';
 		const err = await post('/api/v1/targets', {
 			name,
 			vip,
@@ -33,23 +33,31 @@
 		});
 		if (err) actionError = err;
 		else {
-			notice = `Target ${name} created`;
+			toasts.show(`Target ${name} created`, 'success');
 			name = '';
 			luns = [];
 		}
 	}
 
-	async function deleteTarget(n: string) {
-		if (!confirm(`Delete target ${n}? Initiators lose access.`)) return;
-		actionError = await del(`/api/v1/targets/${n}`);
+	let deleting = $state('');
+	let deleteError = $state('');
+	let busy = $state(false);
+
+	async function deleteTarget() {
+		busy = true;
+		deleteError = '';
+		const err = await del(`/api/v1/targets/${deleting}`);
+		busy = false;
+		if (err) deleteError = err;
+		else {
+			toasts.show(`Target ${deleting} deleted`, 'success');
+			deleting = '';
+		}
 	}
 </script>
 
 <div class="space-y-6">
 	<h1 class="text-xl font-semibold text-slate-100">iSCSI targets</h1>
-
-	{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
-	{#if notice}<p class="text-sm text-emerald-400">{notice}</p>{/if}
 
 	{#if snap.targets.length === 0}
 		<p class="text-sm text-slate-500">No targets yet.</p>
@@ -93,7 +101,7 @@
 								<td class="px-3 py-2">
 									<button
 										class="rounded bg-red-500/10 px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20"
-										onclick={() => deleteTarget(t.name)}
+										onclick={() => ((deleting = t.name), (deleteError = ''))}
 									>
 										delete
 									</button>
@@ -135,6 +143,7 @@
 					placeholder="Initiator IQNs (comma separated)"
 					bind:value={initiators}
 				/>
+				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
 					type="submit"
@@ -145,3 +154,18 @@
 		</section>
 	{/if}
 </div>
+
+{#if deleting}
+	<ConfirmDialog
+		title="Delete target"
+		{busy}
+		error={deleteError}
+		onconfirm={deleteTarget}
+		onclose={() => (deleting = '')}
+	>
+		<p>
+			Target <span class="font-mono text-slate-200">{deleting}</span> will stop being exported;
+			logged-in initiators lose their LUNs. The volumes and their data stay.
+		</p>
+	</ConfirmDialog>
+{/if}

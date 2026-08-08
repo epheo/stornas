@@ -14,6 +14,7 @@
 		LogOut,
 	} from 'lucide-svelte';
 	import { app, startStream, loadSession } from '$lib/state.svelte';
+	import ToastHost from '$lib/ui/ToastHost.svelte';
 
 	let { children } = $props();
 
@@ -116,6 +117,7 @@
 		<main class="ml-52 min-w-0 flex-1 p-6">
 			{@render children()}
 		</main>
+		<ToastHost />
 	</div>
 {:else if gate === 'anon'}
 	<main class="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">

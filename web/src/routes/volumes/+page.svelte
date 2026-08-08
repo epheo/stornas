@@ -2,7 +2,12 @@
 	import { app } from '$lib/state.svelte';
 	import { formatBytes } from '$lib/stream';
 	import { post, del } from '$lib/api';
+	import { toasts } from '$lib/toast.svelte';
+	import { validName, NAME_HINT, sizeBytes, SIZE_HINT } from '$lib/validate';
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
+	import Modal from '$lib/ui/Modal.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
 
 	const snap = $derived(app.snap);
 	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
@@ -12,41 +17,58 @@
 	let size = $state('10Gi');
 	let storageClass = $state('stornas-local');
 	let block = $state(false);
-	let notice = $state('');
 
 	async function createVolume(e: Event) {
 		e.preventDefault();
 		actionError = '';
-		notice = '';
 		const err = await post('/api/v1/volumes', { name, size, storageClass, block });
 		if (err) actionError = err;
 		else {
-			notice = `Volume ${name} created`;
+			toasts.show(`Volume ${name} created`, 'success');
 			name = '';
 		}
 	}
 
-	async function run(fn: () => Promise<string>) {
-		actionError = (await fn()) ?? '';
+	type ModalState =
+		| { kind: 'delete-volume'; name: string }
+		| { kind: 'resize'; name: string; current: number }
+		| { kind: 'snapshot'; name: string }
+		| { kind: 'restore'; snapshot: string }
+		| { kind: 'delete-snapshot'; name: string };
+	let modal = $state<ModalState | null>(null);
+	let modalError = $state('');
+	let busy = $state(false);
+
+	// Per-modal form fields, seeded on open.
+	let newSize = $state('');
+	let snapName = $state('');
+	let restoreName = $state('');
+
+	function open(m: ModalState) {
+		modal = m;
+		modalError = '';
+		if (m.kind === 'resize') newSize = '';
+		if (m.kind === 'snapshot') snapName = `${m.name}-${new Date().toISOString().slice(0, 10)}`;
+		if (m.kind === 'restore') restoreName = `${m.snapshot}-restore`;
 	}
-	function deleteVolume(n: string) {
-		if (confirm(`Delete volume ${n}? Data is lost.`)) run(() => del(`/api/v1/volumes/${n}`));
+
+	async function perform(fn: () => Promise<string>, done: string) {
+		busy = true;
+		modalError = '';
+		const err = await fn();
+		busy = false;
+		if (err) modalError = err;
+		else {
+			modal = null;
+			toasts.show(done, 'success');
+		}
 	}
-	function resizeVolume(n: string, current: number) {
-		const s = prompt(`New size for ${n} (currently ${formatBytes(current)}):`, '');
-		if (s) run(() => post(`/api/v1/volumes/${n}/resize`, { size: s }));
-	}
-	function snapshotVolume(n: string) {
-		const sn = prompt('Snapshot name:', `${n}-${new Date().toISOString().slice(0, 10)}`);
-		if (sn) run(() => post('/api/v1/snapshots', { name: sn, volume: n }));
-	}
-	function restoreSnapshot(n: string) {
-		const vn = prompt('New volume name (restored from snapshot):', `${n}-restore`);
-		if (vn) run(() => post('/api/v1/volumes', { name: vn, size: '', fromSnapshot: n }));
-	}
-	function deleteSnapshot(n: string) {
-		if (confirm(`Delete snapshot ${n}?`)) run(() => del(`/api/v1/snapshots/${n}`));
-	}
+
+	const resizeValid = $derived.by(() => {
+		if (modal?.kind !== 'resize') return false;
+		const b = sizeBytes(newSize);
+		return b != null && b > modal.current;
+	});
 </script>
 
 {#snippet actionButton(label: string, danger: boolean, onclick: () => void)}
@@ -62,9 +84,6 @@
 
 <div class="space-y-6">
 	<h1 class="text-xl font-semibold text-slate-100">Volumes</h1>
-
-	{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
-	{#if notice}<p class="text-sm text-emerald-400">{notice}</p>{/if}
 
 	{#if snap.volumes.length === 0}
 		<p class="text-sm text-slate-500">No volumes yet.</p>
@@ -126,11 +145,15 @@
 							</td>
 							{#if app.role === 'admin'}
 								<td class="space-x-1 px-3 py-2 whitespace-nowrap">
-									{@render actionButton('snapshot', false, () => snapshotVolume(vol.name))}
-									{@render actionButton('resize', false, () =>
-										resizeVolume(vol.name, vol.capacityBytes),
+									{@render actionButton('snapshot', false, () =>
+										open({ kind: 'snapshot', name: vol.name }),
 									)}
-									{@render actionButton('delete', true, () => deleteVolume(vol.name))}
+									{@render actionButton('resize', false, () =>
+										open({ kind: 'resize', name: vol.name, current: vol.capacityBytes }),
+									)}
+									{@render actionButton('delete', true, () =>
+										open({ kind: 'delete-volume', name: vol.name }),
+									)}
 								</td>
 							{/if}
 						</tr>
@@ -174,8 +197,12 @@
 								</td>
 								{#if app.role === 'admin'}
 									<td class="space-x-1 px-3 py-2 whitespace-nowrap">
-										{@render actionButton('restore', false, () => restoreSnapshot(s.name))}
-										{@render actionButton('delete', true, () => deleteSnapshot(s.name))}
+										{@render actionButton('restore', false, () =>
+											open({ kind: 'restore', snapshot: s.name }),
+										)}
+										{@render actionButton('delete', true, () =>
+											open({ kind: 'delete-snapshot', name: s.name }),
+										)}
 									</td>
 								{/if}
 							</tr>
@@ -195,11 +222,13 @@
 					placeholder="Name"
 					bind:value={name}
 				/>
+				{#if name && !validName(name)}<p class="text-xs text-amber-400">{NAME_HINT}</p>{/if}
 				<input
 					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
 					placeholder="Size (10Gi)"
 					bind:value={size}
 				/>
+				{#if size && sizeBytes(size) == null}<p class="text-xs text-amber-400">{SIZE_HINT}</p>{/if}
 				<select
 					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm focus:border-sky-500 focus:outline-none"
 					bind:value={storageClass}
@@ -210,9 +239,11 @@
 				<label class="flex items-center gap-2 text-sm text-slate-300">
 					<input type="checkbox" bind:checked={block} /> Block mode (VM/iSCSI)
 				</label>
+				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
-					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
+					disabled={!validName(name) || sizeBytes(size) == null}
 				>
 					Create volume
 				</button>
@@ -220,3 +251,162 @@
 		</section>
 	{/if}
 </div>
+
+{#if modal?.kind === 'delete-volume'}
+	{@const m = modal}
+	<ConfirmDelete
+		title="Delete volume"
+		confirmWord={m.name}
+		{busy}
+		error={modalError}
+		onconfirm={() => perform(() => del(`/api/v1/volumes/${m.name}`), `Volume ${m.name} deleted`)}
+		onclose={() => (modal = null)}
+	>
+		<p>
+			Volume <span class="font-mono text-slate-200">{m.name}</span> and all data on it will be
+			destroyed. Snapshots of it survive.
+		</p>
+	</ConfirmDelete>
+{:else if modal?.kind === 'resize'}
+	{@const m = modal}
+	<Modal title="Resize {m.name}" onclose={() => (modal = null)}>
+		<form
+			class="px-5 py-4"
+			onsubmit={(e) => {
+				e.preventDefault();
+				if (resizeValid)
+					perform(
+						() => post(`/api/v1/volumes/${m.name}/resize`, { size: newSize }),
+						`Volume ${m.name} resized to ${newSize}`,
+					);
+			}}
+		>
+			<p class="mb-3 text-sm text-slate-400">
+				Currently {formatBytes(m.current)}. Volumes only grow; shrinking is not supported.
+			</p>
+			<label class="mb-1 block text-xs text-slate-400" for="resize-input">New size</label>
+			<input
+				id="resize-input"
+				data-autofocus
+				bind:value={newSize}
+				placeholder="20Gi"
+				class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+			/>
+			{#if newSize && !resizeValid}
+				<p class="mt-1 text-xs text-amber-400">
+					{sizeBytes(newSize) == null ? SIZE_HINT : 'must be larger than the current size'}
+				</p>
+			{/if}
+			{#if modalError}<p class="mt-2 text-xs text-red-400">{modalError}</p>{/if}
+		</form>
+		{#snippet footer()}
+			<button
+				onclick={() => (modal = null)}
+				class="ml-auto rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:bg-slate-800"
+			>
+				Cancel
+			</button>
+			<button
+				onclick={() =>
+					perform(
+						() => post(`/api/v1/volumes/${m.name}/resize`, { size: newSize }),
+						`Volume ${m.name} resized to ${newSize}`,
+					)}
+				disabled={!resizeValid || busy}
+				class="rounded bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+			>
+				Resize
+			</button>
+		{/snippet}
+	</Modal>
+{:else if modal?.kind === 'snapshot'}
+	{@const m = modal}
+	<Modal title="Snapshot {m.name}" onclose={() => (modal = null)}>
+		<div class="px-5 py-4">
+			<label class="mb-1 block text-xs text-slate-400" for="snap-input">Snapshot name</label>
+			<input
+				id="snap-input"
+				data-autofocus
+				bind:value={snapName}
+				class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+			/>
+			{#if snapName && !validName(snapName)}
+				<p class="mt-1 text-xs text-amber-400">{NAME_HINT}</p>
+			{/if}
+			{#if modalError}<p class="mt-2 text-xs text-red-400">{modalError}</p>{/if}
+		</div>
+		{#snippet footer()}
+			<button
+				onclick={() => (modal = null)}
+				class="ml-auto rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:bg-slate-800"
+			>
+				Cancel
+			</button>
+			<button
+				onclick={() =>
+					perform(
+						() => post('/api/v1/snapshots', { name: snapName, volume: m.name }),
+						`Snapshot ${snapName} created`,
+					)}
+				disabled={!validName(snapName) || busy}
+				class="rounded bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+			>
+				Create snapshot
+			</button>
+		{/snippet}
+	</Modal>
+{:else if modal?.kind === 'restore'}
+	{@const m = modal}
+	<Modal title="Restore from {m.snapshot}" onclose={() => (modal = null)}>
+		<div class="px-5 py-4">
+			<p class="mb-3 text-sm text-slate-400">
+				Creates a new volume from the snapshot; the original volume is untouched.
+			</p>
+			<label class="mb-1 block text-xs text-slate-400" for="restore-input">New volume name</label>
+			<input
+				id="restore-input"
+				data-autofocus
+				bind:value={restoreName}
+				class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+			/>
+			{#if restoreName && !validName(restoreName)}
+				<p class="mt-1 text-xs text-amber-400">{NAME_HINT}</p>
+			{/if}
+			{#if modalError}<p class="mt-2 text-xs text-red-400">{modalError}</p>{/if}
+		</div>
+		{#snippet footer()}
+			<button
+				onclick={() => (modal = null)}
+				class="ml-auto rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:bg-slate-800"
+			>
+				Cancel
+			</button>
+			<button
+				onclick={() =>
+					perform(
+						() => post('/api/v1/volumes', { name: restoreName, size: '', fromSnapshot: m.snapshot }),
+						`Volume ${restoreName} restored from ${m.snapshot}`,
+					)}
+				disabled={!validName(restoreName) || busy}
+				class="rounded bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+			>
+				Restore
+			</button>
+		{/snippet}
+	</Modal>
+{:else if modal?.kind === 'delete-snapshot'}
+	{@const m = modal}
+	<ConfirmDialog
+		title="Delete snapshot"
+		{busy}
+		error={modalError}
+		onconfirm={() =>
+			perform(() => del(`/api/v1/snapshots/${m.name}`), `Snapshot ${m.name} deleted`)}
+		onclose={() => (modal = null)}
+	>
+		<p>
+			Snapshot <span class="font-mono text-slate-200">{m.name}</span> will be deleted. Volumes
+			restored from it are unaffected.
+		</p>
+	</ConfirmDialog>
+{/if}

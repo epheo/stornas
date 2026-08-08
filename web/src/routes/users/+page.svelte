@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { app } from '$lib/state.svelte';
 	import { post, del } from '$lib/api';
+	import { toasts } from '$lib/toast.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 
 	type LocalUser = { name: string; role: string; smb: boolean };
 
@@ -22,15 +24,28 @@
 		e.preventDefault();
 		actionError = await post('/api/v1/users', { name, password, role, smb });
 		if (!actionError) {
+			toasts.show(`User ${name} created`, 'success');
 			name = '';
 			password = '';
 			loadUsers();
 		}
 	}
-	async function deleteUser(n: string) {
-		if (!confirm(`Delete user ${n}?`)) return;
-		actionError = await del(`/api/v1/users/${n}`);
-		if (!actionError) loadUsers();
+
+	let deleting = $state('');
+	let deleteError = $state('');
+	let busy = $state(false);
+
+	async function deleteUser() {
+		busy = true;
+		deleteError = '';
+		const err = await del(`/api/v1/users/${deleting}`);
+		busy = false;
+		if (err) deleteError = err;
+		else {
+			toasts.show(`User ${deleting} deleted`, 'success');
+			deleting = '';
+			loadUsers();
+		}
 	}
 </script>
 
@@ -63,7 +78,7 @@
 									{#if u.name !== 'admin'}
 										<button
 											class="rounded bg-red-500/10 px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20"
-											onclick={() => deleteUser(u.name)}
+											onclick={() => ((deleting = u.name), (deleteError = ''))}
 										>
 											delete
 										</button>
@@ -115,3 +130,18 @@
 		</div>
 	{/if}
 </div>
+
+{#if deleting}
+	<ConfirmDialog
+		title="Delete user"
+		{busy}
+		error={deleteError}
+		onconfirm={deleteUser}
+		onclose={() => (deleting = '')}
+	>
+		<p>
+			User <span class="font-mono text-slate-200">{deleting}</span> loses UI and SMB access
+			immediately.
+		</p>
+	</ConfirmDialog>
+{/if}

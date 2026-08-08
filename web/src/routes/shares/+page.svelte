@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { app } from '$lib/state.svelte';
 	import { post, del } from '$lib/api';
+	import { toasts } from '$lib/toast.svelte';
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 
 	const snap = $derived(app.snap);
 	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));
@@ -19,7 +21,6 @@
 	}
 
 	let actionError = $state('');
-	let notice = $state('');
 	let name = $state('');
 	let claim = $state('');
 	let nfsClients = $state('');
@@ -28,7 +29,6 @@
 	async function createShare(e: Event) {
 		e.preventDefault();
 		actionError = '';
-		notice = '';
 		const err = await post('/api/v1/shares', {
 			name,
 			claim,
@@ -37,22 +37,30 @@
 		});
 		if (err) actionError = err;
 		else {
-			notice = `Share ${name} created`;
+			toasts.show(`Share ${name} created`, 'success');
 			name = '';
 		}
 	}
 
-	async function deleteShare(n: string) {
-		if (!confirm(`Delete share ${n}? Clients lose access.`)) return;
-		actionError = await del(`/api/v1/shares/${n}`);
+	let deleting = $state('');
+	let deleteError = $state('');
+	let busy = $state(false);
+
+	async function deleteShare() {
+		busy = true;
+		deleteError = '';
+		const err = await del(`/api/v1/shares/${deleting}`);
+		busy = false;
+		if (err) deleteError = err;
+		else {
+			toasts.show(`Share ${deleting} deleted`, 'success');
+			deleting = '';
+		}
 	}
 </script>
 
 <div class="space-y-6">
 	<h1 class="text-xl font-semibold text-slate-100">Shares</h1>
-
-	{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
-	{#if notice}<p class="text-sm text-emerald-400">{notice}</p>{/if}
 
 	{#if snap.shares.length === 0}
 		<p class="text-sm text-slate-500">No shares yet.</p>
@@ -99,7 +107,7 @@
 								<td class="px-3 py-2">
 									<button
 										class="rounded bg-red-500/10 px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20"
-										onclick={() => deleteShare(s.name)}
+										onclick={() => ((deleting = s.name), (deleteError = ''))}
 									>
 										delete
 									</button>
@@ -138,6 +146,7 @@
 				<label class="flex items-center gap-2 text-sm text-slate-300">
 					<input type="checkbox" bind:checked={smb} /> SMB
 				</label>
+				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
 					type="submit"
@@ -148,3 +157,18 @@
 		</section>
 	{/if}
 </div>
+
+{#if deleting}
+	<ConfirmDialog
+		title="Delete share"
+		{busy}
+		error={deleteError}
+		onconfirm={deleteShare}
+		onclose={() => (deleting = '')}
+	>
+		<p>
+			Share <span class="font-mono text-slate-200">{deleting}</span> will stop being exported;
+			connected clients lose access. The volume and its data stay.
+		</p>
+	</ConfirmDialog>
+{/if}
