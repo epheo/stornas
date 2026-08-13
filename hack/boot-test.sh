@@ -140,6 +140,9 @@ mountpoint = "/"
 minsize = "30 GiB"
 EOF
 sync_rootful_image "$IMAGE" "$PODMAN"
+# Registry weather must not burn a run this long; the pull retries.
+bib_pull() { $PODMAN pull "$BIB_IMAGE"; }
+retry 300 "bootc-image-builder image pulled" bib_pull
 $PODMAN run --rm --privileged \
 	--security-opt label=type:unconfined_t \
 	-v "$WORKDIR/config.toml:/config.toml:ro" \
