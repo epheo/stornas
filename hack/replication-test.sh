@@ -19,6 +19,13 @@
 # node (two replicas cannot form quorum, LINSTOR leaves quorum off, IO
 # must continue), and a resync back to UpToDate when the peer returns.
 #
+# The same kill cycle carries the failover assertions (failure matrix:
+# "node dies, replicated volume"): a Target and a Share active on the
+# worker must re-place to the controller with the VIP answering there,
+# and the returned worker must be fenced clean (no export, no VIP, no
+# mount). Killing the controller is a different matrix row: no operator
+# means no re-placement, only surviving IO.
+#
 # Needs a root-capable podman, qemu-system-x86_64, dnsmasq, and sudo
 # for the bridge/taps. CI-sized: two 5GB VMs.
 set -euo pipefail
@@ -118,6 +125,11 @@ diagnostics() {
 	kc -n stornas-system describe pvc repl-test 2>&1 | sed -n '/Events:/,$p' | tail -8 || true
 	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=25 2>&1 \
 		| grep -iE 'error|fail|capacity' | tail -12 || true
+	log "DIAGNOSTICS: failover placement and host state"
+	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A20 'status:' | tail -40 || true
+	for fn in v1 v2; do
+		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs 2>/dev/null" 2>&1 || true
+	done
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
 	tail -15 "$WORKDIR/console1.log" 2>/dev/null || true
 	tail -15 "$WORKDIR/console2.log" 2>/dev/null || true
@@ -337,12 +349,156 @@ retry 300 "two UpToDate DRBD replicas" replicas_uptodate
 log "writing through the replicated volume"
 kc -n stornas-system exec repl-consumer -- sh -c 'echo before-failover > /data/marker && sync'
 
+VIP=$NET.60
+log "failover setup: a Target and a Share active on node2"
+# Placement follows the DRBD primary and the primary is the first opener,
+# so a consumer pinned to node2 steers initial placement; the agent's own
+# open (LIO backstore, share mount) keeps the device primary after the
+# steering pod goes.
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lun0
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Block
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: share0
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: steer-lun0
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeDevices:
+        - name: v
+          devicePath: /dev/steer
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: lun0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: steer-share0
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: share0
+EOF
+steered() { # steered <pvc>
+	h=$(kc -n stornas-system get pvc "$1" -o jsonpath='{.spec.volumeName}' 2>/dev/null) || return 1
+	[ -n "$h" ] || return 1
+	linstor_cmd resource list -r "$h" 2>/dev/null | grep node2 | grep -q InUse
+}
+lun0_steered() { steered lun0; }
+share0_steered() { steered share0; }
+retry 600 "lun0 primary on node2" lun0_steered
+retry 600 "share0 primary on node2" share0_steered
+
+kc apply -f - <<EOF
+apiVersion: storage.stornas.io/v1alpha1
+kind: Target
+metadata:
+  name: failover
+  namespace: stornas-system
+spec:
+  vip: $VIP/24
+  luns:
+    - id: 0
+      claimName: lun0
+---
+apiVersion: storage.stornas.io/v1alpha1
+kind: Share
+metadata:
+  name: failover
+  namespace: stornas-system
+spec:
+  claimName: share0
+  nfs:
+    clients: ["$NET.0/24(rw,no_root_squash)"]
+EOF
+target_on() { kc -n stornas-system get target failover -o jsonpath='{.status.activeNode} {.status.state}' | grep -qx "$1 Exported"; }
+share_on() { kc -n stornas-system get share failover -o jsonpath='{.status.node} {.status.state}' | grep -qx "$1 Exported"; }
+target_on_node2() { target_on node2; }
+share_on_node2() { share_on node2; }
+retry 300 "target exported from node2" target_on_node2
+retry 300 "share exported from node2" share_on_node2
+vip_up() { # vip_up <vssh-fn>
+	$1 sh -c "ip -j addr show to $VIP | grep -q ifname"
+}
+vip_on_node2() { vip_up v2; }
+retry 120 "VIP held by node2" vip_on_node2
+# The VIP must answer off-node, which is what the GARP buys.
+vip_answers() { timeout 3 bash -c "</dev/tcp/$VIP/3260"; }
+retry 60 "iSCSI reachable on the VIP from the host" vip_answers
+
+# The agent's opens now hold both primaries; the steering pods can go.
+kc -n stornas-system delete pod steer-lun0 steer-share0 --wait
+
 log "killing node2: writes must survive the peer loss"
 sudo kill "$(sudo cat "$WORKDIR/qemu2.pid")"
 sleep 10
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-failover >> /data/marker && sync' \
 	|| die "IO blocked after peer loss (quorum should be off with two replicas)"
 log "ok: IO continued with the peer down"
+
+# Failover: once node2 goes NotReady the operator must re-place both
+# exports to node1 and the agent there must raise the VIP and answer.
+target_on_node1() { target_on node1; }
+share_on_node1() { share_on node1; }
+retry 300 "target re-placed and exported from node1" target_on_node1
+retry 300 "share re-placed and exported from node1" share_on_node1
+vip_on_node1() { vip_up v1; }
+retry 120 "VIP moved to node1" vip_on_node1
+retry 60 "iSCSI reachable on the moved VIP from the host" vip_answers
+share_served_node1() { v1 sh -c 'exportfs | grep -q stornas-system-failover'; }
+retry 60 "NFS export live on node1" share_served_node1
 
 log "restarting node2: replica must resync to UpToDate"
 boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2
@@ -358,6 +514,19 @@ log "data intact after failover cycle"
 kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-failover \
 	|| die "marker written during failover is missing"
 
+# Fencing: the returned ex-primary must shed everything it served, even
+# what target.service restored from saveconfig at boot, and placement
+# must stay put on node1.
+node2_shed_export() { v2 sh -c 'targetcli ls /iscsi 1 2>/dev/null | grep -q stornas:failover && exit 1; exit 0'; }
+node2_shed_vip() { v2 sh -c "ip -j addr show to $VIP | grep -q ifname && exit 1; exit 0"; }
+node2_shed_mount() { v2 sh -c 'findmnt /var/lib/stornas/shares/stornas-system-failover >/dev/null 2>&1 && exit 1; exit 0'; }
+retry 300 "node2 shed the iSCSI export" node2_shed_export
+retry 120 "node2 shed the VIP" node2_shed_vip
+retry 120 "node2 shed the share mount" node2_shed_mount
+target_on node1 || die "target moved off node1 after node2 returned"
+share_on node1 || die "share moved off node1 after node2 returned"
+retry 60 "iSCSI still reachable on the VIP" vip_answers
+
 # Run the packaged check scripts directly (distro multinode-test shape):
 # exactly what greenboot executes, and the stornas check must pass on
 # the controller (full stack) and short-circuit on the worker.
@@ -372,4 +541,4 @@ greenboot_checks() { # greenboot_checks <vssh-fn> <label>
 greenboot_checks v1 controller
 greenboot_checks v2 worker
 
-log "REPLICATION TEST PASSED"
+log "REPLICATION AND FAILOVER TEST PASSED"

@@ -92,8 +92,9 @@ smoke:
 vm-test:
 	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/boot-test.sh
 
-# Two VMs on a shared mcast segment; microshift multinode join; a
-# replicated PVC surviving peer loss and resyncing. Heaviest gate.
+# Two VMs on a shared bridge; microshift multinode join; a replicated
+# PVC surviving peer loss and resyncing; target and share failover with
+# the VIP moving and the returned node fenced. Heaviest gate.
 replication-test:
 	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/replication-test.sh
 
