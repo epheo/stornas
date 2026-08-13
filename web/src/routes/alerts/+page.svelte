@@ -27,7 +27,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each snap.alerts as a (a.namespace + a.object + a.reason + a.lastSeen)}
+					{#each snap.alerts as a (`${a.namespace}/${a.object}/${a.reason}`)}
 						<tr class="border-t border-slate-800/60 align-top">
 							<td class="px-3 py-2 text-xs whitespace-nowrap tabular-nums text-slate-400">
 								{a.lastSeen ? a.lastSeen.slice(0, 19).replace('T', ' ') : '-'}
@@ -64,7 +64,8 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each snap.tasks as t (t.at + t.verb + t.object)}
+						<!-- index key: an audit trail can repeat identical rows in one second -->
+						{#each snap.tasks as t, i (i)}
 							<tr class="border-t border-slate-800/60">
 								<td class="px-3 py-2 text-xs whitespace-nowrap tabular-nums text-slate-400">
 									{t.at ? t.at.slice(0, 19).replace('T', ' ') : '-'}

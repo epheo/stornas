@@ -219,7 +219,7 @@
 				<p class="text-sm text-slate-500">No warnings.</p>
 			{:else}
 				<ul class="space-y-1.5">
-					{#each snap.alerts.slice(0, 5) as a (a.namespace + a.object + a.reason + a.lastSeen)}
+					{#each snap.alerts.slice(0, 5) as a (`${a.namespace}/${a.object}/${a.reason}`)}
 						<li class="flex items-baseline gap-2 text-sm">
 							<span class="shrink-0 text-xs tabular-nums text-slate-500">
 								{a.lastSeen ? a.lastSeen.slice(5, 16).replace('T', ' ') : '-'}
@@ -241,7 +241,8 @@
 				<p class="text-sm text-slate-500">No actions yet.</p>
 			{:else}
 				<ul class="space-y-1.5">
-					{#each snap.tasks.slice(0, 5) as t (t.at + t.verb + t.object)}
+					<!-- index key: an audit trail can repeat identical rows in one second -->
+					{#each snap.tasks.slice(0, 5) as t, i (i)}
 						<li class="flex items-baseline gap-2 text-sm">
 							<span class="shrink-0 text-xs tabular-nums text-slate-500">
 								{t.at ? t.at.slice(5, 16).replace('T', ' ') : '-'}

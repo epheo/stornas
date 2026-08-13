@@ -135,6 +135,9 @@ diagnostics() {
 	for fn in v1 v2; do
 		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs -v 2>/dev/null" 2>&1 || true
 	done
+	log "DIAGNOSTICS: stornas control plane placement and operator log"
+	kc -n stornas-system get pods -o wide 2>&1 || true
+	kc -n stornas-system logs deploy/stornas-operator --tail=30 2>&1 || true
 	log "DIAGNOSTICS: NFS server view on node1"
 	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; findmnt /var/lib/stornas/shares 2>/dev/null; ls /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"

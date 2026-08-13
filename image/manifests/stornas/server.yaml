@@ -92,6 +92,10 @@ spec:
         app.kubernetes.io/name: stornas-server
     spec:
       serviceAccountName: stornas-server
+      # UI down on master loss is the accepted outage (failure matrix);
+      # a worker loss must not take the UI with it.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
       containers:
         - name: server
           image: ghcr.io/epheo/stornas:latest

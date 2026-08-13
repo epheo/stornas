@@ -97,6 +97,12 @@ spec:
         app.kubernetes.io/name: stornas-operator
     spec:
       serviceAccountName: stornas-operator
+      # The operator is the failover brain: on a worker it dies with the
+      # node it should be failing over from, and taint eviction stalls
+      # re-placement for minutes. Master loss is the accepted outage
+      # (failure matrix), worker loss must not be.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
       containers:
         - name: operator
           image: ghcr.io/epheo/stornas-operator:latest

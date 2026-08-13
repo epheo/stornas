@@ -320,12 +320,27 @@ func (s *State) Snapshot() model.Snapshot {
 	for _, u := range reflect.List(s.snapshots) {
 		snap.Snapshots = append(snap.Snapshots, snapshotModel(u))
 	}
+	// One alert per (namespace, object, reason): kubelet emits event
+	// series, and duplicate identities crash the UI's keyed lists.
+	seen := map[string]int{}
 	for _, obj := range s.events.List() {
 		ev, ok := obj.(*corev1.Event)
 		if !ok {
 			continue
 		}
-		snap.Alerts = append(snap.Alerts, alertModel(ev))
+		a := alertModel(ev)
+		key := a.Namespace + "/" + a.Object + "/" + a.Reason
+		if i, ok := seen[key]; ok {
+			prev := &snap.Alerts[i]
+			prev.Count += a.Count
+			if a.LastSeen > prev.LastSeen {
+				prev.LastSeen = a.LastSeen
+				prev.Message = a.Message
+			}
+			continue
+		}
+		seen[key] = len(snap.Alerts)
+		snap.Alerts = append(snap.Alerts, a)
 	}
 	// Newest first, capped: the feed is a trouble log, not an archive.
 	sort.Slice(snap.Alerts, func(i, j int) bool {
