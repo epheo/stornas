@@ -14,6 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
+
+	"github.com/epheo/stornas/internal/mdraid"
 )
 
 // InventoryPublisher refreshes this node's NodeInventory on a fixed tick:
@@ -22,6 +24,8 @@ type InventoryPublisher struct {
 	Client client.Client
 	Node   string
 	Run    Runner
+	// MD marks raid members claimed; they carry no PV, the array does.
+	MD *mdraid.MD
 	// Smart caches verdicts between sweeps and feeds the pool reconciler.
 	Smart *SmartStore
 
@@ -107,6 +111,11 @@ func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Dis
 	claimed := map[string]bool{}
 	for _, line := range splitLines(string(pvout)) {
 		claimed[line] = true
+	}
+	if p.MD != nil {
+		for dev := range p.MD.Members(ctx) {
+			claimed[dev] = true
+		}
 	}
 
 	sweep := p.Smart != nil && time.Since(p.lastSweep) >= smartInterval

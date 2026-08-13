@@ -39,12 +39,9 @@ try {
 
 	if (phase === 'smoke') {
 		await page.getByText('test', { exact: true }).waitFor();
-		await page.getByText('rpool', { exact: true }).waitFor();
-		if ((await page.getByText('Online', { exact: true }).count()) < 2) {
-			throw new Error('expected both pools Online');
-		}
-		if ((await page.getByText('InSync').count()) < 3) {
-			throw new Error('expected all pool members InSync');
+		await page.getByText('Online', { exact: true }).waitFor();
+		if ((await page.getByText('InSync').count()) < 2) {
+			throw new Error('expected both raid members InSync');
 		}
 		// Every page must render its live data without a script error.
 		for (const [link, heading] of [
@@ -71,21 +68,19 @@ try {
 			.getByRole('button', { name: 'replace' })
 			.click();
 		await page
-			.locator('label', { hasText: 'virtio-STORNASD' })
+			.locator('label', { hasText: 'virtio-STORNASC' })
 			.locator('input[type=radio]')
 			.check();
 		await page.getByRole('button', { name: 'Replace disk' }).click();
 		await page
-			.getByRole('heading', { name: 'Replace disk in rpool' })
+			.getByRole('heading', { name: 'Replace disk in test' })
 			.waitFor({ state: 'hidden' });
 	}
 
 	if (phase === 'online') {
 		await page.getByText('Degraded', { exact: true }).waitFor({ state: 'hidden' });
-		await page.getByText('virtio-STORNASD').first().waitFor();
-		if ((await page.getByText('Online', { exact: true }).count()) < 2) {
-			throw new Error('expected both pools Online after replace');
-		}
+		await page.getByText('virtio-STORNASC').first().waitFor();
+		await page.getByText('Online', { exact: true }).waitFor();
 		if (await page.getByText('Missing', { exact: true }).isVisible()) {
 			throw new Error('dead member still shown after replace');
 		}

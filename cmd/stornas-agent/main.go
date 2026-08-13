@@ -13,6 +13,7 @@ import (
 
 	"github.com/epheo/stornas/internal/agent"
 	"github.com/epheo/stornas/internal/lvm"
+	"github.com/epheo/stornas/internal/mdraid"
 )
 
 var version = "dev"
@@ -43,7 +44,8 @@ func main() {
 
 	host := agent.HostRunner{}
 	smart := agent.NewSmartStore()
-	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.NewWithRunner(host), Smart: smart}
+	md := mdraid.NewWithRunner(host)
+	r := &agent.PoolReconciler{Client: mgr.GetClient(), Node: node, LVM: lvm.NewWithRunner(host), MD: md, Smart: smart}
 	if err := r.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func main() {
 	if err := users.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
-	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host, Smart: smart}
+	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host, MD: md, Smart: smart}
 	if err := mgr.Add(inv); err != nil {
 		log.Fatal(err)
 	}

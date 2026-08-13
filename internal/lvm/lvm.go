@@ -58,39 +58,18 @@ func (l *LVM) CreateVG(ctx context.Context, vg string, devices []string) error {
 	return err
 }
 
-func (l *LVM) LVExists(ctx context.Context, vg, lv string) bool {
-	_, err := l.run.Run(ctx, "lvs", vg+"/"+lv)
-	return err == nil
-}
-
 // IsThinPool distinguishes a finished pool from a bare LV left by an
-// interrupted raid build; lv_attr starts with t only for thin pools.
+// interrupted build; lv_attr starts with t only for thin pools.
 func (l *LVM) IsThinPool(ctx context.Context, vg, lv string) bool {
 	out, err := l.run.Run(ctx, "lvs", "--noheadings", "--options", "lv_attr", vg+"/"+lv)
 	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "t")
 }
 
 // CreateThinPool leaves VG headroom: thin metadata grows, and a full VG
-// blocks lvextend during recovery.
-func (l *LVM) CreateThinPool(ctx context.Context, vg, lv, raid string) error {
-	if raid == "" || raid == "none" {
-		_, err := l.run.Run(ctx, "lvcreate", "--type", "thin-pool", "--extents", "90%VG", "--name", lv, vg)
-		return err
-	}
-	// A raid thin pool needs explicit data and metadata LVs; lvcreate
-	// cannot build both in one call. Each step is guarded so a crash
-	// mid-build resumes instead of tripping on the half-made LV.
-	if !l.LVExists(ctx, vg, lv) {
-		if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "85%VG", "--name", lv, vg); err != nil {
-			return err
-		}
-	}
-	if !l.LVExists(ctx, vg, lv+"_meta") {
-		if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "2%VG", "--name", lv+"_meta", vg); err != nil {
-			return err
-		}
-	}
-	_, err := l.run.Run(ctx, "lvconvert", "--yes", "--type", "thin-pool", "--poolmetadata", vg+"/"+lv+"_meta", vg+"/"+lv)
+// blocks lvextend during recovery. Always linear: raid lives in mdadm
+// below the PV, never in LVM (DESIGN.md).
+func (l *LVM) CreateThinPool(ctx context.Context, vg, lv string) error {
+	_, err := l.run.Run(ctx, "lvcreate", "--type", "thin-pool", "--extents", "90%VG", "--name", lv, vg)
 	return err
 }
 
@@ -124,20 +103,8 @@ func (l *LVM) VGReduce(ctx context.Context, vg, dev string) error {
 	return err
 }
 
-func (l *LVM) VGReduceMissing(ctx context.Context, vg string) error {
-	_, err := l.run.Run(ctx, "vgreduce", "--removemissing", vg)
-	return err
-}
-
 func (l *LVM) PVRemove(ctx context.Context, dev string) error {
 	_, err := l.run.Run(ctx, "pvremove", dev)
-	return err
-}
-
-// RepairLV rebuilds a degraded raid (sub-)LV onto free PVs; the caller
-// extends the VG with the replacement first.
-func (l *LVM) RepairLV(ctx context.Context, vg, lv string) error {
-	_, err := l.run.Run(ctx, "lvconvert", "--repair", "--yes", vg+"/"+lv)
 	return err
 }
 

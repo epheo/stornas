@@ -66,10 +66,11 @@ func planDevices(spec []string, resolved map[string]string, pvs []lvm.PV) device
 	return plan
 }
 
-// convergeDevices executes one plan step set. Order matters: the
-// replacement joins first so repair and pvmove have somewhere to go.
-// Raid "none" gets no repair: a missing member there lost data, and only
-// deleting the pool is honest.
+// convergeDevices executes one plan step set for a linear pool; raid
+// membership converges through mdadm instead (ensureRaidPool). Order
+// matters: the replacement joins first so pvmove has somewhere to go.
+// A missing member here lost data, and only deleting the pool is honest,
+// so there is no repair step.
 func convergeDevices(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePool, plan devicePlan) error {
 	vg := pool.VGName()
 	for _, dev := range plan.Add {
@@ -79,17 +80,6 @@ func convergeDevices(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.Stor
 			}
 		}
 		if err := l.VGExtend(ctx, vg, dev); err != nil {
-			return err
-		}
-	}
-	if plan.Missing && pool.Spec.Raid != "" && pool.Spec.Raid != "none" {
-		// The converted thin pool keeps its raid legs as _tdata/_tmeta.
-		for _, sub := range []string{storagev1alpha1.ThinLV + "_tdata", storagev1alpha1.ThinLV + "_tmeta"} {
-			if err := l.RepairLV(ctx, vg, sub); err != nil {
-				return err
-			}
-		}
-		if err := l.VGReduceMissing(ctx, vg); err != nil {
 			return err
 		}
 	}

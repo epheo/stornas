@@ -11,6 +11,7 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 
 	"github.com/epheo/stornas/internal/lvm"
+	"github.com/epheo/stornas/internal/mdraid"
 )
 
 type fakeRunner struct {
@@ -59,6 +60,32 @@ const (
 	lvsIdle    = `{"report":[{"lv":[{"lv_name":"thin","sync_percent":"","copy_percent":""}]}]}`
 )
 
+// seqRunner pops one canned result per invocation of the same command,
+// for flows that read the same state twice (mdadm --detail before and
+// after a convergence step).
+type seqRunner struct {
+	seq   map[string][]result
+	calls []string
+}
+
+func (s *seqRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	cmd := strings.Join(append([]string{name}, args...), " ")
+	s.calls = append(s.calls, cmd)
+	q := s.seq[cmd]
+	if len(q) == 0 {
+		return nil, fmt.Errorf("unexpected command: %s", cmd)
+	}
+	r := q[0]
+	s.seq[cmd] = q[1:]
+	return []byte(r.out), r.err
+}
+
+func (s *seqRunner) RunInput(ctx context.Context, _ string, name string, args ...string) ([]byte, error) {
+	return s.Run(ctx, name, args...)
+}
+
+func mdOf(f Runner) *mdraid.MD { return mdraid.NewWithRunner(f) }
+
 func TestEnsurePoolFreshCreate(t *testing.T) {
 	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
@@ -74,7 +101,7 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 		lvsSyncCmd:             {out: lvsIdle},
 	}}
 
-	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "none", "/dev/sda"))
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "none", "/dev/sda"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,31 +116,10 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 	}
 }
 
-func TestEnsurePoolIdempotent(t *testing.T) {
-	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdb","pv_missing":"","pv_used":"10"}]}]}`
-	f := &fakeRunner{results: map[string]result{
-		"vgs stornas-tank": {},
-		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
-		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
-		"readlink -f /dev/sdb":                                 {out: "/dev/sdb\n"},
-		vgsCmd:                                                 {out: vgsOut},
-		pvsCmd:                                                 {out: pvs},
-		lvsSyncCmd:                                             {out: lvsIdle},
-	}}
-
-	if _, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb")); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "pvcreate") || strings.HasPrefix(c, "vgcreate") || strings.HasPrefix(c, "lvcreate") {
-			t.Fatalf("existing pool must not be recreated: %s", c)
-		}
-	}
-}
-
-// A dead member with no replacement yet stays a Missing report; nothing
-// tries to re-add the corpse or repair without a target.
-func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
+// A dead member with no replacement yet stays a Missing report named by
+// its spec path (pvs prints "[unknown]"); nothing tries to re-add the
+// corpse. Linear pools have no repair: the data is gone.
+func TestEnsurePoolLinearMissingNamesVictim(t *testing.T) {
 	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"[unknown]","pv_missing":"missing","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
 		"vgs stornas-tank": {},
@@ -126,15 +132,13 @@ func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
 		lvsSyncCmd:                                             {out: lvsIdle},
 	}}
 
-	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "none", "/dev/sda", "/dev/sdb"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rep.Health != "Degraded" {
 		t.Fatalf("health = %s", rep.Health)
 	}
-	// The dead PV prints as "[unknown]"; the report must name the spec
-	// device instead, or the UI replace flow cannot address it.
 	missing := ""
 	for _, d := range rep.Devices {
 		if d.State == "Missing" {
@@ -151,58 +155,133 @@ func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
 	}
 }
 
-// The replace flow: spec swapped the dead sdb for sdc. The new disk
-// joins, the raid legs repair, the ghost leaves, and the new member
-// reports Rebuilding with pool-level progress.
-func TestEnsurePoolRepairsWithReplacement(t *testing.T) {
-	pvsBefore := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"[unknown]","pv_missing":"missing","pv_used":"10"}]}]}`
-	pvsAfter := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdc","pv_missing":"","pv_used":"10"}]}]}`
-	lvsSyncing := `{"report":[{"lv":[{"lv_name":"thin_tdata","sync_percent":"37.50","copy_percent":""}]}]}`
-	f := &fakeRunner{results: map[string]result{
-		"vgs stornas-tank": {},
-		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
-		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
-		"readlink -f /dev/sdc":                                 {out: "/dev/sdc\n"},
-		"test -b /dev/sdc":                                     {},
-		"pvs /dev/sdc":                                         {err: errExit},
-		"pvcreate /dev/sdc":                                    {},
-		"vgextend stornas-tank /dev/sdc":                       {},
-		"lvconvert --repair --yes stornas-tank/thin_tdata":     {},
-		"lvconvert --repair --yes stornas-tank/thin_tmeta":     {},
-		"vgreduce --removemissing stornas-tank":                {},
-		vgsCmd:                                                 {out: vgsOut},
-		lvsSyncCmd:                                             {out: lvsSyncing},
-	}}
-	// First pvs read sees the ghost, the re-read after convergence sees
-	// the new member.
-	first := true
-	base := f.results
-	f.results = nil
-	runner := runnerFunc(func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		cmd := strings.Join(append([]string{name}, args...), " ")
-		if cmd == pvsCmd {
-			if first {
-				first = false
-				return []byte(pvsBefore), nil
-			}
-			return []byte(pvsAfter), nil
-		}
-		f.calls = append(f.calls, cmd)
-		r, ok := base[cmd]
-		if !ok {
-			return nil, fmt.Errorf("unexpected command: %s", cmd)
-		}
-		return []byte(r.out), r.err
-	})
+const (
+	mdDetailCmd = "mdadm --detail /dev/md/stornas-tank"
+	mdVgsCmd    = vgsCmd
+	mdHealthy   = `/dev/md/stornas-tank:
+        Raid Level : raid1
+             State : clean
 
-	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(runner), pool("tank", "raid1", "/dev/sda", "/dev/sdc"))
+    Number   Major   Minor   RaidDevice State
+       0     252       16        0      active sync   /dev/sda
+       1     252       32        1      active sync   /dev/sdb
+`
+	mdDegraded = `/dev/md/stornas-tank:
+        Raid Level : raid1
+             State : clean, degraded
+
+    Number   Major   Minor   RaidDevice State
+       0     252       16        0      active sync   /dev/sda
+       -       0        0        1      removed
+`
+	mdRebuilding = `/dev/md/stornas-tank:
+        Raid Level : raid1
+             State : clean, degraded, recovering
+    Rebuild Status : 43% complete
+
+    Number   Major   Minor   RaidDevice State
+       0     252       16        0      active sync   /dev/sda
+       2     252       48        1      spare rebuilding   /dev/sdc
+`
+)
+
+func TestEnsureRaidPoolFreshCreate(t *testing.T) {
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd: {{err: errExit}, {out: mdHealthy}},
+		"mdadm --create /dev/md/stornas-tank --run --force --name=stornas-tank --homehost=stornas --level=raid1 --raid-devices=2 /dev/sda /dev/sdb": {{}},
+		"vgs stornas-tank":                                                   {{err: errExit}},
+		"pvs /dev/md/stornas-tank":                                           {{err: errExit}},
+		"pvcreate /dev/md/stornas-tank":                                      {{}},
+		"vgcreate stornas-tank /dev/md/stornas-tank":                         {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin":               {{err: errExit}},
+		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank": {{}},
+		"readlink -f /dev/sda":                                               {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdb":                                               {{out: "/dev/sdb\n"}},
+		mdVgsCmd:                                                             {{out: vgsOut}},
+	}}
+
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Health != "Online" {
+	if rep.Health != "Online" || len(rep.Devices) != 2 {
+		t.Fatalf("rep = %+v", rep)
+	}
+	for _, d := range rep.Devices {
+		if d.State != "InSync" {
+			t.Fatalf("devices = %+v", rep.Devices)
+		}
+	}
+}
+
+func TestEnsureRaidPoolIdempotent(t *testing.T) {
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}},
+		"vgs stornas-tank": {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
+		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		mdVgsCmd:                                               {{out: vgsOut}},
+	}}
+
+	if _, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.Contains(c, "--create") || strings.HasPrefix(c, "pvcreate") || strings.HasPrefix(c, "lvcreate") {
+			t.Fatalf("existing pool must not be recreated: %s", c)
+		}
+	}
+}
+
+// A pulled disk leaves a removed slot; the report must name the spec
+// device that lost it so the UI replace flow can address the victim.
+func TestEnsureRaidPoolDegradedNamesVictim(t *testing.T) {
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}},
+		"vgs stornas-tank": {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
+		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		"test -b /dev/sdb":                                     {{err: errExit}},
+		mdVgsCmd:                                               {{out: vgsOut}},
+	}}
+
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Health != "Degraded" {
 		t.Fatalf("health = %s", rep.Health)
 	}
-	if rep.Rebuild == nil || *rep.Rebuild != 37 {
+	states := map[string]string{}
+	for _, d := range rep.Devices {
+		states[d.Path] = d.State
+	}
+	if states["/dev/sda"] != "InSync" || states["/dev/sdb"] != "Missing" {
+		t.Fatalf("devices = %+v", rep.Devices)
+	}
+}
+
+// The replace flow with a dead member: the newcomer fills the freed slot
+// via --add and reports Rebuilding with progress.
+func TestEnsureRaidPoolAddsReplacement(t *testing.T) {
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}, {out: mdRebuilding}},
+		"vgs stornas-tank": {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
+		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdc":                                 {{out: "/dev/sdc\n"}},
+		"test -b /dev/sdc":                                     {{}},
+		"mdadm /dev/md/stornas-tank --add /dev/sdc":            {{}},
+		mdVgsCmd: {{out: vgsOut}},
+	}}
+
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Rebuild == nil || *rep.Rebuild != 43 {
 		t.Fatalf("rebuild = %v", rep.Rebuild)
 	}
 	states := map[string]string{}
@@ -214,10 +293,72 @@ func TestEnsurePoolRepairsWithReplacement(t *testing.T) {
 	}
 }
 
-type runnerFunc func(ctx context.Context, name string, args ...string) ([]byte, error)
+// Swapping a live member must go through --replace so redundancy holds
+// while the newcomer rebuilds.
+func TestEnsureRaidPoolLiveReplace(t *testing.T) {
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}, {out: mdRebuilding}},
+		"vgs stornas-tank": {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin":          {{out: "  twi-aotz--\n"}},
+		"readlink -f /dev/sda":                                          {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdc":                                          {{out: "/dev/sdc\n"}},
+		"test -b /dev/sdc":                                              {{}},
+		"mdadm /dev/md/stornas-tank --add-spare /dev/sdc":               {{}},
+		"mdadm /dev/md/stornas-tank --replace /dev/sdb --with /dev/sdc": {{}},
+		mdVgsCmd: {{out: vgsOut}},
+	}}
 
-func (f runnerFunc) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return f(ctx, name, args...)
+	if _, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdc")); err != nil {
+		t.Fatal(err)
+	}
+	replaced := false
+	for _, c := range f.calls {
+		if c == "mdadm /dev/md/stornas-tank --replace /dev/sdb --with /dev/sdc" {
+			replaced = true
+		}
+		if c == "mdadm /dev/md/stornas-tank --add /dev/sdc" {
+			t.Fatalf("live swap must use --replace, not --add: %v", f.calls)
+		}
+	}
+	if !replaced {
+		t.Fatal("live member was not replaced")
+	}
+}
+
+// A faulty member is swept (failed plus detached) before anything joins,
+// and the report shows the freed slot as Missing.
+func TestEnsureRaidPoolSweepsFaulty(t *testing.T) {
+	faulty := `/dev/md/stornas-tank:
+        Raid Level : raid1
+             State : clean, degraded
+
+    Number   Major   Minor   RaidDevice State
+       0     252       16        0      active sync   /dev/sda
+       1     252       32        1      faulty   /dev/sdb
+`
+	f := &seqRunner{seq: map[string][]result{
+		mdDetailCmd:        {{out: faulty}, {out: faulty}, {out: mdDegraded}},
+		"vgs stornas-tank": {{}},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
+		"mdadm /dev/md/stornas-tank --remove failed":           {{}},
+		"mdadm /dev/md/stornas-tank --remove detached":         {{}},
+		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
+		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		"test -b /dev/sdb":                                     {{err: errExit}},
+		mdVgsCmd:                                               {{out: vgsOut}},
+	}}
+
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, d := range rep.Devices {
+		states[d.Path] = d.State
+	}
+	if states["/dev/sdb"] != "Missing" {
+		t.Fatalf("devices = %+v", rep.Devices)
+	}
 }
 
 func TestEnsurePoolFailsClosed(t *testing.T) {
@@ -227,7 +368,7 @@ func TestEnsurePoolFailsClosed(t *testing.T) {
 		"pvcreate /dev/sda": {err: errExit},
 	}}
 
-	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "none", "/dev/sda"))
+	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), mdOf(f), pool("tank", "none", "/dev/sda"))
 	if err == nil {
 		t.Fatal("want error")
 	}

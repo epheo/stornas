@@ -17,6 +17,7 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 
 	"github.com/epheo/stornas/internal/lvm"
+	"github.com/epheo/stornas/internal/mdraid"
 )
 
 // Report is what one convergence pass observed on the host.
@@ -30,11 +31,19 @@ type Report struct {
 	Rebuild *int32
 }
 
-// EnsurePool converges LVM state for one pool and reports what it saw.
+// EnsurePool converges host state for one pool and reports what it saw.
 // It never deletes volumes or shrinks the pool: pool deletion stays a
 // human decision. Membership does converge to spec.devices, which is how
-// a swapped entry (the disk replace flow) reaches the host.
-func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePool) (Report, error) {
+// a swapped entry (the disk replace flow) reaches the host. Raid pools
+// put mdadm below the PV so the thin pool stays linear (DESIGN.md).
+func EnsurePool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1alpha1.StoragePool) (Report, error) {
+	if pool.Spec.Raid == "" || pool.Spec.Raid == "none" {
+		return ensureLinearPool(ctx, l, pool)
+	}
+	return ensureRaidPool(ctx, l, md, pool)
+}
+
+func ensureLinearPool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePool) (Report, error) {
 	vg := pool.VGName()
 	rep := Report{VG: vg, Health: "Failed"}
 
@@ -51,7 +60,7 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 		}
 	}
 	if !l.IsThinPool(ctx, vg, storagev1alpha1.ThinLV) {
-		if err := l.CreateThinPool(ctx, vg, storagev1alpha1.ThinLV, pool.Spec.Raid); err != nil {
+		if err := l.CreateThinPool(ctx, vg, storagev1alpha1.ThinLV); err != nil {
 			return rep, err
 		}
 	}
@@ -67,7 +76,7 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 	plan := planDevices(pool.Spec.Devices, resolved, pvs)
 	// A dead member still in the spec plans as an add; a device absent
 	// from the host cannot join, so it stays a Missing report until the
-	// spec swaps in a real disk. Repair likewise waits for one.
+	// spec swaps in a real disk.
 	live := plan.Add[:0]
 	for _, dev := range plan.Add {
 		if l.IsBlockDev(ctx, dev) {
@@ -75,9 +84,6 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 		}
 	}
 	plan.Add = live
-	if len(plan.Add) == 0 {
-		plan.Missing = false
-	}
 	added := map[string]bool{}
 	if !plan.empty() {
 		if err := convergeDevices(ctx, l, pool, plan); err != nil {
@@ -143,6 +149,135 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 	return rep, nil
 }
 
+func ensureRaidPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1alpha1.StoragePool) (Report, error) {
+	vg := pool.VGName()
+	rep := Report{VG: vg, Health: "Failed"}
+	dev := mdraid.DevPath(pool.Name)
+
+	if !md.Exists(ctx, dev) {
+		if err := md.Create(ctx, dev, "stornas-"+pool.Name, pool.Spec.Raid, pool.Spec.Devices); err != nil {
+			return rep, err
+		}
+	}
+	if !l.VGExists(ctx, vg) {
+		if !l.IsPV(ctx, dev) {
+			if err := l.CreatePV(ctx, dev); err != nil {
+				return rep, err
+			}
+		}
+		if err := l.CreateVG(ctx, vg, []string{dev}); err != nil {
+			return rep, err
+		}
+	}
+	if !l.IsThinPool(ctx, vg, storagev1alpha1.ThinLV) {
+		if err := l.CreateThinPool(ctx, vg, storagev1alpha1.ThinLV); err != nil {
+			return rep, err
+		}
+	}
+
+	detail, err := md.Detail(ctx, dev)
+	if err != nil {
+		return rep, err
+	}
+	// Faulty and vanished members leave first so their slots free up for
+	// the newcomer the replace flow put in the spec.
+	for _, mb := range detail.Members {
+		if mb.State == "Failed" {
+			if err := md.RemoveFailed(ctx, dev); err != nil {
+				return rep, err
+			}
+			if detail, err = md.Detail(ctx, dev); err != nil {
+				return rep, err
+			}
+			break
+		}
+	}
+
+	resolved := map[string]string{}
+	for _, d := range pool.Spec.Devices {
+		resolved[d] = l.ResolvePath(ctx, d)
+	}
+	members := map[string]bool{}
+	inSpec := map[string]bool{}
+	for _, mb := range detail.Members {
+		if mb.Path != "" {
+			members[mb.Path] = true
+		}
+	}
+	for _, d := range pool.Spec.Devices {
+		inSpec[resolved[d]] = true
+	}
+	for _, d := range pool.Spec.Devices {
+		if members[resolved[d]] || !l.IsBlockDev(ctx, d) {
+			continue
+		}
+		// A live member outside the spec means a healthy disk is being
+		// swapped: --replace rebuilds onto the newcomer before failing
+		// it, so redundancy never drops. Otherwise the newcomer fills a
+		// freed slot.
+		old := ""
+		for _, mb := range detail.Members {
+			if mb.Path != "" && mb.State == "InSync" && !inSpec[mb.Path] {
+				old = mb.Path
+				break
+			}
+		}
+		if old != "" {
+			err = md.Replace(ctx, dev, old, d)
+		} else {
+			err = md.Add(ctx, dev, d)
+		}
+		if err != nil {
+			return rep, err
+		}
+		if detail, err = md.Detail(ctx, dev); err != nil {
+			return rep, err
+		}
+	}
+
+	info, err := l.VGInfo(ctx, vg)
+	if err != nil {
+		return rep, err
+	}
+	rep.Capacity = info.SizeBytes
+	rep.Free = info.FreeBytes
+	rep.Rebuild = detail.SyncPercent
+	rep.Health = "Online"
+	if detail.Degraded {
+		rep.Health = "Degraded"
+	}
+
+	// Slots whose disk is gone carry no kernel path (and a pulled disk's
+	// by-id no longer resolves); pair them with the spec devices that
+	// lost their disk so the replace flow can name the victim.
+	kernelToSpec := map[string]string{}
+	for d, r := range resolved {
+		kernelToSpec[r] = d
+	}
+	presentSpec := map[string]bool{}
+	for _, mb := range detail.Members {
+		if sp, ok := kernelToSpec[mb.Path]; ok && mb.Path != "" {
+			presentSpec[sp] = true
+		}
+	}
+	var orphaned []string
+	for _, d := range pool.Spec.Devices {
+		if !presentSpec[d] {
+			orphaned = append(orphaned, d)
+		}
+	}
+	for _, mb := range detail.Members {
+		path := mb.Path
+		if sp, ok := kernelToSpec[mb.Path]; ok && mb.Path != "" {
+			path = sp
+		} else if mb.State != "InSync" && len(orphaned) > 0 {
+			path, orphaned = orphaned[0], orphaned[1:]
+		}
+		rep.Devices = append(rep.Devices, storagev1alpha1.DeviceStatus{Path: path, State: mb.State})
+	}
+	return rep, nil
+}
+
 // PoolReconciler runs on every node and acts only on pools whose spec.node
 // matches; filtering happens here, not in the watch, so a mislabeled pool
 // is visibly ignored rather than silently unwatched.
@@ -150,6 +285,7 @@ type PoolReconciler struct {
 	client.Client
 	Node string
 	LVM  *lvm.LVM
+	MD   *mdraid.MD
 	// Smart joins the inventory sweep's verdicts onto device status.
 	Smart *SmartStore
 }
@@ -170,7 +306,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	rep, ensureErr := EnsurePool(ctx, r.LVM, &pool)
+	rep, ensureErr := EnsurePool(ctx, r.LVM, r.MD, &pool)
 
 	if r.Smart != nil {
 		for i := range rep.Devices {

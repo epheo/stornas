@@ -105,9 +105,13 @@ status:
     - {path: ..., serial: ..., smart: Passed, state: InSync}
 ```
 
-Proposal: LVM raid types instead of a separate mdadm layer.
-Same md kernel code, one fewer tool for the agent to drive.
-Open question below.
+Raid lives in mdadm below the PV: disks form one md array, the VG sits
+on it, and the thin pool stays linear.
+Each layer has one owner; LINSTOR only ever sees a linear thin pool on a
+single plain device, the configuration its containerized satellite can
+always activate.
+The md state model (active, faulty, spare rebuilding, /proc/mdstat
+progress) maps directly onto device status and rebuildPercent.
 
 ### Target (iSCSI)
 
@@ -227,11 +231,10 @@ hack/
 
 ## Open questions
 
-- LVM raid vs mdadm: proposal is LVM raid; mdadm tooling is more battle-worn.
-  Evidence 2026-08-13: the LINSTOR satellite cannot activate a raid-backed
-  thin pool from inside its container (rmeta create ioctl: busy), so a raid
-  pool cannot back the CSI pool today. mdadm under the PV would sidestep
-  that; until decided, raid pools serve only non-CSI use.
+- LVM raid vs mdadm: decided 2026-08-13, mdadm under the PV. The LINSTOR
+  satellite cannot activate a raid-backed thin pool from its container
+  (rmeta create ioctl: busy), and md is the battle-worn path every NAS
+  incumbent ships.
 - VIP mechanics: decided, agent-managed ip addr plus GARP; no keepalived.
 - NFS: kernel nfsd (proposal) vs ganesha in a pod.
 - LIO: drive configfs from Go in the agent, or shell out to targetcli. Proposal: configfs.

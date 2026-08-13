@@ -39,7 +39,7 @@ func TestPoolReconcilerKeepsDevicesOnTransientError(t *testing.T) {
 		"pvs /dev/sda":      {err: errExit},
 		"pvcreate /dev/sda": {err: errExit},
 	}}
-	r := &PoolReconciler{Client: c, Node: "node-a", LVM: lvm.NewWithRunner(f)}
+	r := &PoolReconciler{Client: c, Node: "node-a", LVM: lvm.NewWithRunner(f), MD: mdOf(f)}
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "tank"}}
 	if _, err := r.Reconcile(context.Background(), req); err == nil {
