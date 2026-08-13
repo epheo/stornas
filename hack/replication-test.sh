@@ -570,6 +570,9 @@ retry 120 "NFS client wrote and read back" nfs_io
 
 log "iSCSI client login with CHAP from node2 via the VIP"
 TIQN=iqn.2026-08.io.stornas:failover
+# iscsi-init generates the IQN on first boot only when its unit runs;
+# generate directly when absent.
+v2 sh -c '[ -f /etc/iscsi/initiatorname.iscsi ] || printf "InitiatorName=%s\n" "$(iscsi-iname)" > /etc/iscsi/initiatorname.iscsi'
 INI=$(v2 sh -c "sed -n 's/^InitiatorName=//p' /etc/iscsi/initiatorname.iscsi")
 [ -n "$INI" ] || die "node2 has no initiator IQN"
 kc -n stornas-system create secret generic e2e-chap \
