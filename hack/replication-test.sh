@@ -148,8 +148,8 @@ diagnostics() {
 	v1 sh -c 'mkdir -p /mnt/nfs-self && mount -t nfs -o nfsvers=4.2 localhost:/stornas-system-failover /mnt/nfs-self && echo self-mount-ok; umount /mnt/nfs-self 2>/dev/null; true' 2>&1 || true
 	v2 sh -c "mkdir -p /mnt/nfs-root && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/ /mnt/nfs-root && find /mnt/nfs-root -maxdepth 5 2>/dev/null | head -15; umount /mnt/nfs-root 2>/dev/null; true" 2>&1 || true
 	log "DIAGNOSTICS: iSCSI target tree, auth attributes, one verbose login"
-	v1 sh -c "targetcli ls /iscsi/${TIQN:-none} 3 2>/dev/null; targetcli /iscsi/${TIQN:-none}/tpg1 get attribute authentication generate_node_acls demo_mode_write_protect 2>/dev/null" 2>&1 || true
-	v2 sh -c "iscsiadm -m discovery -t sendtargets -p ${VIP:-127.0.0.1} 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 --login 2>&1; iscsiadm -m session 2>&1; dmesg | grep -i iscsi | tail -8" 2>&1 || true
+	v1 sh -c "targetcli ls /iscsi/${TIQN:-none} 3 2>/dev/null; targetcli /iscsi/${TIQN:-none}/tpg1 get attribute authentication generate_node_acls demo_mode_write_protect 2>/dev/null; targetcli /iscsi/${TIQN:-none}/tpg1/acls/${INI:-none} get auth 2>/dev/null" 2>&1 || true
+	v2 sh -c "iscsiadm -m discovery -t sendtargets -p ${VIP:-127.0.0.1} 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.authmethod -v CHAP 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.username -v e2e 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.password -v e2echappass123 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 --login 2>&1; iscsiadm -m session 2>&1; dmesg | grep -iE 'iscsi|chap' | tail -8" 2>&1 || true
 	log "DIAGNOSTICS: AVC denials on node1"
 	v1 sh -c 'ausearch -m avc -ts recent 2>/dev/null | tail -15 || dmesg | grep -i avc | tail -15' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
