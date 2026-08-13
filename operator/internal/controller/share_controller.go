@@ -73,7 +73,6 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		ObservedGeneration: share.Generation,
 	}
 	res := ctrl.Result{}
-	var retErr error
 
 	handle, reason, msg := claimHandle(ctx, r.Client, share.Namespace, share.Spec.ClaimName)
 	switch {
@@ -95,9 +94,12 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		node, device, _, err := r.Linstor.ResolvePlacement(ctx, handle, share.Status.Node, avoid)
 		if err != nil {
+			// Flat requeue, not an error: LINSTOR heals on its own
+			// schedule, and exponential backoff would strand placement
+			// for minutes after it recovers; failover cannot wait that.
 			available.Reason = storagev1alpha1.ReasonLinstorError
 			available.Message = err.Error()
-			retErr = err
+			res.RequeueAfter = volumeSettleInterval
 			break
 		}
 		moved := share.Status.Node != "" && share.Status.Node != node
@@ -131,7 +133,7 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		return ctrl.Result{}, err
 	}
-	return res, retErr
+	return res, nil
 }
 
 // allShares re-reconciles every share on a node readiness flip; the fleet

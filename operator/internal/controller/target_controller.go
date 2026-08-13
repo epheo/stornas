@@ -64,10 +64,10 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		ObservedGeneration: target.Generation,
 	}
 	res := ctrl.Result{}
-	var retErr error
 
 	target.Status.IQN = storagev1alpha1.IQNPrefix + target.Name
 
+	linstorFailed := false
 	handles := make([]string, 0, len(target.Spec.LUNs))
 	reason, msg := "", ""
 	for _, lun := range target.Spec.LUNs {
@@ -101,9 +101,13 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		for i, h := range handles {
 			n, device, replicas, err := r.Linstor.ResolvePlacement(ctx, h, target.Status.ActiveNode, avoid)
 			if err != nil {
+				// Flat requeue, not an error: LINSTOR heals on its own
+				// schedule, and exponential backoff would strand
+				// placement for minutes after it recovers.
 				available.Reason = storagev1alpha1.ReasonLinstorError
 				available.Message = err.Error()
-				retErr = err
+				res.RequeueAfter = volumeSettleInterval
+				linstorFailed = true
 				break
 			}
 			if i == 0 {
@@ -113,7 +117,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			luns = append(luns, storagev1alpha1.LUNStatus{ID: target.Spec.LUNs[i].ID, Device: device})
 		}
 		switch {
-		case retErr != nil:
+		case linstorFailed:
 
 		case replicated && target.Spec.VIP == "":
 			// Without a VIP initiators cannot follow a failover, so a
@@ -154,7 +158,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 		return ctrl.Result{}, err
 	}
-	return res, retErr
+	return res, nil
 }
 
 // allTargets re-reconciles every target on a node readiness flip; the

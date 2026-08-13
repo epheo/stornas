@@ -194,8 +194,11 @@ var _ = Describe("Target Controller", func() {
 
 		placer := &fakePlacer{err: fmt.Errorf("controller unreachable")}
 		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "erring-target"}})
-		Expect(err).To(HaveOccurred())
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "erring-target"}})
+		// Flat requeue, no error: exponential backoff would strand
+		// placement long after LINSTOR recovers.
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(volumeSettleInterval))
 
 		got := &storagev1alpha1.Target{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "erring-target"}, got)).To(Succeed())

@@ -156,7 +156,7 @@ var _ = Describe("Share Controller", func() {
 		Expect(meta.IsStatusConditionTrue(share.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
 	})
 
-	It("surfaces placement errors and retries", func() {
+	It("surfaces placement errors and retries on a flat interval", func() {
 		boundClaim("erring", "pvc-erring-1")
 		Expect(k8sClient.Create(ctx, newShare("erring", "erring"))).To(Succeed())
 		defer func() {
@@ -164,9 +164,15 @@ var _ = Describe("Share Controller", func() {
 		}()
 
 		placer := &fakePlacer{err: fmt.Errorf("controller unreachable")}
-		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "erring")
-		Expect(err).To(HaveOccurred())
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "erring"}})
+		// Flat requeue, no error: exponential backoff would strand
+		// placement long after LINSTOR recovers.
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(volumeSettleInterval))
 
+		share := &storagev1alpha1.Share{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "erring"}, share)).To(Succeed())
 		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
