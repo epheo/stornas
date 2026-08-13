@@ -109,6 +109,20 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 	for dev, r := range resolved {
 		specPath[r] = dev
 	}
+	// pvs names a dead member "[unknown]"; pair it with the spec device
+	// that lost its disk, or the replace flow cannot name the victim.
+	presentSpec := map[string]bool{}
+	for _, pv := range pvs {
+		if sp, ok := specPath[pv.Name]; ok && !pv.Missing {
+			presentSpec[sp] = true
+		}
+	}
+	var orphaned []string
+	for _, dev := range pool.Spec.Devices {
+		if !presentSpec[dev] {
+			orphaned = append(orphaned, dev)
+		}
+	}
 	for _, pv := range pvs {
 		state := "InSync"
 		switch {
@@ -121,6 +135,8 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 		path := pv.Name
 		if sp, ok := specPath[pv.Name]; ok {
 			path = sp
+		} else if pv.Missing && len(orphaned) > 0 {
+			path, orphaned = orphaned[0], orphaned[1:]
 		}
 		rep.Devices = append(rep.Devices, storagev1alpha1.DeviceStatus{Path: path, State: state})
 	}

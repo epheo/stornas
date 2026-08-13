@@ -42,16 +42,54 @@ type lsblkReport struct {
 		Size   int64  `json:"size"`
 		Rota   bool   `json:"rota"`
 		Type   string `json:"type"`
-		WWN    string `json:"wwn"`
 	} `json:"blockdevices"`
 }
 
+// byIDAliases maps kernel paths to a stable /dev/disk/by-id name: wwn
+// wins, then the first alias alphabetically (virtio-, ata-, scsi-, ...).
+// lvm-pv aliases churn with pool membership and never qualify. Best
+// effort: on failure disks keep their kernel paths.
+func (p *InventoryPublisher) byIDAliases(ctx context.Context) map[string]string {
+	out, err := p.Run.Run(ctx, "find", "/dev/disk/by-id", "-maxdepth", "1",
+		"-type", "l", "-printf", "%f %l\n")
+	if err != nil {
+		return nil
+	}
+	better := func(name, cur string) bool {
+		if cur == "" {
+			return true
+		}
+		nw, cw := strings.HasPrefix(name, "wwn-"), strings.HasPrefix(cur, "wwn-")
+		if nw != cw {
+			return nw
+		}
+		return name < cur
+	}
+	best := map[string]string{}
+	for _, line := range splitLines(string(out)) {
+		name, target, ok := strings.Cut(line, " ")
+		if !ok || strings.HasPrefix(name, "lvm-pv-uuid-") {
+			continue
+		}
+		kernel := "/dev/" + target[strings.LastIndex(target, "/")+1:]
+		if better(name, best[kernel]) {
+			best[kernel] = name
+		}
+	}
+	aliases := make(map[string]string, len(best))
+	for kernel, name := range best {
+		aliases[kernel] = "/dev/disk/by-id/" + name
+	}
+	return aliases
+}
+
 // Collect lists whole disks and marks the ones already carrying an LVM PV.
-// The by-id WWN path is preferred: /dev/sdX names reshuffle across boots
-// and StoragePool.spec.devices is immutable.
+// The by-id path is preferred: /dev/sdX names reshuffle across boots and
+// StoragePool.spec.devices is immutable, so the UI must never offer a
+// kernel path when a stable alias exists.
 func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Disk, error) {
 	out, err := p.Run.Run(ctx, "lsblk", "--json", "-b", "-d",
-		"-o", "PATH,MODEL,SERIAL,SIZE,ROTA,TYPE,WWN")
+		"-o", "PATH,MODEL,SERIAL,SIZE,ROTA,TYPE")
 	if err != nil {
 		return nil, err
 	}
@@ -76,14 +114,15 @@ func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Dis
 		p.lastSweep = time.Now()
 	}
 
+	aliases := p.byIDAliases(ctx)
 	var disks []storagev1alpha1.Disk
 	for _, d := range rep.BlockDevices {
 		if d.Type != "disk" {
 			continue
 		}
 		path := d.Path
-		if d.WWN != "" {
-			path = "/dev/disk/by-id/wwn-" + d.WWN
+		if a := aliases[d.Path]; a != "" {
+			path = a
 		}
 		disk := storagev1alpha1.Disk{
 			Path:       path,

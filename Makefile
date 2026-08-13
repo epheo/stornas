@@ -36,7 +36,7 @@ test:
 	$(MAKE) -C operator test
 
 web:
-	cd web && npm run format:check && npm run check && npm run build
+	cd web && npm run format:check && npm run check && npm run test && npm run build
 
 # App images, built into local podman storage under their runtime names.
 images: web

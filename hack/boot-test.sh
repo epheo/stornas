@@ -19,8 +19,9 @@
 # before the DHCPv4 lease and MicroShift then picks IPv6 single-stack,
 # where OVN-K never reaches node readiness.
 #
-# Needs a root-capable podman (PODMAN='sudo podman' in CI) and
-# qemu-system-x86_64. KVM is used when present, TCG otherwise.
+# Needs a root-capable podman (PODMAN='sudo podman' in CI),
+# qemu-system-x86_64, and playwright's chromium for the UI phases
+# (cd web && npx playwright install chromium). KVM when present.
 set -euo pipefail
 # shellcheck source=hack/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -253,6 +254,15 @@ curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
 curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
 
+# Real-browser pass over every page; needs playwright's chromium
+# (npx playwright install chromium, once per machine).
+ui_phase() { # ui_phase <smoke|degraded-replace|online>
+	UI_URL="http://127.0.0.1:$UI_PORT" ADMIN_PW="$ADMIN_PW" node web/e2e/ui.mjs "$1" \
+		|| die "UI phase $1 failed"
+}
+log "UI renders live data in a real browser"
+ui_phase smoke
+
 log "snapshot and restore through the appliance API"
 curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d '{"name":"boot-snap","volume":"boot-test"}' \
@@ -298,19 +308,8 @@ kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull >> /data
 	|| die "IO blocked on a degraded raid1 pool"
 log "ok: IO continued on the degraded pool"
 
-log "replace flow: the spec swaps the dead member for the spare"
-kc apply -f - <<EOF
-apiVersion: storage.stornas.io/v1alpha1
-kind: StoragePool
-metadata:
-  name: test
-spec:
-  node: $NODE
-  devices:
-    - /dev/disk/by-id/virtio-STORNASTEST
-    - /dev/disk/by-id/virtio-STORNASC
-  raid: raid1
-EOF
+log "replace flow through the UI: pick the spare in the dialog"
+ui_phase degraded-replace
 pool_online() { pool_health Online; }
 retry 600 "pool back Online after rebuild" pool_online
 spare_insync() { device_state /dev/disk/by-id/virtio-STORNASC InSync; }
@@ -319,6 +318,7 @@ kc get storagepool test -o jsonpath='{.status.devices[*].state}' | grep -q Missi
 	&& die "dead member still reported after replace"
 kc -n stornas-system exec boot-test-consumer -- cat /data/marker | grep -q during-pull \
 	|| die "marker written on the degraded pool is missing"
+ui_phase online
 
 # The air-gap contract: every ref in the embedded manifest must come
 # from the store, never a registry. The drbd9-* loader is deliberately

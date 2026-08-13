@@ -133,6 +133,17 @@ func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
 	if rep.Health != "Degraded" {
 		t.Fatalf("health = %s", rep.Health)
 	}
+	// The dead PV prints as "[unknown]"; the report must name the spec
+	// device instead, or the UI replace flow cannot address it.
+	missing := ""
+	for _, d := range rep.Devices {
+		if d.State == "Missing" {
+			missing = d.Path
+		}
+	}
+	if missing != "/dev/sdb" {
+		t.Fatalf("missing device reported as %q, want /dev/sdb", missing)
+	}
 	for _, c := range f.calls {
 		if strings.HasPrefix(c, "lvconvert") || strings.HasPrefix(c, "vgreduce") || strings.HasPrefix(c, "pvcreate") {
 			t.Fatalf("no replacement present, must not act: %s", c)
