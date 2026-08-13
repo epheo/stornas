@@ -142,6 +142,11 @@ diagnostics() {
 	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; ls -Z /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: one verbose NFS mount attempt from node2"
 	v2 sh -c "mkdir -p /mnt/nfs-diag && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-diag; umount /mnt/nfs-diag 2>/dev/null; true" 2>&1 || true
+	log "DIAGNOSTICS: who owns 2049 on node1, kernel export cache, mountd log"
+	v1 sh -c 'ss -tlnp | grep 2049; cat /proc/net/rpc/nfsd.export/content 2>/dev/null; journalctl -u nfs-mountd --no-pager -n 15 2>/dev/null' 2>&1 || true
+	log "DIAGNOSTICS: self-mount on node1 and pseudo-root walk from node2"
+	v1 sh -c 'mkdir -p /mnt/nfs-self && mount -t nfs -o nfsvers=4.2 localhost:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-self && echo self-mount-ok; umount /mnt/nfs-self 2>/dev/null; true' 2>&1 || true
+	v2 sh -c "mkdir -p /mnt/nfs-root && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/ /mnt/nfs-root && find /mnt/nfs-root -maxdepth 5 2>/dev/null | head -15; umount /mnt/nfs-root 2>/dev/null; true" 2>&1 || true
 	log "DIAGNOSTICS: AVC denials on node1"
 	v1 sh -c 'ausearch -m avc -ts recent 2>/dev/null | tail -15 || dmesg | grep -i avc | tail -15' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
