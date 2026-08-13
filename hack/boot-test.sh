@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Boot acceptance test, same harness shape as the microshift distro's
 # scripts/vm-test.sh: bootc-image-builder turns the bootc image into a
-# qcow2 with a root ssh key baked in, plain qemu-system boots it with a
-# scratch disk, ssh rides a user-net hostfwd, and the console log is the
+# qcow2 with a root ssh key baked in, plain qemu-system boots it with
+# scratch disks, ssh rides a user-net hostfwd, and the console log is the
 # failure artifact. On top of the distro's boot checks this validates the
-# storage stack: drbd kmod, piraeus + LINSTOR, a StoragePool converging on
-# the scratch disk, a PVC binding through LINSTOR CSI, and the UI.
+# storage stack: drbd kmod, piraeus + LINSTOR, a raid1 StoragePool
+# converging on two scratch disks, a PVC binding through LINSTOR CSI, the
+# UI, and the disk failure matrix row: a member hot-unplugged over QMP
+# must degrade the pool with IO continuing, and the spec-driven replace
+# flow must rebuild onto the spare and return the pool to Online.
 #
 # The guest boots with restrict=on by default: no outbound at all, only
 # the hostfwd ports in (DESIGN.md air gap; the distro embeds the full
@@ -51,6 +54,9 @@ diagnostics() {
 	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-snapshotter --tail=20 2>&1 | tail -15 || true
 	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor snapshot list 2>&1 || true
 	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err list 2>&1 | tail -15 || true
+	log "DIAGNOSTICS: pool and LVM state"
+	kc get storagepool test -o yaml 2>&1 | sed -n '/status:/,$p' | tail -30 || true
+	vssh sh -c 'pvs; lvs -a -o name,attr,sync_percent,devices' 2>&1 || true
 	log "DIAGNOSTICS: import-embedded-images"
 	vssh journalctl -u import-embedded-images --no-pager 2>&1 | tail -10 || true
 	log "DIAGNOSTICS: crio image pulls"
@@ -85,6 +91,23 @@ vssh() {
 		root@127.0.0.1 "$(printf '%q ' "$@")"
 }
 kc() { vssh kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
+
+# One QMP command per connection; python3 because the runner has no socat.
+qmp() { # qmp <json-execute-line>
+	python3 - "$WORKDIR/qmp.sock" "$1" <<'PY'
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+f = s.makefile("rw")
+f.readline()
+f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n")
+f.flush()
+f.readline()
+f.write(sys.argv[2] + "\n")
+f.flush()
+print(f.readline())
+PY
+}
 
 node_ready() { kc get nodes --no-headers | grep -q ' Ready'; }
 piraeus_up() { kc -n piraeus-datastore get deploy piraeus-operator-controller-manager -o jsonpath='{.status.availableReplicas}' | grep -q 1; }
@@ -121,8 +144,10 @@ DISK="$WORKDIR/output/qcow2/disk.qcow2"
 [ -f "$DISK" ] || DISK=$(find "$WORKDIR/output" -name '*.qcow2' | head -1)
 [ -n "$DISK" ] || die "bootc-image-builder produced no qcow2"
 
-log "booting the appliance with a scratch disk"
-truncate -s 20G "$WORKDIR/scratch.raw"
+log "booting the appliance with raid members and a spare"
+for d in scratch raidb spare; do
+	truncate -s 10G "$WORKDIR/$d.raw"
+done
 ACCEL=tcg
 [ -w /dev/kvm ] && ACCEL=kvm
 # bootc disks are UEFI; SeaBIOS sits at a blank screen with no serial
@@ -140,7 +165,12 @@ qemu-system-x86_64 \
 	-drive "if=pflash,format=raw,file=$WORKDIR/ovmf-vars.fd" \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
-	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST \
+	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST,id=disk-a \
+	-drive "file=$WORKDIR/raidb.raw,if=none,format=raw,id=raidb" \
+	-device virtio-blk-pci,drive=raidb,serial=STORNASB,id=disk-b \
+	-drive "file=$WORKDIR/spare.raw,if=none,format=raw,id=spare" \
+	-device virtio-blk-pci,drive=spare,serial=STORNASC,id=disk-c \
+	-qmp "unix:$WORKDIR/qmp.sock,server=on,wait=off" \
 	-netdev "user,id=n0,ipv6=off$([ "$AIRGAP" = 1 ] && echo ,restrict=on),hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
 	-device virtio-rng-pci \
@@ -163,7 +193,7 @@ retry 900 "linstor controller up" controller_up
 retry 900 "linstor satellite up" satellite_up
 retry 600 "stornas operator, agent, server running" stornas_up
 
-log "creating a StoragePool on the scratch disk"
+log "creating a raid1 StoragePool on the two members"
 NODE=$(kc get nodes --no-headers | awk '{print $1}')
 kc apply -f - <<EOF
 apiVersion: storage.stornas.io/v1alpha1
@@ -172,8 +202,10 @@ metadata:
   name: test
 spec:
   node: $NODE
-  devices: ["/dev/disk/by-id/virtio-STORNASTEST"]
-  raid: none
+  devices:
+    - /dev/disk/by-id/virtio-STORNASTEST
+    - /dev/disk/by-id/virtio-STORNASB
+  raid: raid1
 EOF
 retry 600 "storage pool Available" pool_available
 
@@ -254,6 +286,39 @@ spec:
 EOF
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
+
+log "pulling a raid1 member: pool degrades, IO continues"
+kc -n stornas-system exec boot-test-consumer -- sh -c 'echo before-pull > /data/marker && sync'
+qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}'
+pool_health() { kc get storagepool test -o jsonpath='{.status.health}' | grep -qx "$1"; }
+device_state() { kc get storagepool test -o jsonpath="{.status.devices[?(@.path=='$1')].state}" | grep -qx "$2"; }
+pool_degraded() { pool_health Degraded; }
+retry 300 "pool Degraded" pool_degraded
+kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull >> /data/marker && sync' \
+	|| die "IO blocked on a degraded raid1 pool"
+log "ok: IO continued on the degraded pool"
+
+log "replace flow: the spec swaps the dead member for the spare"
+kc apply -f - <<EOF
+apiVersion: storage.stornas.io/v1alpha1
+kind: StoragePool
+metadata:
+  name: test
+spec:
+  node: $NODE
+  devices:
+    - /dev/disk/by-id/virtio-STORNASTEST
+    - /dev/disk/by-id/virtio-STORNASC
+  raid: raid1
+EOF
+pool_online() { pool_health Online; }
+retry 600 "pool back Online after rebuild" pool_online
+spare_insync() { device_state /dev/disk/by-id/virtio-STORNASC InSync; }
+retry 120 "spare InSync" spare_insync
+kc get storagepool test -o jsonpath='{.status.devices[*].state}' | grep -q Missing \
+	&& die "dead member still reported after replace"
+kc -n stornas-system exec boot-test-consumer -- cat /data/marker | grep -q during-pull \
+	|| die "marker written on the degraded pool is missing"
 
 # The air-gap contract: every ref in the embedded manifest must come
 # from the store, never a registry. The drbd9-* loader is deliberately

@@ -26,6 +26,11 @@
 # mount). Killing the controller is a different matrix row: no operator
 # means no re-placement, only surviving IO.
 #
+# After the failover cycle: real client IO (NFS mount, iSCSI CHAP login)
+# against the moved exports, the 2-node split-brain row (bridge port
+# isolation, forced divergence, pick-survivor through the API), and the
+# controller-down row (IO continues, provisioning blocks and recovers).
+#
 # Needs a root-capable podman, qemu-system-x86_64, dnsmasq, and sudo
 # for the bridge/taps. CI-sized: two 5GB VMs.
 set -euo pipefail
@@ -533,6 +538,140 @@ retry 120 "node2 shed the share mount" node2_shed_mount
 target_on node1 || die "target moved off node1 after node2 returned"
 share_on node1 || die "share moved off node1 after node2 returned"
 retry 60 "iSCSI still reachable on the VIP" vip_answers
+
+# Real clients against the failed-over exports: reachability proves the
+# wiring, only IO proves the product.
+log "NFS client IO from node2 against the node1 export"
+v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs $IP1:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e" \
+	|| die "NFS client IO failed"
+log "ok: NFS client wrote and read back"
+
+log "iSCSI client login with CHAP from node2 via the VIP"
+TIQN=iqn.2026-08.io.stornas:failover
+INI=$(v2 sh -c "sed -n 's/^InitiatorName=//p' /etc/iscsi/initiatorname.iscsi")
+[ -n "$INI" ] || die "node2 has no initiator IQN"
+kc -n stornas-system create secret generic e2e-chap \
+	--from-literal=username=e2e --from-literal=password=e2echappass123
+kc -n stornas-system patch target failover --type merge \
+	-p "{\"spec\":{\"initiators\":[{\"iqn\":\"$INI\",\"chapSecretRef\":\"e2e-chap\"}]}}"
+v2 systemctl start iscsid
+iscsi_login() {
+	v2 sh -c "iscsiadm -m discovery -t sendtargets -p $VIP >/dev/null \
+		&& iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.authmethod -v CHAP \
+		&& iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.username -v e2e \
+		&& iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v e2echappass123 \
+		&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login"
+}
+# The first attempts race the agent converging the new ACL.
+retry 120 "iSCSI login via the VIP" iscsi_login
+LUN_DEV="/dev/disk/by-path/ip-$VIP:3260-iscsi-$TIQN-lun-0"
+lun_dev_up() { v2 test -b "$LUN_DEV"; }
+retry 60 "LUN device visible on node2" lun_dev_up
+v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
+	&& dd if=/tmp/probe of=$LUN_DEV bs=512 count=1 oflag=direct 2>/dev/null \
+	&& dd if=$LUN_DEV bs=512 count=1 iflag=direct 2>/dev/null | cmp - /tmp/probe" \
+	|| die "iSCSI block IO mismatch"
+v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
+log "ok: iSCSI client wrote and read back through the VIP"
+
+# Failure matrix: 2-node split brain. Isolated bridge ports cut only
+# VM-to-VM traffic, the host still reaches both. Divergence needs a
+# primary on each side, so the stale side is force-promoted: the operator
+# error the pick-survivor flow exists for. Quorum is off with two
+# replicas, so DRBD detects the divergence on reconnect and refuses to
+# merge; the API discards the loser and resyncs from the survivor.
+log "splitting the two nodes: writes diverge, pick-survivor resolves"
+REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
+kc -n stornas-system exec repl-consumer -- sh -c 'echo before-split >> /data/marker && sync'
+sudo bridge link set dev tap-stornas1 isolated on
+sudo bridge link set dev tap-stornas2 isolated on
+peer_lost() { v1 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
+retry 120 "DRBD peer connection lost" peer_lost
+kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
+	|| die "IO blocked on the primary during the partition"
+v2 sh -c "drbdadm primary --force $REPL_RES \
+	&& mount \"\$(drbdadm sh-dev $REPL_RES)\" /mnt \
+	&& echo divergent > /mnt/divergent && umount /mnt \
+	&& drbdadm secondary $REPL_RES" \
+	|| die "could not diverge the stale side"
+
+log "healing the partition: DRBD must refuse to merge"
+sudo bridge link set dev tap-stornas1 isolated off
+sudo bridge link set dev tap-stornas2 isolated off
+split_detected() {
+	v1 sh -c "dmesg | grep -qi split-brain" || v2 sh -c "dmesg | grep -qi split-brain"
+}
+retry 300 "split brain detected" split_detected
+retry 600 "both nodes Ready after heal" both_ready
+
+log "pick-survivor through the appliance API"
+ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
+curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+	"http://$IP1:30080/api/v1/login" >/dev/null || die "UI login failed"
+curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"survivor":"node1"}' \
+	"http://$IP1:30080/api/v1/volumes/repl-test/resolve-split" >/dev/null \
+	|| die "resolve-split failed"
+retry 900 "replicas resynced after pick-survivor" resynced
+kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-split \
+	|| die "survivor lost its writes"
+log "ok: survivor kept its writes, loser was discarded"
+
+# Failure matrix: LINSTOR controller down. The piraeus operator would
+# undo the scale-down, so it goes first.
+log "LINSTOR controller down: IO continues, provisioning blocks"
+kc -n piraeus-datastore scale deploy piraeus-operator-controller-manager --replicas=0
+kc -n piraeus-datastore scale deploy linstor-controller --replicas=0
+controller_up() { kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller --no-headers 2>/dev/null | grep -q Running; }
+controller_gone() { ! controller_up; }
+retry 120 "controller stopped" controller_gone
+kc -n stornas-system exec repl-consumer -- sh -c 'echo no-controller >> /data/marker && sync' \
+	|| die "IO blocked without the LINSTOR controller"
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blocked
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: blocked-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "3600"]
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: blocked
+EOF
+sleep 45
+[ "$(kc -n stornas-system get pvc blocked -o jsonpath='{.status.phase}')" = Pending ] \
+	|| die "PVC bound while the controller was down"
+log "ok: IO continued, provisioning blocked"
+
+log "controller returns: blocked PVC must bind"
+kc -n piraeus-datastore scale deploy piraeus-operator-controller-manager --replicas=1
+kc -n piraeus-datastore scale deploy linstor-controller --replicas=1
+retry 300 "controller Running again" controller_up
+blocked_bound() { kc -n stornas-system get pvc blocked -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 300 "blocked PVC Bound" blocked_bound
 
 # Run the packaged check scripts directly (distro multinode-test shape):
 # exactly what greenboot executes, and the stornas check must pass on

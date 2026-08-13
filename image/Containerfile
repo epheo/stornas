@@ -9,12 +9,14 @@ COPY --from=kmod /out/rpms /tmp/drbd-rpms
 COPY --from=kmod /out/utils/ /
 
 # iputils: arping sends the gratuitous ARP on VIP failover.
+# iscsi-initiator-utils: admin debugging of exports, and the e2e client.
 RUN dnf install -y \
 	lvm2 \
 	mdadm \
 	smartmontools \
 	nvme-cli \
 	iputils \
+	iscsi-initiator-utils \
 	targetcli \
 	samba \
 	nfs-utils \
