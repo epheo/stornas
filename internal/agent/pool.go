@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -175,6 +176,10 @@ func ensureRaidPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storag
 		}
 	}
 
+	// Best effort: detection aid only, Detail stays authoritative.
+	if err := md.FailDetached(ctx, dev); err != nil {
+		fmt.Printf("mdadm fail detached %s: %v\n", dev, err)
+	}
 	detail, err := md.Detail(ctx, dev)
 	if err != nil {
 		return rep, err

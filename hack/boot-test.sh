@@ -301,14 +301,14 @@ retry 300 "restored volume Bound" restore_bound
 
 log "pulling a raid1 member: status must degrade and name the victim"
 qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}'
+kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull > /data/marker && sync' \
+	|| die "PVC IO blocked after the disk pull"
 pool_health() { kc get storagepool test -o jsonpath='{.status.health}' | grep -qx "$1"; }
 device_state() { kc get storagepool test -o jsonpath="{.status.devices[?(@.path=='$1')].state}" | grep -qx "$2"; }
 pool_degraded() { pool_health Degraded; }
 retry 300 "raid pool Degraded" pool_degraded
 dead_named() { device_state /dev/disk/by-id/virtio-STORNASB Missing; }
 retry 120 "dead member named by its spec path" dead_named
-kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull > /data/marker && sync' \
-	|| die "PVC IO blocked while the pool is degraded"
 
 log "replace flow through the UI: pick the spare in the dialog"
 ui_phase degraded-replace

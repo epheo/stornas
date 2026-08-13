@@ -127,6 +127,14 @@ func (m *MD) Add(ctx context.Context, dev, member string) error {
 	return err
 }
 
+// FailDetached marks members whose device node vanished as faulty. An
+// idle array does not notice a hot-unplugged disk until IO hits it, so
+// detection would otherwise wait on a write.
+func (m *MD) FailDetached(ctx context.Context, dev string) error {
+	_, err := m.run.Run(ctx, "mdadm", dev, "--fail", "detached")
+	return err
+}
+
 // RemoveFailed clears faulty and vanished members in one sweep; both
 // keywords are mdadm-native and absent members are the converged case.
 func (m *MD) RemoveFailed(ctx context.Context, dev string) error {

@@ -187,6 +187,7 @@ const (
 
 func TestEnsureRaidPoolFreshCreate(t *testing.T) {
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd: {{err: errExit}, {out: mdHealthy}},
 		"mdadm --create /dev/md/stornas-tank --run --force --name=stornas-tank --homehost=stornas --level=raid1 --raid-devices=2 /dev/sda /dev/sdb": {{}},
 		"vgs stornas-tank":                                                   {{err: errExit}},
@@ -216,6 +217,7 @@ func TestEnsureRaidPoolFreshCreate(t *testing.T) {
 
 func TestEnsureRaidPoolIdempotent(t *testing.T) {
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
@@ -238,6 +240,7 @@ func TestEnsureRaidPoolIdempotent(t *testing.T) {
 // device that lost it so the UI replace flow can address the victim.
 func TestEnsureRaidPoolDegradedNamesVictim(t *testing.T) {
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
@@ -267,6 +270,7 @@ func TestEnsureRaidPoolDegradedNamesVictim(t *testing.T) {
 // via --add and reports Rebuilding with progress.
 func TestEnsureRaidPoolAddsReplacement(t *testing.T) {
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}, {out: mdRebuilding}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
@@ -297,6 +301,7 @@ func TestEnsureRaidPoolAddsReplacement(t *testing.T) {
 // while the newcomer rebuilds.
 func TestEnsureRaidPoolLiveReplace(t *testing.T) {
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}, {out: mdRebuilding}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin":          {{out: "  twi-aotz--\n"}},
@@ -337,6 +342,7 @@ func TestEnsureRaidPoolSweepsFaulty(t *testing.T) {
        1     252       32        1      faulty   /dev/sdb
 `
 	f := &seqRunner{seq: map[string][]result{
+		"mdadm /dev/md/stornas-tank --fail detached": {{}},
 		mdDetailCmd:        {{out: faulty}, {out: faulty}, {out: mdDegraded}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
