@@ -34,6 +34,8 @@ func TestEnsureTargetFullFlow(t *testing.T) {
 		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0":                     {},
 		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":                         {},
 		"targetcli /iscsi/" + iqn + "/tpg1/acls/iqn.1994-05.com.redhat:client1 set auth userid=u1 password=p1": {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1":                                     {},
+
 		"ip -j route show default":                 {out: `[{"dev":"eth0"}]`},
 		"ip -j addr show to 192.168.1.50":          {out: `[]`},
 		"ip addr replace 192.168.1.50/24 dev eth0": {},
@@ -62,10 +64,12 @@ func TestEnsureVIPSkipsGarpWhenHeld(t *testing.T) {
 		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
 		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
 		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":     {},
-		"ip -j route show default":                                                         {out: `[{"dev":"eth0"}]`},
-		"ip -j addr show to 192.168.1.50":                                                  {out: `[{"ifname":"eth0"}]`},
-		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
-		"targetcli saveconfig":                                                             {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1":                 {},
+
+		"ip -j route show default":                 {out: `[{"dev":"eth0"}]`},
+		"ip -j addr show to 192.168.1.50":          {out: `[{"ifname":"eth0"}]`},
+		"ip addr replace 192.168.1.50/24 dev eth0": {},
+		"targetcli saveconfig":                     {},
 	}}
 	m := &LIOManager{Run: f}
 
@@ -91,6 +95,8 @@ func TestEnsureTargetToleratesExisting(t *testing.T) {
 		"targetcli /iscsi create " + iqn: exists,
 		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": exists,
 		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":     exists,
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1":                 {},
+
 		"ip -j route show default":                 {out: `[{"dev":"eth0"}]`},
 		"ip -j addr show to 192.168.1.50":          {out: `[{"ifname":"eth0"}]`},
 		"ip addr replace 192.168.1.50/24 dev eth0": {},
@@ -140,10 +146,12 @@ func TestEnsureTargetPrunesDroppedEntries(t *testing.T) {
 		"targetcli /iscsi/" + iqn + "/tpg1/acls delete iqn.1994-05.com.redhat:client2":     {},
 		"targetcli /iscsi/" + iqn + "/tpg1/luns delete lun1":                               {},
 		"targetcli /backstores/block delete stornas-vms-lun1":                              {},
-		"ip -j route show default":                                                         {out: `[{"dev":"eth0"}]`},
-		"ip -j addr show to 192.168.1.50":                                                  {out: `[{"ifname":"eth0"}]`},
-		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
-		"targetcli saveconfig":                                                             {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1":                 {},
+
+		"ip -j route show default":                 {out: `[{"dev":"eth0"}]`},
+		"ip -j addr show to 192.168.1.50":          {out: `[{"ifname":"eth0"}]`},
+		"ip addr replace 192.168.1.50/24 dev eth0": {},
+		"targetcli saveconfig":                     {},
 	}}
 	m := &LIOManager{Run: f}
 
@@ -167,6 +175,45 @@ func TestEnsureTargetPrunesDroppedEntries(t *testing.T) {
 		if strings.Contains(c, "client1") || strings.Contains(c, "lun0") {
 			t.Fatalf("wanted entry deleted: %s", c)
 		}
+	}
+}
+
+// TPG auth follows spec intent: no CHAP initiators means authentication
+// off; a CHAP initiator whose secret has not resolved yet must still
+// lock the TPG, never fail open.
+func TestEnsureTargetAuthFollowsSpec(t *testing.T) {
+	iqn := "iqn.2026-08.io.stornas:vms"
+	open := testTarget()
+	open.Spec.Initiators = []storagev1alpha1.Initiator{{IQN: "iqn.1994-05.com.redhat:client1"}}
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi create " + iqn:                                                   {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
+		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":     {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=0":                 {},
+		"ip -j route show default":                                                         {out: `[{"dev":"eth0"}]`},
+		"ip -j addr show to 192.168.1.50":                                                  {out: `[{"ifname":"eth0"}]`},
+		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
+		"targetcli saveconfig":                                                             {},
+	}}
+	if err := (&LIOManager{Run: f}).EnsureTarget(context.Background(), open, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same target with a chapSecretRef but no resolved cred: locked.
+	locked := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi create " + iqn:                                                   {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
+		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":     {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1":                 {},
+		"ip -j route show default":                                                         {out: `[{"dev":"eth0"}]`},
+		"ip -j addr show to 192.168.1.50":                                                  {out: `[{"ifname":"eth0"}]`},
+		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
+		"targetcli saveconfig":                                                             {},
+	}}
+	if err := (&LIOManager{Run: locked}).EnsureTarget(context.Background(), testTarget(), nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

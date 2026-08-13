@@ -68,6 +68,7 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 			return err
 		}
 	}
+	auth := "0"
 	for _, ini := range t.Spec.Initiators {
 		if err := m.ensure(ctx, "/iscsi/"+iqn+"/tpg1/acls", "create", ini.IQN); err != nil {
 			return err
@@ -78,6 +79,19 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 				return err
 			}
 		}
+		if ini.ChapSecretRef != "" {
+			auth = "1"
+		}
+	}
+	// LIO enforces CHAP per TPG, not per ACL: at authentication=0 the
+	// target only offers AuthMethod=None and CHAP initiators cannot log
+	// in, so any CHAP initiator in the spec flips the whole TPG (keyed
+	// on spec, not resolved secrets: a missing secret must fail closed,
+	// never drop the target to no-auth). Mixed CHAP and no-CHAP
+	// initiators on one target are not supportable.
+	if _, err := m.Run.Run(ctx, "targetcli", "/iscsi/"+iqn+"/tpg1",
+		"set", "attribute", "authentication="+auth); err != nil {
+		return err
 	}
 	// The spec is authoritative: entries it dropped are revocations and
 	// must leave the host, not linger until CR deletion.
