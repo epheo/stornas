@@ -96,6 +96,8 @@ vssh() {
 kc() { vssh kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
 
 # One QMP command per connection; python3 because the runner has no socat.
+# Exits nonzero on a QMP error reply: a refused device_del would silently
+# void every assertion built on it.
 qmp() { # qmp <json-execute-line>
 	python3 - "$WORKDIR/qmp.sock" "$1" <<'PY'
 import json, socket, sys
@@ -108,7 +110,9 @@ f.flush()
 f.readline()
 f.write(sys.argv[2] + "\n")
 f.flush()
-print(f.readline())
+resp = f.readline()
+print(resp)
+sys.exit(1 if '"error"' in resp else 0)
 PY
 }
 
@@ -169,8 +173,9 @@ qemu-system-x86_64 \
 	-drive "file=$DISK,if=virtio,format=qcow2" \
 	-drive "file=$WORKDIR/scratch.raw,if=none,format=raw,id=scratch" \
 	-device virtio-blk-pci,drive=scratch,serial=STORNASTEST,id=disk-a \
+	-device pcie-root-port,id=hotplug-port,slot=9 \
 	-drive "file=$WORKDIR/raidb.raw,if=none,format=raw,id=raidb" \
-	-device virtio-blk-pci,drive=raidb,serial=STORNASB,id=disk-b \
+	-device virtio-blk-pci,drive=raidb,serial=STORNASB,id=disk-b,bus=hotplug-port \
 	-drive "file=$WORKDIR/spare.raw,if=none,format=raw,id=spare" \
 	-device virtio-blk-pci,drive=spare,serial=STORNASC,id=disk-c \
 	-qmp "unix:$WORKDIR/qmp.sock,server=on,wait=off" \
@@ -233,11 +238,16 @@ metadata:
   namespace: stornas-system
 spec:
   restartPolicy: Never
+  # The agent SA's privileged SCC lets the consumer write the volume as
+  # root; restricted-v2 leaves the mount root-owned (no fsGroup applied).
+  serviceAccountName: stornas-agent
   containers:
     - name: c
       image: ghcr.io/epheo/stornas:latest
       imagePullPolicy: Never
       command: [sleep, "3600"]
+      securityContext:
+        runAsUser: 0
       volumeMounts:
         - name: v
           mountPath: /data
@@ -300,7 +310,7 @@ restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.statu
 retry 300 "restored volume Bound" restore_bound
 
 log "pulling a raid1 member: status must degrade and name the victim"
-qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}'
+qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}' || die "device_del refused"
 kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull > /data/marker && sync' \
 	|| die "PVC IO blocked after the disk pull"
 pool_health() { kc get storagepool test -o jsonpath='{.status.health}' | grep -qx "$1"; }
