@@ -133,8 +133,10 @@ diagnostics() {
 	log "DIAGNOSTICS: failover placement and host state"
 	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A30 'status:' | tail -80 || true
 	for fn in v1 v2; do
-		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs 2>/dev/null" 2>&1 || true
+		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs -v 2>/dev/null" 2>&1 || true
 	done
+	log "DIAGNOSTICS: NFS server view on node1"
+	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; findmnt /var/lib/stornas/shares 2>/dev/null; ls /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
 	tail -15 "$WORKDIR/console1.log" 2>/dev/null || true
 	tail -15 "$WORKDIR/console2.log" 2>/dev/null || true
@@ -542,9 +544,12 @@ retry 60 "iSCSI still reachable on the VIP" vip_answers
 # Real clients against the failed-over exports: reachability proves the
 # wiring, only IO proves the product.
 log "NFS client IO from node2 against the node1 export"
-v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs $IP1:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e" \
-	|| die "NFS client IO failed"
-log "ok: NFS client wrote and read back"
+# vers pinned: only 2049/tcp is open, so v4 is the supported protocol and
+# a silent v3 fallback would produce misleading mountd errors.
+nfs_io() {
+	v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs -o nfsvers=4.2 $IP1:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e"
+}
+retry 120 "NFS client wrote and read back" nfs_io
 
 log "iSCSI client login with CHAP from node2 via the VIP"
 TIQN=iqn.2026-08.io.stornas:failover

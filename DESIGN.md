@@ -228,6 +228,10 @@ hack/
 ## Open questions
 
 - LVM raid vs mdadm: proposal is LVM raid; mdadm tooling is more battle-worn.
+  Evidence 2026-08-13: the LINSTOR satellite cannot activate a raid-backed
+  thin pool from inside its container (rmeta create ioctl: busy), so a raid
+  pool cannot back the CSI pool today. mdadm under the PV would sidestep
+  that; until decided, raid pools serve only non-CSI use.
 - VIP mechanics: decided, agent-managed ip addr plus GARP; no keepalived.
 - NFS: kernel nfsd (proposal) vs ganesha in a pod.
 - LIO: drive configfs from Go in the agent, or shell out to targetcli. Proposal: configfs.

@@ -20,25 +20,31 @@ page.on('pageerror', (err) => {
 	console.error(`page error: ${err.message}`);
 	process.exitCode = 1;
 });
+// The dashboard links to the same pages as the sidebar; scope navigation
+// to the aside so getByRole stays unambiguous.
+const nav = (name) => page.locator('aside').getByRole('link', { name });
 
 try {
 	await page.goto(url);
 	await page.getByPlaceholder('Username').fill('admin');
 	await page.getByPlaceholder('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
-	await page.getByRole('link', { name: 'Pools' }).waitFor();
+	await nav('Pools').waitFor();
 	// The generated password nudges a change on every load; not this flow.
 	const cancel = page.getByRole('button', { name: 'Cancel' });
 	if (await cancel.isVisible()) await cancel.click();
 
-	await page.getByRole('link', { name: 'Pools' }).click();
+	await nav('Pools').click();
 	await page.getByRole('heading', { name: 'Storage pools' }).waitFor();
 
 	if (phase === 'smoke') {
 		await page.getByText('test', { exact: true }).waitFor();
-		await page.getByText('Online', { exact: true }).waitFor();
-		if ((await page.getByText('InSync').count()) < 2) {
-			throw new Error('expected both raid members InSync');
+		await page.getByText('rpool', { exact: true }).waitFor();
+		if ((await page.getByText('Online', { exact: true }).count()) < 2) {
+			throw new Error('expected both pools Online');
+		}
+		if ((await page.getByText('InSync').count()) < 3) {
+			throw new Error('expected all pool members InSync');
 		}
 		// Every page must render its live data without a script error.
 		for (const [link, heading] of [
@@ -50,7 +56,7 @@ try {
 			['Alerts', 'Alerts'],
 			['Users', 'Users'],
 		]) {
-			await page.getByRole('link', { name: link }).click();
+			await nav(link).click();
 			await page.getByRole('heading', { name: heading }).waitFor();
 		}
 	}
@@ -65,16 +71,21 @@ try {
 			.getByRole('button', { name: 'replace' })
 			.click();
 		await page
-			.locator('label', { hasText: 'virtio-STORNASC' })
+			.locator('label', { hasText: 'virtio-STORNASD' })
 			.locator('input[type=radio]')
 			.check();
 		await page.getByRole('button', { name: 'Replace disk' }).click();
-		await page.getByRole('heading', { name: 'Replace disk in test' }).waitFor({ state: 'hidden' });
+		await page
+			.getByRole('heading', { name: 'Replace disk in rpool' })
+			.waitFor({ state: 'hidden' });
 	}
 
 	if (phase === 'online') {
-		await page.getByText('Online', { exact: true }).waitFor();
-		await page.getByText('virtio-STORNASC').first().waitFor();
+		await page.getByText('Degraded', { exact: true }).waitFor({ state: 'hidden' });
+		await page.getByText('virtio-STORNASD').first().waitFor();
+		if ((await page.getByText('Online', { exact: true }).count()) < 2) {
+			throw new Error('expected both pools Online after replace');
+		}
 		if (await page.getByText('Missing', { exact: true }).isVisible()) {
 			throw new Error('dead member still shown after replace');
 		}
