@@ -54,9 +54,16 @@ RUN firewall-offline-cmd --zone=public --add-service=stornas
 # images do not ship it: /var/target is rtslib's dbroot, without which
 # every targetcli invocation dies at startup.
 COPY files/smb.conf /etc/samba/smb.conf
+# The bootc root is composefs, which cannot anchor the NFSv4 pseudo tree
+# (no exportable filehandles); the shares directory on /var is the
+# explicit fsid=0 root instead, so clients mount server:/<share-name>.
+# Per-share client lists stay on the agent's leaf exports.
 RUN touch /etc/samba/stornas-shares.conf \
+	&& printf '/var/lib/stornas/shares *(ro,fsid=0,crossmnt)\n' \
+		> /etc/exports.d/stornas-root.exports \
 	&& printf '%s\n' \
 		'd /var/lib/stornas 0755 root root -' \
+		'd /var/lib/stornas/shares 0755 root root -' \
 		'd /var/lib/drbd 0755 root root -' \
 		'd /var/target 0755 root root -' \
 		'd /var/target/pr 0755 root root -' \

@@ -141,11 +141,11 @@ diagnostics() {
 	log "DIAGNOSTICS: NFS server view on node1"
 	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; ls -Z /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: one verbose NFS mount attempt from node2"
-	v2 sh -c "mkdir -p /mnt/nfs-diag && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-diag; umount /mnt/nfs-diag 2>/dev/null; true" 2>&1 || true
+	v2 sh -c "mkdir -p /mnt/nfs-diag && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/stornas-system-failover /mnt/nfs-diag; umount /mnt/nfs-diag 2>/dev/null; true" 2>&1 || true
 	log "DIAGNOSTICS: who owns 2049 on node1, kernel export cache, mountd log"
 	v1 sh -c 'ss -tlnp | grep 2049; cat /proc/net/rpc/nfsd.export/content 2>/dev/null; journalctl -u nfs-mountd --no-pager -n 15 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: self-mount on node1 and pseudo-root walk from node2"
-	v1 sh -c 'mkdir -p /mnt/nfs-self && mount -t nfs -o nfsvers=4.2 localhost:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-self && echo self-mount-ok; umount /mnt/nfs-self 2>/dev/null; true' 2>&1 || true
+	v1 sh -c 'mkdir -p /mnt/nfs-self && mount -t nfs -o nfsvers=4.2 localhost:/stornas-system-failover /mnt/nfs-self && echo self-mount-ok; umount /mnt/nfs-self 2>/dev/null; true' 2>&1 || true
 	v2 sh -c "mkdir -p /mnt/nfs-root && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/ /mnt/nfs-root && find /mnt/nfs-root -maxdepth 5 2>/dev/null | head -15; umount /mnt/nfs-root 2>/dev/null; true" 2>&1 || true
 	log "DIAGNOSTICS: AVC denials on node1"
 	v1 sh -c 'ausearch -m avc -ts recent 2>/dev/null | tail -15 || dmesg | grep -i avc | tail -15' 2>&1 || true
@@ -560,9 +560,11 @@ retry 60 "iSCSI still reachable on the VIP" vip_answers
 # wiring, only IO proves the product.
 log "NFS client IO from node2 against the node1 export"
 # vers pinned: only 2049/tcp is open, so v4 is the supported protocol and
-# a silent v3 fallback would produce misleading mountd errors.
+# a silent v3 fallback would produce misleading mountd errors. The mount
+# path is relative to the fsid=0 pseudo root (image Containerfile): the
+# composefs rootfs cannot anchor the v4 tree.
 nfs_io() {
-	v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs -o nfsvers=4.2 $IP1:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e"
+	v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e"
 }
 retry 120 "NFS client wrote and read back" nfs_io
 

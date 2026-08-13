@@ -157,6 +157,10 @@ status:
   state: Exported
 ```
 
+NFS clients mount server:/<share-name>: the shares directory is the
+fsid=0 pseudo root, because the composefs rootfs cannot anchor the
+NFSv4 tree. v4 only; v3 ports stay closed.
+
 ### LocalUser
 
 ```yaml
