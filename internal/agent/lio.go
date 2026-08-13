@@ -27,15 +27,22 @@ func backstore(target string, lunID int32) string {
 	return fmt.Sprintf("stornas-%s-lun%d", target, lunID)
 }
 
-// ensure runs one targetcli create, tolerating "already exists" so
-// re-convergence is a no-op walk. The match is exact: "does not exist"
-// failures must surface, not converge green.
+// ensure runs one targetcli create, tolerating the object-exists replies
+// so re-convergence is a no-op walk. targetcli phrases them differently
+// per object ("This Target already exists in configFS", "Storage object
+// block/x exists"), while "does not exist" failures must surface, not
+// converge green; the not-exist guard runs first because both phrasings
+// contain "exist".
 func (m *LIOManager) ensure(ctx context.Context, args ...string) error {
 	out, err := m.Run.Run(ctx, "targetcli", args...)
-	if err != nil && !strings.Contains(err.Error()+string(out), "already exists") {
-		return err
+	if err == nil {
+		return nil
 	}
-	return nil
+	msg := err.Error() + string(out)
+	if !strings.Contains(msg, "not exist") && strings.Contains(msg, "exists") {
+		return nil
+	}
+	return err
 }
 
 // remove runs one targetcli delete; an absent entry is the converged case,

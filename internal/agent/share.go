@@ -50,6 +50,19 @@ func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.S
 		mounted = false
 	}
 	if !mounted {
+		// Fresh PVCs arrive raw: the CSI formats only when a pod mounts
+		// the volume, so first placement owns the mkfs. Anything other
+		// than blank or xfs is foreign data, never clobbered.
+		fsout, _ := m.Run.Run(ctx, "blkid", "-o", "value", "-s", "TYPE", share.Status.Device)
+		switch fstype := strings.TrimSpace(string(fsout)); fstype {
+		case "":
+			if _, err := m.Run.Run(ctx, "mkfs.xfs", share.Status.Device); err != nil {
+				return err
+			}
+		case "xfs":
+		default:
+			return fmt.Errorf("device %s carries %s, refusing to mount as xfs", share.Status.Device, fstype)
+		}
 		if err := os.MkdirAll(m.Root+mnt, 0o755); err != nil {
 			return err
 		}

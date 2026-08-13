@@ -1,0 +1,1028 @@
+replication	replication test	﻿2026-08-13T08:40:48.1388089Z ##[group]Run make replication-test PODMAN='sudo podman'
+replication	replication test	2026-08-13T08:40:48.1388837Z [36;1mmake replication-test PODMAN='sudo podman'[0m
+replication	replication test	2026-08-13T08:40:48.1511636Z shell: /usr/bin/bash -e {0}
+replication	replication test	2026-08-13T08:40:48.1511935Z ##[endgroup]
+replication	replication test	2026-08-13T08:40:48.1601060Z IMAGE=localhost/stornas-os:dev PODMAN="sudo podman" ./hack/replication-test.sh
+replication	replication test	2026-08-13T08:40:48.1690447Z 
+replication	replication test	2026-08-13T08:40:48.1690935Z == building qcow2 from localhost/stornas-os:dev
+replication	replication test	2026-08-13T08:40:48.3156711Z 
+replication	replication test	2026-08-13T08:40:48.3157535Z == syncing localhost/stornas-os:dev into rootful podman storage
+replication	replication test	2026-08-13T08:41:34.4268636Z Getting image source signatures
+replication	replication test	2026-08-13T08:41:34.4274122Z Copying blob sha256:ff2839d851de763080da87cd9e1f397552c513b4e9128d98f008a09c476ff028
+replication	replication test	2026-08-13T08:41:34.4275483Z Copying blob sha256:5c4b7744d3096d6200d4bce47fc5d2a74e3bc77875dbb824588e8a5e64f3ca02
+replication	replication test	2026-08-13T08:41:34.4276815Z Copying blob sha256:63edd50e99cbb597fe9acdaa7a0d760bc964af9ef3a3b6cd37d4fa480b39580a
+replication	replication test	2026-08-13T08:41:34.4278224Z Copying blob sha256:da9e3dbdc9b67e2c9752c395476ea3da15f958a36c97a2b8e235f37ddcfbae74
+replication	replication test	2026-08-13T08:41:34.4279619Z Copying blob sha256:9f0886eae3f019538c000ec5238bee8c3b70861a88dd491fd9a99141b58eacb9
+replication	replication test	2026-08-13T08:41:34.4280928Z Copying blob sha256:13cfb64f6ce2e7386ac2717a05a4607311bb4ed66929417f756f0776441ec65a
+replication	replication test	2026-08-13T08:41:34.6103203Z Copying blob sha256:009617f31d695e7a7182173ed41a7b9c3361d026207d99903585f553c964945f
+replication	replication test	2026-08-13T08:41:35.5218935Z Copying blob sha256:feaacaeea5ecc2019251d69dbf3151cdcd254fac658fd90fd957a31683fa46d9
+replication	replication test	2026-08-13T08:41:35.5241143Z Copying blob sha256:1fcd12519c5da21bbf81568424f7e1b6e47d7309b05c789c140c3fe1cc52dbc9
+replication	replication test	2026-08-13T08:41:35.5269147Z Copying blob sha256:3b54183036c4fea5516d924aadc917571e11b160cf34e663c302c8d436eeadcf
+replication	replication test	2026-08-13T08:41:35.5327457Z Copying blob sha256:4c98bfa8019e7c2fe095e483e82cf75181873f43972c665e0730e8fb17bdf08b
+replication	replication test	2026-08-13T08:41:35.8493886Z Copying blob sha256:c92f6470fdb649239011657e5e029e5f9f1516299039285898efe28a0a9b8ed9
+replication	replication test	2026-08-13T08:41:36.2535059Z Copying blob sha256:a7ddeae9112457289cd249aef9e37772deded1769e7efbd7577f65b2bd01f840
+replication	replication test	2026-08-13T08:41:36.2565066Z Copying blob sha256:cc0a8965aeb56bb240415ef98a8b4c9e1db204dec47819662ddc8cd15843bd0f
+replication	replication test	2026-08-13T08:41:36.2572126Z Copying blob sha256:01b583b6dd1c9b7fc0f077f94f0717baca9717a856ec6b7249de88b21593633b
+replication	replication test	2026-08-13T08:41:36.4352827Z Copying blob sha256:d07eb710fff96b4c5df4d51c2706c55b5e1e444463339c98b725b0066c5bd5b8
+replication	replication test	2026-08-13T08:41:36.4402383Z Copying blob sha256:947af30e84d7fdd8c29f7f62f67c4a5c22623e421848f83bec2c5584be2a7706
+replication	replication test	2026-08-13T08:41:36.5038825Z Copying blob sha256:7c12676bf6a3fe3790be57f0cadbb2e720dfb7a29de31cd52eb602eb78102a01
+replication	replication test	2026-08-13T08:41:36.5063460Z Copying blob sha256:ed252ba52c341fc11f058762eb0e4f42ba7403b5a2c59c4a0d4fb2700453e08b
+replication	replication test	2026-08-13T08:41:36.6519082Z Copying blob sha256:93db6e51fa6f56e4f017e57edde714d21fc3c4f294622528e50372ab63f79e3e
+replication	replication test	2026-08-13T08:41:36.6563578Z Copying blob sha256:a0472c1877b7afd9c7f04991ee97bda9779a1505fc86738d3ad5daa80ea1b203
+replication	replication test	2026-08-13T08:41:36.6784874Z Copying blob sha256:eb6c2923e39e2f7be35b46815b2011da4baef24b40e085c8ed427be85997c61b
+replication	replication test	2026-08-13T08:41:36.8639949Z Copying blob sha256:dbd06678400d683d06f9e07ae0161ee8c4873553a31e16e2b7608c95468a118e
+replication	replication test	2026-08-13T08:41:36.8670755Z Copying blob sha256:3b0c3a4bdcb88e3b12a4b3e1e42ead28d6f24bc337768b998dcf2e01f21d255a
+replication	replication test	2026-08-13T08:41:36.8731520Z Copying blob sha256:2b6572fb4efec39e30825d762baaf692513c9ba67c366c455261ad8fb56fc7db
+replication	replication test	2026-08-13T08:41:36.8745559Z Copying blob sha256:407edbe58865b1cb7942a133704844d01fdbdef0194536e93db3930f72901742
+replication	replication test	2026-08-13T08:41:36.8928280Z Copying blob sha256:8e2292d7947813c8968e212c143999a9abf82df805aacbdc06ce6c70e1a75a92
+replication	replication test	2026-08-13T08:41:36.9022299Z Copying blob sha256:c7796a6f0b1cb6d71f8dd57b965dbe0f600d91ab7278cbf2ef8f16706ab5f672
+replication	replication test	2026-08-13T08:41:37.5002685Z Copying blob sha256:4097fc9ab39bc8440157f260645788a586bf25814b8e377dbb09406ddea6048e
+replication	replication test	2026-08-13T08:41:37.5032588Z Copying blob sha256:7b6db8c4c1801a1a1adb466d50a553e37a9c9c90bbb53a9758b7645379cf71b1
+replication	replication test	2026-08-13T08:41:37.8724805Z Copying blob sha256:ccb56675193432b68ad729e08421c49a0b19e85fd10e45c8ced756dffdcf4b63
+replication	replication test	2026-08-13T08:41:37.8737198Z Copying blob sha256:d09e0e8a6d88cef711628ad939bd0082f3f498d7c5d155148587bbdb6556dc4e
+replication	replication test	2026-08-13T08:41:37.8762247Z Copying blob sha256:99295ec5ceb0ef30087f53164a98d57719403924f3096d998d67e8d3923469da
+replication	replication test	2026-08-13T08:41:37.9886444Z Copying blob sha256:3d1d077cac78dca9cdae1870c0d953dce29779caa8ac179614e691c5a659e1a9
+replication	replication test	2026-08-13T08:41:37.9918352Z Copying blob sha256:2180ab89bd45c93279fe5d0cb57c15c03570e9146df245918986dc4b2340a115
+replication	replication test	2026-08-13T08:41:37.9975664Z Copying blob sha256:19f7d53aaf36d92b133a3ccc986350daf35b8f8b07a766766f3536fdf975c710
+replication	replication test	2026-08-13T08:41:37.9990751Z Copying blob sha256:ca7af5feeaf6aea46c51f61ba98b4d466ae89547c92dab389fe8d2fb51a38169
+replication	replication test	2026-08-13T08:41:38.0210870Z Copying blob sha256:6d24b0fe1f9a34127cb9960718fca268bd204d9f6153fd62f11615408fcb032c
+replication	replication test	2026-08-13T08:41:38.1381004Z Copying blob sha256:884d8dea684040ea318769a56677c8f6205e8a23cedd3834f06c7e25c5bad06c
+replication	replication test	2026-08-13T08:41:38.1402186Z Copying blob sha256:286c2acb1c1623361b310be50d1c804e394656e55930c72f13fd5a147f944054
+replication	replication test	2026-08-13T08:41:38.1422326Z Copying blob sha256:b902c1217576288c7c3fc7e72afee8e30dfda4847f2d3a6aa2ff1fe897e1b98e
+replication	replication test	2026-08-13T08:41:38.1456111Z Copying blob sha256:bbf0a039bac97560080612ad97204c56097acbb09667b5d30011a60c7665fe11
+replication	replication test	2026-08-13T08:41:38.4327942Z Copying blob sha256:4c87376f952523a99dc7754e441180b1886c56621307cc4d82f06858d2840358
+replication	replication test	2026-08-13T08:41:38.8478644Z Copying blob sha256:6d30dd4b20b91f36090282a78d44fd3e521c10c7cca4deadf012765ab1d7d783
+replication	replication test	2026-08-13T08:41:38.8492344Z Copying blob sha256:eaca1a102104a002a64cc665e139f59826673690c5bfa2716cdb42d0c15b2055
+replication	replication test	2026-08-13T08:41:38.8518837Z Copying blob sha256:be307fe6565eaa58c97a0cd5ef28784564c05f055b896d68586a5de7758a4c67
+replication	replication test	2026-08-13T08:41:38.8547879Z Copying blob sha256:56c6c9740e88b4a7e3c1fb78a8010adcee711da2371e343c3c4080dc2a16dd4a
+replication	replication test	2026-08-13T08:41:38.8576029Z Copying blob sha256:8c0638ee13a408c831949b46ca872aa862870eee2253495c415021345633ce81
+replication	replication test	2026-08-13T08:41:38.8642286Z Copying blob sha256:b53618fb83fca37621b66ce92ddc22fee242efcf65a71188be9ea26c563d94a1
+replication	replication test	2026-08-13T08:41:39.0218269Z Copying blob sha256:b5cb1bbbc3dd2fc1456a03376a596192719d23c48c4e9ae9cbb8baa792d9e0e6
+replication	replication test	2026-08-13T08:41:39.4519768Z Copying blob sha256:9112b2394c0da009d0b6b40cc90afff1e474199519776cbf05aea418f1278ae5
+replication	replication test	2026-08-13T08:41:39.4541760Z Copying blob sha256:4b3f887c619e704896b9e58664a9791c2e6af21578783c3ef6b90c2fc14aebb0
+replication	replication test	2026-08-13T08:41:39.4555465Z Copying blob sha256:60943d5f562cde15b9fa86779286556ac635187dc3ac5afc5fd8ccc88856a74c
+replication	replication test	2026-08-13T08:41:39.4624459Z Copying blob sha256:b524add9ac9232e836c191e63f358a2c5cd799f87eb9fabc1899761348faef6e
+replication	replication test	2026-08-13T08:41:39.5542696Z Copying blob sha256:9c0e12d82813bb82bf242c633cb6000079f0dbca584132fd827cf39591db868e
+replication	replication test	2026-08-13T08:41:39.5572858Z Copying blob sha256:71b3e0a5eb22a12e340e43979b75cd97e5eae06f48af8b69fa68beab8bc4eae6
+replication	replication test	2026-08-13T08:41:39.5633146Z Copying blob sha256:36b6fdbbaadcd3c508c0985df136d9eb943fb47d0e6f6f9cf1af5e8ed5a244f1
+replication	replication test	2026-08-13T08:41:39.5643832Z Copying blob sha256:b7c38a6a1f01786335302cd635ff3b6e973535d6b2339fb4d07b1596e5199ee6
+replication	replication test	2026-08-13T08:41:39.5667810Z Copying blob sha256:f9881bc54347f7d59eeba908c1d807cf69bfd7f77570fe098b863410a7acfae1
+replication	replication test	2026-08-13T08:41:39.5691585Z Copying blob sha256:5cf9df2ecf9c8da6762a4ebe0f881dbd59ca4ee80f2225590eec6016e1d337c8
+replication	replication test	2026-08-13T08:41:39.5748904Z Copying blob sha256:e202f629dea205d73844f35f6e7eed9e8ef8f4ee6d968f1d8c929c3b9827c109
+replication	replication test	2026-08-13T08:41:39.5817911Z Copying blob sha256:e960e94fb6263ad3ccd797bfd412ccf0957a5602a95844c6bdda085cff2922f2
+replication	replication test	2026-08-13T08:41:39.5890460Z Copying blob sha256:b383f411d1e4a45ae0de208d2edaae493abfb528733b307ef3be3bd3cd81e42e
+replication	replication test	2026-08-13T08:41:39.7152832Z Copying blob sha256:cb21c7758df8edcd5656c6b419c54bb7df20b27eb09da753b174bd2f7822ab92
+replication	replication test	2026-08-13T08:41:39.7237221Z Copying blob sha256:12787d84fa137cd5649a9005efe98ec9d05ea46245fdc50aecb7dd007f2035b1
+replication	replication test	2026-08-13T08:41:39.7327255Z Copying blob sha256:e8662e922ceb9f28b1147adc1328b6d917d5d8577f244f2e6f73b990162ad2e7
+replication	replication test	2026-08-13T08:41:39.7390659Z Copying blob sha256:ee0b7a79a458d70c331f812eb522ce3438b17e2bbf1567b858589c9b47dfcd08
+replication	replication test	2026-08-13T08:41:39.9359275Z Copying blob sha256:22f5cdcc5502cb217de747ba047d2268fb2ef725e688f69905759ba32d8fe58d
+replication	replication test	2026-08-13T08:41:39.9825681Z Copying blob sha256:46a3ec2b60549dbfda6e832ea2a4784fc587fa5268a63697e8318425a136cfd2
+replication	replication test	2026-08-13T08:41:40.5877780Z Copying blob sha256:8c7a7c84bf5cb67ff7798300cd3d15c20dd8412b224ad062c18599fd6dde7dc9
+replication	replication test	2026-08-13T08:41:40.6331104Z Copying blob sha256:3601ad3e3a71df2d1bb8b13db2435f341949bdc44ed9894dbcd7546c67df6bfb
+replication	replication test	2026-08-13T08:41:40.6810331Z Copying blob sha256:fcc921003afd81ff429323cd0ab0e8b2e7c93367fdca298bffe9d933ce1f0a40
+replication	replication test	2026-08-13T08:41:40.9301126Z Copying blob sha256:995c398d43bc7c00ad11402b02cc66c63407869c564231ded4b60e2229b8c6e2
+replication	replication test	2026-08-13T08:41:41.8413185Z Copying blob sha256:9837c930f273eafb5778413e7bbb2ec169d8e9495a926fedbe3b3370b389264a
+replication	replication test	2026-08-13T08:41:41.8967849Z Copying blob sha256:6f074d334690694a80f8c6f59946f778516b292b418eabd02fc332ecec5ad2a0
+replication	replication test	2026-08-13T08:41:42.4376270Z Copying blob sha256:ce6fea3d24bb752112a0f56516072b68233a9c063d7887041c193f951ab20c47
+replication	replication test	2026-08-13T08:41:42.4770513Z Copying blob sha256:85a663657ccf5f298db09da9c100ada6d2013d0714e42b643bacb4b4cbf6702d
+replication	replication test	2026-08-13T08:41:44.1768248Z Copying blob sha256:4d8c8d59557b2a292b76d506d6d46f5298b2c384f1b9a499c2f2e59f4dc5806d
+replication	replication test	2026-08-13T08:41:44.2864240Z Copying blob sha256:bdd3e27710b3bcb873ced1360922bb499bd0b8fcdecc3240bab5ab575ed54d9f
+replication	replication test	2026-08-13T08:41:44.3840878Z Copying blob sha256:f7a5244f5931747a93ec2fb19162990bf7eb51024f7062b3bd143144c5852b06
+replication	replication test	2026-08-13T08:41:44.4143062Z Copying blob sha256:6587c635a3f00622df8ece97c668384645c12f96566c8a2cdd452d8315cf4e6d
+replication	replication test	2026-08-13T08:41:44.4905922Z Copying blob sha256:6112925e0a96d068e15be16f89457abc981399e7b8bd912bbf924db6ae2ebaab
+replication	replication test	2026-08-13T08:41:44.5726559Z Copying blob sha256:cdecf6f5ef8c1463018d9ea0181d6eae745a67c5594a9c0e9f3f1a3b22ca6ebb
+replication	replication test	2026-08-13T08:41:44.5751680Z Copying blob sha256:74d3e1cc1e960d443a924276f256b1ed8e1246143155d9c2cf8836dd501fe278
+replication	replication test	2026-08-13T08:41:44.5776250Z Copying blob sha256:e95690419b7aacb459a4842ab5a028c3597f812d5414770f8453f2824e0a032b
+replication	replication test	2026-08-13T08:41:44.5801157Z Copying blob sha256:0f98ba51cffa6c6c4d80142f7bbc868cdfb817157f6c3b46590a46fc77cf37bb
+replication	replication test	2026-08-13T08:41:44.5836359Z Copying blob sha256:f827cb177415202aea19f39b1f2a840b91c25e49833aefcad27ba9a8ca436992
+replication	replication test	2026-08-13T08:41:44.5862498Z Copying blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
+replication	replication test	2026-08-13T08:41:44.5887399Z Copying blob sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
+replication	replication test	2026-08-13T08:41:44.5888689Z Copying blob sha256:5b289c93978bf7518ea4c85b6742c018ffc5a45bbf158ef54a69fe5510a018f5
+replication	replication test	2026-08-13T08:41:44.5932267Z Copying blob sha256:c305529b34dd0baf0818bce2fa22184c279cfaf4cf98387f366f751a7ae9304a
+replication	replication test	2026-08-13T08:41:44.5963606Z Copying blob sha256:22e033c84232cb50b987c1b77b8b72a04020e157632b63dd999511af310cd3c3
+replication	replication test	2026-08-13T08:41:44.7123241Z Copying blob sha256:9e60d2184632cdf4343474c890717153a3b60eb0b15dc36425c1c7b7b554c935
+replication	replication test	2026-08-13T08:41:44.7162261Z Copying blob sha256:d0555c3602c368a62bbcc3e202fe32d045ad51c67febcd98607c0505e0b01d8c
+replication	replication test	2026-08-13T08:41:44.7193595Z Copying blob sha256:d03f7fdacdb78956964ed88d0171be18c8af4ed84e2134ec5b534674b25b874d
+replication	replication test	2026-08-13T08:41:44.7523785Z Copying blob sha256:e3629a2db2f0f940ca62c012fc42b29228276383b41530efabb0910ac3bb02be
+replication	replication test	2026-08-13T08:41:44.8846317Z Copying blob sha256:d3b1d800d06e3555c888d7a7081f0d65ad057a3580d9e3ec0a094a423e30bec4
+replication	replication test	2026-08-13T08:41:45.0349573Z Copying blob sha256:88c2ee572b261a8f0f85de9442d24ce85d07a1c8eaadc5a6f48c319e5e789b8f
+replication	replication test	2026-08-13T08:41:45.4262951Z Copying blob sha256:5d6ae6135f7be13173fafe6e184537a32760ea93e8be56604ae90f97248fe76a
+replication	replication test	2026-08-13T08:41:45.8854276Z Copying blob sha256:5cfa22b7aaab710e30483524436be659c9990e5ab8a6202350fe161f2705f522
+replication	replication test	2026-08-13T08:41:46.7372409Z Copying blob sha256:565b7a9049bbae27e21ed67e0c0db11fe063d92f7b1c6e1d728cb7c1924600eb
+replication	replication test	2026-08-13T08:41:46.8296452Z Copying blob sha256:c4ea0d28282b364ed63c07a5e88711d3384bb5b44f740e9dc3038bbf4ca49284
+replication	replication test	2026-08-13T08:41:48.5263444Z Copying blob sha256:6c6311865de8149678482fbfb4070e03f14849ba903701f7be9d4bb1888576a1
+replication	replication test	2026-08-13T08:42:08.7623089Z Copying config sha256:edeaa89af382e03983a50d3f936e363cee9a38f1ca13b84b3dc0f1588427664d
+replication	replication test	2026-08-13T08:42:08.7686356Z Writing manifest to image destination
+replication	replication test	2026-08-13T08:42:09.1442410Z Loaded image: localhost/stornas-os:dev
+replication	replication test	2026-08-13T08:42:09.3220523Z Trying to pull quay.io/centos-bootc/bootc-image-builder:latest...
+replication	replication test	2026-08-13T08:42:11.0509145Z Getting image source signatures
+replication	replication test	2026-08-13T08:42:11.0512697Z Copying blob sha256:419b79a05f4b7b7596e704ce4aa07898ca036fd8f9cad5964b8cb2811ae51d21
+replication	replication test	2026-08-13T08:42:11.0514056Z Copying blob sha256:7f84c9a39298e72463000147c62d0984deac5fa9cac8554b8550ad0be039a119
+replication	replication test	2026-08-13T08:42:21.4161632Z Copying config sha256:ba9dec3a9a314dad88bfcdd2299a8d2b441ced1a833b5cc4a335f5ee315a3922
+replication	replication test	2026-08-13T08:42:21.4181181Z Writing manifest to image destination
+replication	replication test	2026-08-13T08:42:23.0375032Z Generating manifest manifest-qcow2.json
+replication	replication test	2026-08-13T08:42:25.6717146Z Manifest generation step
+replication	replication test	2026-08-13T08:42:27.3161931Z blueprint validation failed for image type "qcow2": customizations.filesystem: not supportedDone generating manifest
+replication	replication test	2026-08-13T08:42:27.3163686Z Disk image building step
+replication	replication test	2026-08-13T08:42:27.3164041Z Building manifest-qcow2.json
+replication	replication test	2026-08-13T08:42:27.5365735Z starting -Pipeline source org.osbuild.containers-storage: a35cdbc5e99a42ab884133455e5b1a256df791aad03753e009e1f3d5c5e3f916
+replication	replication test	2026-08-13T08:42:27.5366828Z Build
+replication	replication test	2026-08-13T08:42:27.5367436Z   root: <host>
+replication	replication test	2026-08-13T08:42:27.6465263Z Pipeline build: 946310fe6b2d9b9de97fc1386c22449d28ed1f0e99cd69628200e375a33db06a
+replication	replication test	2026-08-13T08:42:27.6466108Z Build
+replication	replication test	2026-08-13T08:42:27.6466497Z   root: <host>
+replication	replication test	2026-08-13T08:42:27.6467104Z   runner: org.osbuild.fedora38 (org.osbuild.fedora38)
+replication	replication test	2026-08-13T08:42:27.6512551Z org.osbuild.container-deploy: dc3206a6c6d2734dc2dea74aba90310c656610c279b40809e0fb110456376816 {
+replication	replication test	2026-08-13T08:42:27.6513474Z   "remove-signatures": true
+replication	replication test	2026-08-13T08:42:27.6514087Z }
+replication	replication test	2026-08-13T08:42:45.9632084Z edeaa89af382e03983a50d3f936e363cee9a38f1ca13b84b3dc0f1588427664d
+replication	replication test	2026-08-13T08:42:45.9820150Z umount: /run/osbuild/containers/storage/overlay: not mounted.
+replication	replication test	2026-08-13T08:42:45.9823232Z WARNING: umount of overlay dir failed with an error: CompletedProcess(args=['umount', '-f', '--lazy', '/run/osbuild/containers/storage/overlay'], returncode=32)
+replication	replication test	2026-08-13T08:42:50.2607190Z 
+replication	replication test	2026-08-13T08:42:50.2608718Z ⏱  Duration: 22.61s
+replication	replication test	2026-08-13T08:42:50.2609732Z org.osbuild.selinux: 946310fe6b2d9b9de97fc1386c22449d28ed1f0e99cd69628200e375a33db06a {
+replication	replication test	2026-08-13T08:42:50.2610853Z   "file_contexts": "etc/selinux/targeted/contexts/files/file_contexts",
+replication	replication test	2026-08-13T08:42:50.2611830Z   "exclude_paths": [
+replication	replication test	2026-08-13T08:42:50.2612271Z     "/sysroot"
+replication	replication test	2026-08-13T08:42:50.2612621Z   ],
+replication	replication test	2026-08-13T08:42:50.2612975Z   "labels": {
+replication	replication test	2026-08-13T08:42:50.2613655Z     "/usr/bin/mount": "system_u:object_r:install_exec_t:s0",
+replication	replication test	2026-08-13T08:42:50.2614580Z     "/usr/bin/ostree": "system_u:object_r:install_exec_t:s0",
+replication	replication test	2026-08-13T08:42:50.2615504Z     "/usr/bin/umount": "system_u:object_r:install_exec_t:s0"
+replication	replication test	2026-08-13T08:42:50.2616103Z   }
+replication	replication test	2026-08-13T08:42:50.2616417Z }
+replication	replication test	2026-08-13T08:42:50.4642391Z setfiles: /run/osbuild/tree/etc/selinux/targeted/contexts/files/file_contexts.bin:  Regex version mismatch, expected: 10.46 2025-08-27 actual: 10.44 2024-06-07
+replication	replication test	2026-08-13T08:42:50.4656002Z setfiles: /run/osbuild/tree/etc/selinux/targeted/contexts/files/file_contexts.homedirs.bin:  Regex version mismatch, expected: 10.46 2025-08-27 actual: 10.44 2024-06-07
+replication	replication test	2026-08-13T08:42:51.7241004Z 
+replication	replication test	2026-08-13T08:42:51.7242033Z ⏱  Duration: 1.46s
+replication	replication test	2026-08-13T08:42:51.7242625Z Pipeline image: 40f06d1f251adfc8f02e04c153ae9aafa2e623a3a2f68a1c77808fb085fa212a
+replication	replication test	2026-08-13T08:42:51.7243066Z Build
+replication	replication test	2026-08-13T08:42:51.7243953Z   root: 946310fe6b2d9b9de97fc1386c22449d28ed1f0e99cd69628200e375a33db06a
+replication	replication test	2026-08-13T08:42:51.7244943Z   runner: org.osbuild.linux (org.osbuild.linux)
+replication	replication test	2026-08-13T08:42:51.7257489Z org.osbuild.truncate: 04bbb8ce3e5810d349329922d7a19e16a0887af4edf3dc6509ed26542f81db16 {
+replication	replication test	2026-08-13T08:42:51.7258838Z   "filename": "disk.raw",
+replication	replication test	2026-08-13T08:42:51.7259169Z   "size": "33814478848"
+replication	replication test	2026-08-13T08:42:51.7259402Z }
+replication	replication test	2026-08-13T08:42:52.1038028Z 
+replication	replication test	2026-08-13T08:42:52.1039376Z ⏱  Duration: 0.38s
+replication	replication test	2026-08-13T08:42:52.1040808Z org.osbuild.sfdisk: e17b6d0c3da79ece074dd27dc7314f5a289c643047363f472ce1e8d70c4defe0 {
+replication	replication test	2026-08-13T08:42:52.1042407Z   "label": "gpt",
+replication	replication test	2026-08-13T08:42:52.1043129Z   "uuid": "87e5fa0e-8052-4a67-a504-bf243c71eeb7",
+replication	replication test	2026-08-13T08:42:52.1044172Z   "partitions": [
+replication	replication test	2026-08-13T08:42:52.1044588Z     {
+replication	replication test	2026-08-13T08:42:52.1045003Z       "bootable": true,
+replication	replication test	2026-08-13T08:42:52.1045645Z       "size": 2048,
+replication	replication test	2026-08-13T08:42:52.1046070Z       "start": 2048,
+replication	replication test	2026-08-13T08:42:52.1046701Z       "type": "21686148-6449-6E6F-744E-656564454649",
+replication	replication test	2026-08-13T08:42:52.1047477Z       "uuid": "6967ed1b-24c4-46bd-928c-db0c98f43322"
+replication	replication test	2026-08-13T08:42:52.1047988Z     },
+replication	replication test	2026-08-13T08:42:52.1048293Z     {
+replication	replication test	2026-08-13T08:42:52.1048677Z       "size": 1026048,
+replication	replication test	2026-08-13T08:42:52.1049115Z       "start": 4096,
+replication	replication test	2026-08-13T08:42:52.1049769Z       "type": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+replication	replication test	2026-08-13T08:42:52.1050556Z       "uuid": "d4bb2eee-9b75-438c-9832-82404079dd06"
+replication	replication test	2026-08-13T08:42:52.1051066Z     },
+replication	replication test	2026-08-13T08:42:52.1051635Z     {
+replication	replication test	2026-08-13T08:42:52.1052009Z       "size": 2097152,
+replication	replication test	2026-08-13T08:42:52.1052508Z       "start": 1030144,
+replication	replication test	2026-08-13T08:42:52.1053187Z       "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+replication	replication test	2026-08-13T08:42:52.1053880Z       "uuid": "8ee481c2-7d0d-45c9-9c97-475eeca8c8db"
+replication	replication test	2026-08-13T08:42:52.1054403Z     },
+replication	replication test	2026-08-13T08:42:52.1054600Z     {
+replication	replication test	2026-08-13T08:42:52.1055007Z       "size": 62916575,
+replication	replication test	2026-08-13T08:42:52.1055374Z       "start": 3127296,
+replication	replication test	2026-08-13T08:42:52.1055900Z       "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+replication	replication test	2026-08-13T08:42:52.1056551Z       "uuid": "d802c0ae-e956-4a53-aad4-9fbbae801a5c"
+replication	replication test	2026-08-13T08:42:52.1057051Z     }
+replication	replication test	2026-08-13T08:42:52.1057276Z   ]
+replication	replication test	2026-08-13T08:42:52.1057597Z }
+replication	replication test	2026-08-13T08:42:52.2062976Z device/device (org.osbuild.loopback): loop0 acquired (locked: True)
+replication	replication test	2026-08-13T08:42:52.5444689Z label: gpt
+replication	replication test	2026-08-13T08:42:52.5445244Z label-id: 87e5fa0e-8052-4a67-a504-bf243c71eeb7
+replication	replication test	2026-08-13T08:42:52.5446212Z start="2048", size="2048", type="21686148-6449-6E6F-744E-656564454649", uuid="6967ed1b-24c4-46bd-928c-db0c98f43322", bootable
+replication	replication test	2026-08-13T08:42:52.5447698Z start="4096", size="1026048", type="C12A7328-F81F-11D2-BA4B-00A0C93EC93B", uuid="d4bb2eee-9b75-438c-9832-82404079dd06"
+replication	replication test	2026-08-13T08:42:52.5449013Z start="1030144", size="2097152", type="0FC63DAF-8483-4772-8E79-3D69D8477DE4", uuid="8ee481c2-7d0d-45c9-9c97-475eeca8c8db"
+replication	replication test	2026-08-13T08:42:52.5451118Z start="3127296", size="62916575", type="0FC63DAF-8483-4772-8E79-3D69D8477DE4", uuid="d802c0ae-e956-4a53-aad4-9fbbae801a5c"
+replication	replication test	2026-08-13T08:42:52.5713606Z {
+replication	replication test	2026-08-13T08:42:52.5714117Z    "partitiontable": {
+replication	replication test	2026-08-13T08:42:52.5714567Z       "label": "gpt",
+replication	replication test	2026-08-13T08:42:52.5715165Z       "id": "87E5FA0E-8052-4A67-A504-BF243C71EEB7",
+replication	replication test	2026-08-13T08:42:52.5715758Z       "device": "/dev/loop0",
+replication	replication test	2026-08-13T08:42:52.5716252Z       "unit": "sectors",
+replication	replication test	2026-08-13T08:42:52.5716683Z       "firstlba": 2048,
+replication	replication test	2026-08-13T08:42:52.5717108Z       "lastlba": 66043870,
+replication	replication test	2026-08-13T08:42:52.5717525Z       "sectorsize": 512,
+replication	replication test	2026-08-13T08:42:52.5717960Z       "partitions": [
+replication	replication test	2026-08-13T08:42:52.5718325Z          {
+replication	replication test	2026-08-13T08:42:52.5718846Z             "node": "/dev/loop0p1",
+replication	replication test	2026-08-13T08:42:52.5719360Z             "start": 2048,
+replication	replication test	2026-08-13T08:42:52.5719843Z             "size": 2048,
+replication	replication test	2026-08-13T08:42:52.5720622Z             "type": "21686148-6449-6E6F-744E-656564454649",
+replication	replication test	2026-08-13T08:42:52.5721726Z             "uuid": "6967ED1B-24C4-46BD-928C-DB0C98F43322"
+replication	replication test	2026-08-13T08:42:52.5722257Z          },{
+replication	replication test	2026-08-13T08:42:52.5722797Z             "node": "/dev/loop0p2",
+replication	replication test	2026-08-13T08:42:52.5723330Z             "start": 4096,
+replication	replication test	2026-08-13T08:42:52.5723832Z             "size": 1026048,
+replication	replication test	2026-08-13T08:42:52.5724623Z             "type": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+replication	replication test	2026-08-13T08:42:52.5725510Z             "uuid": "D4BB2EEE-9B75-438C-9832-82404079DD06"
+replication	replication test	2026-08-13T08:42:52.5726447Z          },{
+replication	replication test	2026-08-13T08:42:52.5726981Z             "node": "/dev/loop0p3",
+replication	replication test	2026-08-13T08:42:52.5727517Z             "start": 1030144,
+replication	replication test	2026-08-13T08:42:52.5728279Z             "size": 2097152,
+replication	replication test	2026-08-13T08:42:52.5729058Z             "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+replication	replication test	2026-08-13T08:42:52.5730367Z             "uuid": "8EE481C2-7D0D-45C9-9C97-475EECA8C8DB"
+replication	replication test	2026-08-13T08:42:52.5731419Z          },{
+replication	replication test	2026-08-13T08:42:52.5732184Z             "node": "/dev/loop0p4",
+replication	replication test	2026-08-13T08:42:52.5732935Z             "start": 3127296,
+replication	replication test	2026-08-13T08:42:52.5733640Z             "size": 62916575,
+replication	replication test	2026-08-13T08:42:52.5734606Z             "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+replication	replication test	2026-08-13T08:42:52.5735689Z             "uuid": "D802C0AE-E956-4A53-AAD4-9FBBAE801A5C"
+replication	replication test	2026-08-13T08:42:52.5736408Z          }
+replication	replication test	2026-08-13T08:42:52.5736921Z       ]
+replication	replication test	2026-08-13T08:42:52.5737396Z    }
+replication	replication test	2026-08-13T08:42:52.5737854Z }
+replication	replication test	2026-08-13T08:42:52.6214032Z 
+replication	replication test	2026-08-13T08:42:52.6216025Z ⏱  Duration: 0.52s
+replication	replication test	2026-08-13T08:42:52.6217535Z org.osbuild.mkfs.fat: 3bc2c9604aa50928f3c520504d9de8688e0ccfc84955f5423c047c52af529413 {
+replication	replication test	2026-08-13T08:42:52.6218648Z   "volid": "FD17ECD8",
+replication	replication test	2026-08-13T08:42:52.6219325Z   "label": "EFI-SYSTEM"
+replication	replication test	2026-08-13T08:42:52.6219892Z }
+replication	replication test	2026-08-13T08:42:52.7084189Z device/device (org.osbuild.loopback): loop0 acquired (locked: True)
+replication	replication test	2026-08-13T08:42:53.0488982Z mkfs.fat 4.2 (2021-01-31)
+replication	replication test	2026-08-13T08:42:53.0983792Z 
+replication	replication test	2026-08-13T08:42:53.0984856Z ⏱  Duration: 0.48s
+replication	replication test	2026-08-13T08:42:53.0986241Z org.osbuild.mkfs.xfs: 605e6df301fd89744b711ef9ac67c95f213d6056243f1fc71908a344b8bc5f3c {
+replication	replication test	2026-08-13T08:42:53.0987407Z   "uuid": "3b9d6658-4455-4758-ba1a-33c40e1c9bc5",
+replication	replication test	2026-08-13T08:42:53.0988128Z   "label": "boot"
+replication	replication test	2026-08-13T08:42:53.0988503Z }
+replication	replication test	2026-08-13T08:42:53.1856986Z device/device (org.osbuild.loopback): loop0 acquired (locked: True)
+replication	replication test	2026-08-13T08:42:53.5229453Z meta-data=/dev/loop0             isize=512    agcount=4, agsize=65536 blks
+replication	replication test	2026-08-13T08:42:53.5230911Z          =                       sectsz=512   attr=2, projid32bit=1
+replication	replication test	2026-08-13T08:42:53.5232208Z          =                       crc=1        finobt=1, sparse=1, rmapbt=1
+replication	replication test	2026-08-13T08:42:53.5233260Z          =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+replication	replication test	2026-08-13T08:42:53.5234116Z          =                       exchange=0   metadir=0
+replication	replication test	2026-08-13T08:42:53.5234741Z data     =                       bsize=4096   blocks=262144, imaxpct=25
+replication	replication test	2026-08-13T08:42:53.5235399Z          =                       sunit=0      swidth=0 blks
+replication	replication test	2026-08-13T08:42:53.5235913Z naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+replication	replication test	2026-08-13T08:42:53.5236453Z log      =internal log           bsize=4096   blocks=16384, version=2
+replication	replication test	2026-08-13T08:42:53.5237032Z          =                       sectsz=512   sunit=0 blks, lazy-count=1
+replication	replication test	2026-08-13T08:42:53.5237507Z realtime =none                   extsz=4096   blocks=0, rtextents=0
+replication	replication test	2026-08-13T08:42:53.5238039Z          =                       rgcount=0    rgsize=0 extents
+replication	replication test	2026-08-13T08:42:53.5238548Z          =                       zoned=0      start=0 reserved=0
+replication	replication test	2026-08-13T08:42:53.5284756Z Discarding blocks...Done.
+replication	replication test	2026-08-13T08:42:53.5790549Z 
+replication	replication test	2026-08-13T08:42:53.5792052Z ⏱  Duration: 0.48s
+replication	replication test	2026-08-13T08:42:53.5793487Z org.osbuild.mkfs.xfs: 0833b6a1c4d883548f514b21544fa3b36e8183f4eb4b90d16f4392210d3f24f0 {
+replication	replication test	2026-08-13T08:42:53.5794867Z   "uuid": "10de29b2-9e1a-4f45-84d3-f5fcbe8df47c",
+replication	replication test	2026-08-13T08:42:53.5795353Z   "label": "root"
+replication	replication test	2026-08-13T08:42:53.5795806Z }
+replication	replication test	2026-08-13T08:42:53.6664819Z device/device (org.osbuild.loopback): loop0 acquired (locked: True)
+replication	replication test	2026-08-13T08:42:54.0026480Z meta-data=/dev/loop0             isize=512    agcount=4, agsize=1966143 blks
+replication	replication test	2026-08-13T08:42:54.0027208Z          =                       sectsz=512   attr=2, projid32bit=1
+replication	replication test	2026-08-13T08:42:54.0027803Z          =                       crc=1        finobt=1, sparse=1, rmapbt=1
+replication	replication test	2026-08-13T08:42:54.0028437Z          =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+replication	replication test	2026-08-13T08:42:54.0029342Z          =                       exchange=0   metadir=0
+replication	replication test	2026-08-13T08:42:54.0029793Z data     =                       bsize=4096   blocks=7864571, imaxpct=25
+replication	replication test	2026-08-13T08:42:54.0030327Z          =                       sunit=0      swidth=0 blks
+replication	replication test	2026-08-13T08:42:54.0031014Z naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+replication	replication test	2026-08-13T08:42:54.0032682Z log      =internal log           bsize=4096   blocks=16384, version=2
+replication	replication test	2026-08-13T08:42:54.0033881Z          =                       sectsz=512   sunit=0 blks, lazy-count=1
+replication	replication test	2026-08-13T08:42:54.0034767Z realtime =none                   extsz=4096   blocks=0, rtextents=0
+replication	replication test	2026-08-13T08:42:54.0035731Z          =                       rgcount=0    rgsize=0 extents
+replication	replication test	2026-08-13T08:42:54.0036281Z          =                       zoned=0      start=0 reserved=0
+replication	replication test	2026-08-13T08:42:54.0090239Z Discarding blocks...Done.
+replication	replication test	2026-08-13T08:42:54.0593331Z 
+replication	replication test	2026-08-13T08:42:54.0596542Z ⏱  Duration: 0.48s
+replication	replication test	2026-08-13T08:42:54.0597936Z org.osbuild.bootc.install-to-filesystem: 1d8b0dd95308b09629db61fed74e271f0ae340a6f5b228382807ad07095d6008 {
+replication	replication test	2026-08-13T08:42:54.0599046Z   "kernel-args": [
+replication	replication test	2026-08-13T08:42:54.0599391Z     "rw",
+replication	replication test	2026-08-13T08:42:54.0599763Z     "console=tty0",
+replication	replication test	2026-08-13T08:42:54.0600252Z     "console=ttyS0"
+replication	replication test	2026-08-13T08:42:54.0600658Z   ],
+replication	replication test	2026-08-13T08:42:54.0601001Z   "target-imgref": "localhost/stornas-os:dev"
+replication	replication test	2026-08-13T08:42:54.0601766Z }
+replication	replication test	2026-08-13T08:42:54.2305631Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:42:54.3179612Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-0keds491/mounts/
+replication	replication test	2026-08-13T08:42:54.7258550Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-0keds491/mounts/boot
+replication	replication test	2026-08-13T08:42:54.8092131Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-0keds491/mounts/boot/efi
+replication	replication test	2026-08-13T08:42:55.2315870Z Installing image: docker://localhost/stornas-os:dev
+replication	replication test	2026-08-13T08:42:55.2456919Z Initializing ostree layout
+replication	replication test	2026-08-13T08:42:55.4023502Z layers already present: 0; layers needed: 103 (5.2 GB)
+replication	replication test	2026-08-13T08:44:37.8927059Z Deploying container image...done (12 seconds)
+replication	replication test	2026-08-13T08:44:38.3136536Z Bootloader: grub
+replication	replication test	2026-08-13T08:44:38.3137364Z Installing bootloader via bootupd
+replication	replication test	2026-08-13T08:44:39.0789166Z Added 01_users.cfg
+replication	replication test	2026-08-13T08:44:39.0790093Z Added 08_greenboot.cfg
+replication	replication test	2026-08-13T08:44:39.0791801Z Added 10_blscfg.cfg
+replication	replication test	2026-08-13T08:44:39.0794149Z Added 14_menu_show_once.cfg
+replication	replication test	2026-08-13T08:44:39.0796548Z Added 30_uefi-firmware.cfg
+replication	replication test	2026-08-13T08:44:39.0800139Z Added 41_custom.cfg
+replication	replication test	2026-08-13T08:44:39.0816957Z Installed: grub.cfg
+replication	replication test	2026-08-13T08:44:39.0879681Z Installed: bootuuid.cfg
+replication	replication test	2026-08-13T08:44:39.1078347Z Installed: "centos/grub.cfg"
+replication	replication test	2026-08-13T08:44:39.1079079Z Installed: "centos/bootuuid.cfg"
+replication	replication test	2026-08-13T08:44:39.9923752Z Trimming root
+replication	replication test	2026-08-13T08:44:40.0130632Z .: 30 GiB (32213282816 bytes) trimmed
+replication	replication test	2026-08-13T08:44:40.0133120Z Finalizing filesystem root
+replication	replication test	2026-08-13T08:44:40.2017124Z Trimming boot
+replication	replication test	2026-08-13T08:44:40.2078437Z boot: 1 GiB (1073741824 bytes) trimmed
+replication	replication test	2026-08-13T08:44:40.2079569Z Finalizing filesystem boot
+replication	replication test	2026-08-13T08:44:40.2268520Z Installation complete!
+replication	replication test	2026-08-13T08:44:40.2432259Z umount: /run/osbuild/containers/storage/overlay: not mounted.
+replication	replication test	2026-08-13T08:44:40.2444377Z WARNING: umount of overlay dir failed with an error: CompletedProcess(args=['umount', '-f', '--lazy', '/run/osbuild/containers/storage/overlay'], returncode=32)
+replication	replication test	2026-08-13T08:44:40.2799561Z mount/boot-efi (org.osbuild.fat): umount: /store/tmp/buildroot-tmp-0keds491/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:40.3013302Z mount/boot (org.osbuild.xfs): umount: /store/tmp/buildroot-tmp-0keds491/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:40.6007037Z mount/- (org.osbuild.xfs): umount: /store/tmp/buildroot-tmp-0keds491/mounts/ unmounted
+replication	replication test	2026-08-13T08:44:40.6635538Z 
+replication	replication test	2026-08-13T08:44:40.6636769Z ⏱  Duration: 106.60s
+replication	replication test	2026-08-13T08:44:40.6637991Z org.osbuild.systemd.unit.create: 3106028d36cd5411b44f8237d44b086c0a399f8001e9009918c5cd9ae3507219 {
+replication	replication test	2026-08-13T08:44:40.6639435Z   "filename": "-.mount",
+replication	replication test	2026-08-13T08:44:40.6639950Z   "unit-path": "etc",
+replication	replication test	2026-08-13T08:44:40.6640445Z   "config": {
+replication	replication test	2026-08-13T08:44:40.6640865Z     "Unit": {
+replication	replication test	2026-08-13T08:44:40.6641681Z       "DefaultDependencies": true
+replication	replication test	2026-08-13T08:44:40.6642196Z     },
+replication	replication test	2026-08-13T08:44:40.6642574Z     "Mount": {
+replication	replication test	2026-08-13T08:44:40.6643476Z       "What": "/dev/disk/by-uuid/10de29b2-9e1a-4f45-84d3-f5fcbe8df47c",
+replication	replication test	2026-08-13T08:44:40.6644234Z       "Where": "/",
+replication	replication test	2026-08-13T08:44:40.6644676Z       "Type": "xfs",
+replication	replication test	2026-08-13T08:44:40.6645148Z       "Options": "ro"
+replication	replication test	2026-08-13T08:44:40.6645567Z     },
+replication	replication test	2026-08-13T08:44:40.6645943Z     "Install": {
+replication	replication test	2026-08-13T08:44:40.6646395Z       "WantedBy": [
+replication	replication test	2026-08-13T08:44:40.6646893Z         "multi-user.target"
+replication	replication test	2026-08-13T08:44:40.6647353Z       ]
+replication	replication test	2026-08-13T08:44:40.6647696Z     }
+replication	replication test	2026-08-13T08:44:40.6648028Z   }
+replication	replication test	2026-08-13T08:44:40.6648355Z }
+replication	replication test	2026-08-13T08:44:40.7638182Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:40.8578172Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-h172c6_b/mounts/
+replication	replication test	2026-08-13T08:44:40.9443719Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-h172c6_b/mounts/boot
+replication	replication test	2026-08-13T08:44:41.0323367Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-h172c6_b/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:41.1633698Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:41.6421508Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:41.6424149Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:41.6428324Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:41.6433007Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:41.6642222Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-h172c6_b/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-h172c6_b/mounts
+replication	replication test	2026-08-13T08:44:41.6644973Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:41.6647029Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:41.6649203Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:41.6651872Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts unmounted
+replication	replication test	2026-08-13T08:44:41.6655821Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts unmounted
+replication	replication test	2026-08-13T08:44:41.6685639Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:41.6707724Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:41.6733888Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-h172c6_b/mounts unmounted
+replication	replication test	2026-08-13T08:44:41.6899984Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-h172c6_b/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:41.7044932Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-h172c6_b/mounts/boot
+replication	replication test	2026-08-13T08:44:41.7190225Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-h172c6_b/mounts/
+replication	replication test	2026-08-13T08:44:41.7550422Z 
+replication	replication test	2026-08-13T08:44:41.7551983Z ⏱  Duration: 1.09s
+replication	replication test	2026-08-13T08:44:41.7553304Z org.osbuild.systemd.unit.create: b87e841727c618bc8501b2a9597a23c27b0f738836ac52b1ea0da1f2a32273ed {
+replication	replication test	2026-08-13T08:44:41.7554434Z   "filename": "boot-efi.mount",
+replication	replication test	2026-08-13T08:44:41.7554968Z   "unit-path": "etc",
+replication	replication test	2026-08-13T08:44:41.7555399Z   "config": {
+replication	replication test	2026-08-13T08:44:41.7555783Z     "Unit": {
+replication	replication test	2026-08-13T08:44:41.7556346Z       "DefaultDependencies": true
+replication	replication test	2026-08-13T08:44:41.7556825Z     },
+replication	replication test	2026-08-13T08:44:41.7557187Z     "Mount": {
+replication	replication test	2026-08-13T08:44:41.7557740Z       "What": "/dev/disk/by-uuid/FD17-ECD8",
+replication	replication test	2026-08-13T08:44:41.7558319Z       "Where": "/boot/efi",
+replication	replication test	2026-08-13T08:44:41.7558791Z       "Type": "vfat",
+replication	replication test	2026-08-13T08:44:41.7559391Z       "Options": "umask=0077,shortname=winnt"
+replication	replication test	2026-08-13T08:44:41.7559901Z     },
+replication	replication test	2026-08-13T08:44:41.7560289Z     "Install": {
+replication	replication test	2026-08-13T08:44:41.7560720Z       "WantedBy": [
+replication	replication test	2026-08-13T08:44:41.7561555Z         "multi-user.target"
+replication	replication test	2026-08-13T08:44:41.7562040Z       ]
+replication	replication test	2026-08-13T08:44:41.7562365Z     }
+replication	replication test	2026-08-13T08:44:41.7562681Z   }
+replication	replication test	2026-08-13T08:44:41.7563002Z }
+replication	replication test	2026-08-13T08:44:41.8480061Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:41.9492279Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-peafb8ok/mounts/
+replication	replication test	2026-08-13T08:44:42.0349904Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-peafb8ok/mounts/boot
+replication	replication test	2026-08-13T08:44:42.1208001Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-peafb8ok/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:42.2191716Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:42.6853760Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:42.6856574Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:42.6860476Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:42.6864810Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:42.7073615Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-peafb8ok/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-peafb8ok/mounts
+replication	replication test	2026-08-13T08:44:42.7076836Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:42.7078963Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:42.7080811Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:42.7084900Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts unmounted
+replication	replication test	2026-08-13T08:44:42.7088185Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts unmounted
+replication	replication test	2026-08-13T08:44:42.7118065Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:42.7143404Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:42.7175637Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-peafb8ok/mounts unmounted
+replication	replication test	2026-08-13T08:44:42.7341432Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-peafb8ok/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:42.7482849Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-peafb8ok/mounts/boot
+replication	replication test	2026-08-13T08:44:42.7628056Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-peafb8ok/mounts/
+replication	replication test	2026-08-13T08:44:42.7998912Z 
+replication	replication test	2026-08-13T08:44:42.8000320Z ⏱  Duration: 1.05s
+replication	replication test	2026-08-13T08:44:42.8002004Z org.osbuild.systemd.unit.create: f71b83a95a505a8ca26119a8d049e56c8144663e2c662f17c89b88cfd0217132 {
+replication	replication test	2026-08-13T08:44:42.8003189Z   "filename": "boot.mount",
+replication	replication test	2026-08-13T08:44:42.8003880Z   "unit-path": "etc",
+replication	replication test	2026-08-13T08:44:42.8004483Z   "config": {
+replication	replication test	2026-08-13T08:44:42.8004907Z     "Unit": {
+replication	replication test	2026-08-13T08:44:42.8005431Z       "DefaultDependencies": true
+replication	replication test	2026-08-13T08:44:42.8005901Z     },
+replication	replication test	2026-08-13T08:44:42.8006261Z     "Mount": {
+replication	replication test	2026-08-13T08:44:42.8007055Z       "What": "/dev/disk/by-uuid/3b9d6658-4455-4758-ba1a-33c40e1c9bc5",
+replication	replication test	2026-08-13T08:44:42.8007737Z       "Where": "/boot",
+replication	replication test	2026-08-13T08:44:42.8008230Z       "Type": "xfs",
+replication	replication test	2026-08-13T08:44:42.8008747Z       "Options": "ro"
+replication	replication test	2026-08-13T08:44:42.8009130Z     },
+replication	replication test	2026-08-13T08:44:42.8009488Z     "Install": {
+replication	replication test	2026-08-13T08:44:42.8009911Z       "WantedBy": [
+replication	replication test	2026-08-13T08:44:42.8010306Z         "multi-user.target"
+replication	replication test	2026-08-13T08:44:42.8010751Z       ]
+replication	replication test	2026-08-13T08:44:42.8011046Z     }
+replication	replication test	2026-08-13T08:44:42.8011616Z   }
+replication	replication test	2026-08-13T08:44:42.8011910Z }
+replication	replication test	2026-08-13T08:44:42.8919117Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:42.9856999Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-ykdi5gqf/mounts/
+replication	replication test	2026-08-13T08:44:43.0728143Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot
+replication	replication test	2026-08-13T08:44:43.1602647Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:43.2590405Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:43.8114101Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:43.8118576Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:43.8123399Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:43.8132336Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:43.8395739Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-ykdi5gqf/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-ykdi5gqf/mounts
+replication	replication test	2026-08-13T08:44:43.8401434Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:43.8403428Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:43.8405398Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:43.8407288Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts unmounted
+replication	replication test	2026-08-13T08:44:43.8409076Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts unmounted
+replication	replication test	2026-08-13T08:44:43.8434028Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:43.8455795Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:43.8496373Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ykdi5gqf/mounts unmounted
+replication	replication test	2026-08-13T08:44:43.8738242Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:43.8939026Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/boot
+replication	replication test	2026-08-13T08:44:43.9095905Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-ykdi5gqf/mounts/
+replication	replication test	2026-08-13T08:44:43.9561465Z 
+replication	replication test	2026-08-13T08:44:43.9563088Z ⏱  Duration: 1.16s
+replication	replication test	2026-08-13T08:44:43.9564538Z org.osbuild.systemd: 1c3c01a7c0dfbcbb5d5fd272bee9dab0af8d8fb98696874ed1eff8cc88f187dc {
+replication	replication test	2026-08-13T08:44:43.9565749Z   "enabled_services": [
+replication	replication test	2026-08-13T08:44:43.9566391Z     "-.mount",
+replication	replication test	2026-08-13T08:44:43.9566967Z     "boot-efi.mount",
+replication	replication test	2026-08-13T08:44:43.9567640Z     "boot.mount"
+replication	replication test	2026-08-13T08:44:43.9568212Z   ]
+replication	replication test	2026-08-13T08:44:43.9568822Z }
+replication	replication test	2026-08-13T08:44:44.0633579Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:44.1676503Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-up3v7h74/mounts/
+replication	replication test	2026-08-13T08:44:44.2577303Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-up3v7h74/mounts/boot
+replication	replication test	2026-08-13T08:44:44.3427808Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-up3v7h74/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:44.4398338Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:44.8948989Z Created symlink '/run/osbuild/tree/etc/systemd/system/multi-user.target.wants/-.mount' → '/etc/systemd/system/-.mount'.
+replication	replication test	2026-08-13T08:44:44.8996999Z Created symlink '/run/osbuild/tree/etc/systemd/system/multi-user.target.wants/boot-efi.mount' → '/etc/systemd/system/boot-efi.mount'.
+replication	replication test	2026-08-13T08:44:44.9039870Z Created symlink '/run/osbuild/tree/etc/systemd/system/multi-user.target.wants/boot.mount' → '/etc/systemd/system/boot.mount'.
+replication	replication test	2026-08-13T08:44:44.9379079Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:44.9382212Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:44.9386472Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:44.9390019Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:44.9603478Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-up3v7h74/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-up3v7h74/mounts
+replication	replication test	2026-08-13T08:44:44.9606577Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:44.9608463Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:44.9610387Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:44.9612530Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts unmounted
+replication	replication test	2026-08-13T08:44:44.9616851Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts unmounted
+replication	replication test	2026-08-13T08:44:44.9646820Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:44.9667618Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:44.9694069Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-up3v7h74/mounts unmounted
+replication	replication test	2026-08-13T08:44:44.9859487Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-up3v7h74/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:45.0000296Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-up3v7h74/mounts/boot
+replication	replication test	2026-08-13T08:44:45.0139238Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-up3v7h74/mounts/
+replication	replication test	2026-08-13T08:44:45.0503793Z 
+replication	replication test	2026-08-13T08:44:45.0505167Z ⏱  Duration: 1.09s
+replication	replication test	2026-08-13T08:44:45.0506474Z org.osbuild.mkdir: bacf382de8b3c6c0f542c2910a53123624ded8010910c72cb3923489c9c67c11 {
+replication	replication test	2026-08-13T08:44:45.0507384Z   "paths": [
+replication	replication test	2026-08-13T08:44:45.0507759Z     {
+replication	replication test	2026-08-13T08:44:45.0508274Z       "path": "/var/roothome",
+replication	replication test	2026-08-13T08:44:45.0508820Z       "mode": 448,
+replication	replication test	2026-08-13T08:44:45.0509268Z       "exist_ok": true
+replication	replication test	2026-08-13T08:44:45.0509697Z     }
+replication	replication test	2026-08-13T08:44:45.0509909Z   ]
+replication	replication test	2026-08-13T08:44:45.0510092Z }
+replication	replication test	2026-08-13T08:44:45.1413801Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:45.2346812Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-ez37rk99/mounts/
+replication	replication test	2026-08-13T08:44:45.3189552Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-ez37rk99/mounts/boot
+replication	replication test	2026-08-13T08:44:45.4047222Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-ez37rk99/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:45.5004473Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:45.9632718Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:45.9635552Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:45.9639801Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:45.9644080Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:45.9827487Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-ez37rk99/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-ez37rk99/mounts
+replication	replication test	2026-08-13T08:44:45.9829568Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:45.9831546Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:45.9833497Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:45.9837220Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts unmounted
+replication	replication test	2026-08-13T08:44:45.9841117Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts unmounted
+replication	replication test	2026-08-13T08:44:45.9870937Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:45.9903895Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:45.9923418Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-ez37rk99/mounts unmounted
+replication	replication test	2026-08-13T08:44:46.0088090Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-ez37rk99/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:46.0243241Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-ez37rk99/mounts/boot
+replication	replication test	2026-08-13T08:44:46.0369909Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-ez37rk99/mounts/
+replication	replication test	2026-08-13T08:44:46.0732494Z 
+replication	replication test	2026-08-13T08:44:46.0733481Z ⏱  Duration: 1.02s
+replication	replication test	2026-08-13T08:44:46.0734562Z org.osbuild.users: 903f8432f48a9a51f0fb3c4ca89546b06aa1c9b1f04b53c13f82ff4a7425ab62 {
+replication	replication test	2026-08-13T08:44:46.0735064Z   "users": {
+replication	replication test	2026-08-13T08:44:46.0735300Z     "root": {
+replication	replication test	2026-08-13T08:44:46.0736072Z       "key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB9Tigpwcdi4OP2dLw4dDNh3OxrQjIx1XAJbfej9Pvtv runner@runnervmvrwv9"
+replication	replication test	2026-08-13T08:44:46.0736652Z     }
+replication	replication test	2026-08-13T08:44:46.0736836Z   }
+replication	replication test	2026-08-13T08:44:46.0737016Z }
+replication	replication test	2026-08-13T08:44:46.1649656Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:46.2588318Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-4ujmc67e/mounts/
+replication	replication test	2026-08-13T08:44:46.3450842Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot
+replication	replication test	2026-08-13T08:44:46.4282550Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:46.5249831Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:46.9867748Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:46.9870183Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:46.9874627Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:46.9878476Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:47.0087720Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-4ujmc67e/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-4ujmc67e/mounts
+replication	replication test	2026-08-13T08:44:47.0089877Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:47.0091787Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:47.0093353Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:47.0096137Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts unmounted
+replication	replication test	2026-08-13T08:44:47.0099544Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts unmounted
+replication	replication test	2026-08-13T08:44:47.0129926Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:47.0148273Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:47.0173304Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-4ujmc67e/mounts unmounted
+replication	replication test	2026-08-13T08:44:47.0339933Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:47.0477109Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-4ujmc67e/mounts/boot
+replication	replication test	2026-08-13T08:44:47.0614842Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-4ujmc67e/mounts/
+replication	replication test	2026-08-13T08:44:47.0964760Z 
+replication	replication test	2026-08-13T08:44:47.0965606Z ⏱  Duration: 1.02s
+replication	replication test	2026-08-13T08:44:47.0966632Z org.osbuild.selinux: 94888cc97a7e0ef6690d027078df15962dbfffe43d484287dacfe994cadde6bc {
+replication	replication test	2026-08-13T08:44:47.0967861Z   "target": "tree:///etc",
+replication	replication test	2026-08-13T08:44:47.0968649Z   "file_contexts": "etc/selinux/targeted/contexts/files/file_contexts",
+replication	replication test	2026-08-13T08:44:47.0969147Z   "exclude_paths": [
+replication	replication test	2026-08-13T08:44:47.0969398Z     "/sysroot"
+replication	replication test	2026-08-13T08:44:47.0969600Z   ]
+replication	replication test	2026-08-13T08:44:47.0969780Z }
+replication	replication test	2026-08-13T08:44:47.1852812Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:47.2791744Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-u7y736uj/mounts/
+replication	replication test	2026-08-13T08:44:47.3623710Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-u7y736uj/mounts/boot
+replication	replication test	2026-08-13T08:44:47.4459020Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-u7y736uj/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:47.5408644Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:47.9727630Z Can't stat exclude path "/run/osbuild/tree/etc/sysroot", No such file or directory - ignoring.
+replication	replication test	2026-08-13T08:44:48.0957105Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:48.0959856Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:48.0965337Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:48.0969754Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:48.1163991Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-u7y736uj/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-u7y736uj/mounts
+replication	replication test	2026-08-13T08:44:48.1167415Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:48.1169969Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:48.1172558Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:48.1174855Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts unmounted
+replication	replication test	2026-08-13T08:44:48.1177111Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts unmounted
+replication	replication test	2026-08-13T08:44:48.1208866Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:48.1225938Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:48.1314549Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-u7y736uj/mounts unmounted
+replication	replication test	2026-08-13T08:44:48.1489724Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-u7y736uj/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:48.1625198Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-u7y736uj/mounts/boot
+replication	replication test	2026-08-13T08:44:48.1773175Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-u7y736uj/mounts/
+replication	replication test	2026-08-13T08:44:48.2132374Z 
+replication	replication test	2026-08-13T08:44:48.2133268Z ⏱  Duration: 1.12s
+replication	replication test	2026-08-13T08:44:48.2134331Z org.osbuild.selinux: 40f06d1f251adfc8f02e04c153ae9aafa2e623a3a2f68a1c77808fb085fa212a {
+replication	replication test	2026-08-13T08:44:48.2135273Z   "target": "tree:///var",
+replication	replication test	2026-08-13T08:44:48.2136093Z   "file_contexts": "etc/selinux/targeted/contexts/files/file_contexts",
+replication	replication test	2026-08-13T08:44:48.2136851Z   "exclude_paths": [
+replication	replication test	2026-08-13T08:44:48.2137676Z     "/sysroot"
+replication	replication test	2026-08-13T08:44:48.2138047Z   ]
+replication	replication test	2026-08-13T08:44:48.2138391Z }
+replication	replication test	2026-08-13T08:44:48.3045126Z device/disk (org.osbuild.loopback): loop0 acquired (locked: False)
+replication	replication test	2026-08-13T08:44:48.4003887Z mount/- (org.osbuild.xfs): mounting /dev/loop0p4 -> /store/tmp/buildroot-tmp-1ck6cndk/mounts/
+replication	replication test	2026-08-13T08:44:48.4860395Z mount/boot (org.osbuild.xfs): mounting /dev/loop0p3 -> /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot
+replication	replication test	2026-08-13T08:44:48.5722458Z mount/boot-efi (org.osbuild.fat): mounting /dev/loop0p2 -> /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:48.6703944Z mount/ostree.deployment (org.osbuild.ostree.deployment): Deployment root at 'ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0'
+replication	replication test	2026-08-13T08:44:49.1066834Z Can't stat exclude path "/run/osbuild/tree/var/sysroot", No such file or directory - ignoring.
+replication	replication test	2026-08-13T08:44:49.1500260Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/boot unmounted
+replication	replication test	2026-08-13T08:44:49.1502999Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/var unmounted
+replication	replication test	2026-08-13T08:44:49.1506378Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree/sysroot unmounted
+replication	replication test	2026-08-13T08:44:49.1510332Z mount/bind-ostree-deployment-to-tree (org.osbuild.bind): umount: /store/stage/uuid-c03bacf58d05466a926430d2e3683477/data/tree unmounted
+replication	replication test	2026-08-13T08:44:49.1723198Z mount/ostree.deployment (org.osbuild.ostree.deployment): mounting /store/tmp/buildroot-tmp-1ck6cndk/mounts/ostree/deploy/default/deploy/19033e4f7c91cbb9ad6c756f716a562e11b08d54b354bc33577cbd7be1d77625.0 -> /store/tmp/buildroot-tmp-1ck6cndk/mounts
+replication	replication test	2026-08-13T08:44:49.1726193Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:49.1729359Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts/var unmounted
+replication	replication test	2026-08-13T08:44:49.1731918Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts/sysroot unmounted
+replication	replication test	2026-08-13T08:44:49.1734460Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts unmounted
+replication	replication test	2026-08-13T08:44:49.1737536Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts unmounted
+replication	replication test	2026-08-13T08:44:49.1768368Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot/efi unmounted
+replication	replication test	2026-08-13T08:44:49.1788082Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot unmounted
+replication	replication test	2026-08-13T08:44:49.1812888Z mount/ostree.deployment (org.osbuild.ostree.deployment): umount: /store/tmp/buildroot-tmp-1ck6cndk/mounts unmounted
+replication	replication test	2026-08-13T08:44:49.1985795Z mount/boot-efi (org.osbuild.fat): already unmounted: /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot/efi
+replication	replication test	2026-08-13T08:44:49.2123746Z mount/boot (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-1ck6cndk/mounts/boot
+replication	replication test	2026-08-13T08:44:49.2262133Z mount/- (org.osbuild.xfs): already unmounted: /store/tmp/buildroot-tmp-1ck6cndk/mounts/
+replication	replication test	2026-08-13T08:44:49.2628180Z 
+replication	replication test	2026-08-13T08:44:49.2629165Z ⏱  Duration: 1.05s
+replication	replication test	2026-08-13T08:44:49.2634895Z Pipeline qcow2: 948457790626fe29be623496a4dbbb77028011d179ad419568ed5d6794a6cd91
+replication	replication test	2026-08-13T08:44:49.2636272Z Build
+replication	replication test	2026-08-13T08:44:49.2636915Z   root: <host>
+replication	replication test	2026-08-13T08:44:49.2637593Z   runner: org.osbuild.fedora38 (org.osbuild.fedora38)
+replication	replication test	2026-08-13T08:44:49.2643641Z org.osbuild.qemu: 948457790626fe29be623496a4dbbb77028011d179ad419568ed5d6794a6cd91 {
+replication	replication test	2026-08-13T08:44:49.2644496Z   "filename": "disk.qcow2",
+replication	replication test	2026-08-13T08:44:49.2645428Z   "format": {
+replication	replication test	2026-08-13T08:44:49.2645843Z     "type": "qcow2",
+replication	replication test	2026-08-13T08:44:49.2646210Z     "compat": "1.1"
+replication	replication test	2026-08-13T08:44:49.2646879Z   }
+replication	replication test	2026-08-13T08:44:49.2647070Z }
+replication	replication test	2026-08-13T08:46:08.8468136Z 
+replication	replication test	2026-08-13T08:46:08.8469032Z ⏱  Duration: 79.58s
+replication	replication test	2026-08-13T08:46:08.8469592Z manifest - finished successfully
+replication	replication test	2026-08-13T08:46:21.8324770Z 
+replication	replication test	2026-08-13T08:46:21.8325593Z Pipelines
+replication	replication test	2026-08-13T08:46:21.8327241Z   build:    	946310fe6b2d9b9de97fc1386c22449d28ed1f0e99cd69628200e375a33db06a
+replication	replication test	2026-08-13T08:46:21.8328515Z   image:    	40f06d1f251adfc8f02e04c153ae9aafa2e623a3a2f68a1c77808fb085fa212a
+replication	replication test	2026-08-13T08:46:21.8330313Z   qcow2:    	948457790626fe29be623496a4dbbb77028011d179ad419568ed5d6794a6cd91
+replication	replication test	2026-08-13T08:46:21.8332690Z   vmdk:     	92597b93dd4ee18329c92279f8d00f60d23846befb75818149d3146e8d1c6755
+replication	replication test	2026-08-13T08:46:21.8333871Z   vpc:      	7bc8641239427c5c3b4ea1908438f297e94b96b68701bb18c3c77ac92b95de67
+replication	replication test	2026-08-13T08:46:21.8335002Z   ovf:      	98a75fcfd8c493558d1e7c9000f8e29089de950eef385308167fcfd36e13a7fc
+replication	replication test	2026-08-13T08:46:21.8336162Z   archive:  	b9d27ac52ef20d6bef32156b97bd27dd29dbca8be0a71c509d08c9925ed88883
+replication	replication test	2026-08-13T08:46:21.8337389Z   gce:      	2b26396cbc3095586f08b2dc9c8541f4f920868e72c8c7ed2c34b7e135723517
+replication	replication test	2026-08-13T08:46:21.8337962Z 
+replication	replication test	2026-08-13T08:46:21.8338149Z Checkpoints
+replication	replication test	2026-08-13T08:46:21.8587428Z Build complete!
+replication	replication test	2026-08-13T08:46:21.8589311Z Results saved in .
+replication	replication test	2026-08-13T08:46:26.0712658Z 
+replication	replication test	2026-08-13T08:46:26.0713337Z == creating the shared NAT bridge network
+replication	replication test	2026-08-13T08:46:27.8426848Z 
+replication	replication test	2026-08-13T08:46:27.8427611Z == booting two appliances on the shared network
+replication	replication test	2026-08-13T08:46:30.1503992Z waiting up to 600s for: node1 ssh reachable
+replication	replication test	2026-08-13T08:46:55.9179046Z 
+replication	replication test	2026-08-13T08:46:55.9238527Z == ok: node1 ssh reachable
+replication	replication test	2026-08-13T08:46:55.9274268Z waiting up to 600s for: node2 ssh reachable
+replication	replication test	2026-08-13T08:46:57.0863830Z 
+replication	replication test	2026-08-13T08:46:57.0893985Z == ok: node2 ssh reachable
+replication	replication test	2026-08-13T08:46:57.0940451Z waiting up to 900s for: node1 first boot settled
+replication	replication test	2026-08-13T08:51:11.0418202Z 
+replication	replication test	2026-08-13T08:51:11.0419266Z == ok: node1 first boot settled
+replication	replication test	2026-08-13T08:51:11.0441701Z waiting up to 900s for: node2 first boot settled
+replication	replication test	2026-08-13T08:51:12.1992788Z 
+replication	replication test	2026-08-13T08:51:12.1993955Z == ok: node2 first boot settled
+replication	replication test	2026-08-13T08:51:12.5468906Z 
+replication	replication test	2026-08-13T08:51:12.5476319Z == configuring node1 as the controller
+replication	replication test	2026-08-13T08:51:12.5477969Z   [node1] pause greenboot around the wipe
+replication	replication test	2026-08-13T08:51:12.7555521Z   [node1] set hostname
+replication	replication test	2026-08-13T08:51:13.2033861Z   [node1] write node config
+replication	replication test	2026-08-13T08:51:13.3921888Z   [node1] wipe single-node state
+replication	replication test	2026-08-13T08:51:13.5780868Z Stopping MicroShift services
+replication	replication test	2026-08-13T08:51:13.6888644Z Disabling MicroShift services
+replication	replication test	2026-08-13T08:51:14.5184113Z Removing MicroShift pods
+replication	replication test	2026-08-13T08:51:45.2992481Z Deleting the br-int interface
+replication	replication test	2026-08-13T08:51:45.3863587Z Killing conmon, pause and OVN processes
+replication	replication test	2026-08-13T08:51:46.2583950Z Removing MicroShift configuration
+replication	replication test	2026-08-13T08:51:46.2972851Z Removing OVN configuration
+replication	replication test	2026-08-13T08:51:46.3383393Z MicroShift service was stopped
+replication	replication test	2026-08-13T08:51:46.3412709Z MicroShift service was disabled
+replication	replication test	2026-08-13T08:51:46.3442427Z Cleanup succeeded
+replication	replication test	2026-08-13T08:51:46.6723317Z Created symlink '/etc/systemd/system/multi-user.target.wants/microshift.service' → '/usr/lib/systemd/system/microshift.service'.
+replication	replication test	2026-08-13T08:51:46.6772625Z Created symlink '/etc/systemd/system/multi-user.target.wants/microshift-cleanup-kubelet.service' → '/usr/lib/systemd/system/microshift-cleanup-kubelet.service'.
+replication	replication test	2026-08-13T08:52:13.6052640Z waiting up to 600s for: microshift active on node1
+replication	replication test	2026-08-13T08:52:14.0362079Z 
+replication	replication test	2026-08-13T08:52:14.0402706Z == ok: microshift active on node1
+replication	replication test	2026-08-13T08:52:14.0423017Z waiting up to 600s for: node1 Ready
+replication	replication test	2026-08-13T08:52:14.7742165Z 
+replication	replication test	2026-08-13T08:52:14.7743064Z == ok: node1 Ready
+replication	replication test	2026-08-13T08:52:14.7813004Z 
+replication	replication test	2026-08-13T08:52:14.7843010Z == joining node2 as a worker (microshift-profile worker + add-node --worker)
+replication	replication test	2026-08-13T08:52:14.7843951Z   [node2] pause greenboot around the wipe
+replication	replication test	2026-08-13T08:52:17.1305811Z   [node2] set hostname
+replication	replication test	2026-08-13T08:52:17.7452827Z   [node2] write node config
+replication	replication test	2026-08-13T08:52:18.1241616Z   [node2] wipe single-node state
+replication	replication test	2026-08-13T08:52:18.4052876Z Stopping MicroShift services
+replication	replication test	2026-08-13T08:52:18.5512239Z Disabling MicroShift services
+replication	replication test	2026-08-13T08:52:19.2423020Z Removing MicroShift pods
+replication	replication test	2026-08-13T08:52:34.9608408Z Deleting the br-int interface
+replication	replication test	2026-08-13T08:52:35.0068727Z Killing conmon, pause and OVN processes
+replication	replication test	2026-08-13T08:52:35.5838189Z Removing MicroShift configuration
+replication	replication test	2026-08-13T08:52:35.6138472Z Removing OVN configuration
+replication	replication test	2026-08-13T08:52:35.6351959Z MicroShift service was stopped
+replication	replication test	2026-08-13T08:52:35.6352885Z MicroShift service was disabled
+replication	replication test	2026-08-13T08:52:35.6353569Z Cleanup succeeded
+replication	replication test	2026-08-13T08:52:38.6692729Z Profile: worker. Join the cluster with:
+replication	replication test	2026-08-13T08:52:38.6706547Z   microshift add-node --worker --kubeconfig /path/to/bootstrap-kubeconfig
+replication	replication test	2026-08-13T08:52:38.6707551Z The bootstrap kubeconfig is the controller's
+replication	replication test	2026-08-13T08:52:38.6708441Z /var/lib/microshift/resources/kubeadmin/<node-addr>/kubeconfig.
+replication	replication test	2026-08-13T08:52:38.8725116Z Created symlink '/etc/systemd/system/multi-user.target.wants/microshift.service' → '/usr/lib/systemd/system/microshift.service'.
+replication	replication test	2026-08-13T08:52:38.8727958Z Created symlink '/etc/systemd/system/multi-user.target.wants/microshift-cleanup-kubelet.service' → '/usr/lib/systemd/system/microshift-cleanup-kubelet.service'.
+replication	replication test	2026-08-13T08:52:40.3114126Z ??? I0813 08:52:40.309218    7713 addnode.go:99] Starting cluster join process...
+replication	replication test	2026-08-13T08:52:40.3183248Z ??? I0813 08:52:40.317316    7713 addnode.go:108] MicroShift configuration loaded successfully
+replication	replication test	2026-08-13T08:52:40.3333506Z ??? I0813 08:52:40.332398    7713 addnode.go:132] MicroShift data directories cleaned up successfully
+replication	replication test	2026-08-13T08:52:40.9347688Z ??? I0813 08:52:40.933764    7713 addnode.go:165] Certificate authorities fetched and written successfully
+replication	replication test	2026-08-13T08:52:41.7988414Z ??? I0813 08:52:41.792572    7713 addnode.go:207] MicroShift service restarted
+replication	replication test	2026-08-13T08:52:41.7989730Z ??? I0813 08:52:41.792888    7713 addnode.go:740] Waiting for node node2 to become ready...
+replication	replication test	2026-08-13T08:52:51.7996332Z ??? I0813 08:52:51.797585    7713 addnode.go:760] Node node2 is ready!
+replication	replication test	2026-08-13T08:52:51.7997569Z ??? I0813 08:52:51.798451    7713 addnode.go:224] Node successfully joined the cluster
+replication	replication test	2026-08-13T08:52:51.8055047Z waiting up to 900s for: both nodes Ready
+replication	replication test	2026-08-13T08:52:52.5078830Z 
+replication	replication test	2026-08-13T08:52:52.5102568Z == ok: both nodes Ready
+replication	replication test	2026-08-13T08:52:52.7996592Z waiting up to 900s for: two linstor satellites Running
+replication	replication test	2026-08-13T08:53:49.2412053Z 
+replication	replication test	2026-08-13T08:53:49.2482665Z == ok: two linstor satellites Running
+replication	replication test	2026-08-13T08:53:49.2591842Z 
+replication	replication test	2026-08-13T08:53:49.2622429Z == creating a StoragePool on each node
+replication	replication test	2026-08-13T08:53:49.8607748Z storagepool.storage.stornas.io/pool-node1 created
+replication	replication test	2026-08-13T08:53:50.4716313Z storagepool.storage.stornas.io/pool-node2 created
+replication	replication test	2026-08-13T08:53:50.4991165Z waiting up to 600s for: both storage pools Available
+replication	replication test	2026-08-13T08:55:59.0905632Z 
+replication	replication test	2026-08-13T08:55:59.0908876Z == ok: both storage pools Available
+replication	replication test	2026-08-13T08:55:59.0935302Z waiting up to 120s for: LINSTOR reports free capacity on both pools
+replication	replication test	2026-08-13T08:55:59.8323646Z 
+replication	replication test	2026-08-13T08:55:59.8324860Z == ok: LINSTOR reports free capacity on both pools
+replication	replication test	2026-08-13T08:55:59.8325745Z 
+replication	replication test	2026-08-13T08:55:59.8326413Z == provisioning a replicated PVC, consumer pinned to node1
+replication	replication test	2026-08-13T08:56:00.2330744Z persistentvolumeclaim/repl-test created
+replication	replication test	2026-08-13T08:56:00.2424621Z pod/repl-consumer created
+replication	replication test	2026-08-13T08:56:00.2675232Z waiting up to 600s for: replicated PVC Bound
+replication	replication test	2026-08-13T08:56:27.0705227Z 
+replication	replication test	2026-08-13T08:56:27.0712947Z == ok: replicated PVC Bound
+replication	replication test	2026-08-13T08:56:27.0735005Z waiting up to 300s for: consumer Running on node1
+replication	replication test	2026-08-13T08:56:37.9423030Z 
+replication	replication test	2026-08-13T08:56:37.9424204Z == ok: consumer Running on node1
+replication	replication test	2026-08-13T08:56:37.9459046Z waiting up to 300s for: two UpToDate DRBD replicas
+replication	replication test	2026-08-13T08:56:38.5349239Z 
+replication	replication test	2026-08-13T08:56:38.5372235Z == ok: two UpToDate DRBD replicas
+replication	replication test	2026-08-13T08:56:38.5375675Z 
+replication	replication test	2026-08-13T08:56:38.5377172Z == writing through the replicated volume
+replication	replication test	2026-08-13T08:56:38.8937509Z 
+replication	replication test	2026-08-13T08:56:38.8938980Z == failover setup: a Target and a Share active on node2
+replication	replication test	2026-08-13T08:56:39.2541593Z persistentvolumeclaim/lun0 created
+replication	replication test	2026-08-13T08:56:39.2676397Z persistentvolumeclaim/share0 created
+replication	replication test	2026-08-13T08:56:39.2792186Z pod/steer-lun0 created
+replication	replication test	2026-08-13T08:56:39.2914264Z pod/steer-share0 created
+replication	replication test	2026-08-13T08:56:39.3039712Z waiting up to 600s for: lun0 primary on node2
+replication	replication test	2026-08-13T08:56:56.9051755Z 
+replication	replication test	2026-08-13T08:56:56.9090987Z == ok: lun0 primary on node2
+replication	replication test	2026-08-13T08:56:56.9104080Z waiting up to 600s for: share0 primary on node2
+replication	replication test	2026-08-13T08:56:57.8974518Z 
+replication	replication test	2026-08-13T08:56:57.8979740Z == ok: share0 primary on node2
+replication	replication test	2026-08-13T08:56:58.1977629Z target.storage.stornas.io/failover created
+replication	replication test	2026-08-13T08:56:58.2222308Z share.storage.stornas.io/failover created
+replication	replication test	2026-08-13T08:56:58.2438168Z waiting up to 300s for: target exported from node2
+replication	replication test	2026-08-13T09:02:00.3455054Z 
+replication	replication test	2026-08-13T09:02:00.3463728Z FAIL: timed out waiting for: target exported from node2
+replication	replication test	2026-08-13T09:02:00.3464470Z == FAILED (rc=1)
+replication	replication test	2026-08-13T09:02:00.3484099Z 
+replication	replication test	2026-08-13T09:02:00.3497799Z == DIAGNOSTICS: nodes and pods
+replication	replication test	2026-08-13T09:02:00.6443326Z NAME    STATUS   ROLES                         AGE     VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE                      KERNEL-VERSION           CONTAINER-RUNTIME
+replication	replication test	2026-08-13T09:02:00.6444826Z node1   Ready    control-plane,master,worker   9m50s   v1.35.6   192.168.100.11   <none>        CentOS Stream 10 (Coughlan)   6.12.0-254.el10.x86_64   cri-o://1.35.5-3.rhaos4.22.git0adf62b.el9
+replication	replication test	2026-08-13T09:02:00.6447367Z node2   Ready    worker                        9m19s   v1.35.6   192.168.100.12   <none>        CentOS Stream 10 (Coughlan)   6.12.0-254.el10.x86_64   cri-o://1.35.5-3.rhaos4.22.git0adf62b.el9
+replication	replication test	2026-08-13T09:02:00.9555624Z 
+replication	replication test	2026-08-13T09:02:00.9556897Z == DIAGNOSTICS: not-running pod events
+replication	replication test	2026-08-13T09:02:01.2700471Z 
+replication	replication test	2026-08-13T09:02:01.2705261Z == DIAGNOSTICS: kubernetes service endpoints
+replication	replication test	2026-08-13T09:02:01.5485320Z Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+replication	replication test	2026-08-13T09:02:01.5508754Z NAME         ENDPOINTS        AGE
+replication	replication test	2026-08-13T09:02:01.5511472Z kubernetes   10.44.0.0:6443   10m
+replication	replication test	2026-08-13T09:02:01.5550776Z 
+replication	replication test	2026-08-13T09:02:01.5552156Z == DIAGNOSTICS: ovn state per node
+replication	replication test	2026-08-13T09:02:01.7291003Z node1
+replication	replication test	2026-08-13T09:02:01.7318600Z br-ex            UNKNOWN        10.44.0.0/32 169.254.169.2/29 fe80::859:ff:fe00:1/64 
+replication	replication test	2026-08-13T09:02:01.7343290Z default via 192.168.100.1 dev enp0s3 proto dhcp src 192.168.100.11 metric 100 
+replication	replication test	2026-08-13T09:02:01.7386021Z 00-multus.conflist
+replication	replication test	2026-08-13T09:02:01.7386526Z 10-ovn-kubernetes.conf
+replication	replication test	2026-08-13T09:02:01.7387042Z multus.d
+replication	replication test	2026-08-13T09:02:02.3640736Z node2
+replication	replication test	2026-08-13T09:02:02.3672551Z br-ex            UNKNOWN        169.254.169.2/29 192.168.100.12/32 fe80::859:ff:fe00:1/64 
+replication	replication test	2026-08-13T09:02:02.3699425Z default via 192.168.100.1 dev enp0s3 proto dhcp src 192.168.100.12 metric 100 
+replication	replication test	2026-08-13T09:02:02.3743309Z 00-multus.conflist
+replication	replication test	2026-08-13T09:02:02.3744216Z 10-ovn-kubernetes.conf
+replication	replication test	2026-08-13T09:02:02.3745005Z multus.d
+replication	replication test	2026-08-13T09:02:02.3762102Z 
+replication	replication test	2026-08-13T09:02:02.3763234Z == DIAGNOSTICS: node2 apiserver reachability (advertise address)
+replication	replication test	2026-08-13T09:02:02.5681628Z nothing listening on 6443
+replication	replication test	2026-08-13T09:02:02.6073588Z okactive
+replication	replication test	2026-08-13T09:02:02.6081959Z 
+replication	replication test	2026-08-13T09:02:02.6082977Z == DIAGNOSTICS: node2 ovnkube-controller log
+replication	replication test	2026-08-13T09:02:03.2408213Z I0813 08:53:07.611428    8214 cniserver.go:300] [piraeus-datastore/linstor-controller-6b678ccb7-m278n c1bce1eddd475b0723715677fe402ef46915c5ce8d8f578406120f3f8b365d4b network default NAD default NAD key default] ADD finished CNI request [piraeus-datastore/linstor-controller-6b678ccb7-m278n c1bce1eddd475b0723715677fe402ef46915c5ce8d8f578406120f3f8b365d4b network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"22:f2:38:c8:2d:6b\",\"name\":\"c1bce1eddd475b0\"},{\"mac\":\"0a:58:0a:2a:01:05\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/532d0e46-c9c8-46b7-b1ef-c7e305d1bbe9\"}],\"ips\":[{\"address\":\"10.42.1.5/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2433797Z I0813 08:53:08.082565    8214 cniserver.go:300] [piraeus-datastore/linstor-csi-controller-89f669bc-z82c5 82cb7bd6200431b7c5689693333746a1274e5ca02bf0f64cb1b273992d8eb3d3 network default NAD default NAD key default] ADD finished CNI request [piraeus-datastore/linstor-csi-controller-89f669bc-z82c5 82cb7bd6200431b7c5689693333746a1274e5ca02bf0f64cb1b273992d8eb3d3 network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"66:e1:73:6b:fc:90\",\"name\":\"82cb7bd6200431b\"},{\"mac\":\"0a:58:0a:2a:01:06\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/f8978f97-6a08-474b-bac1-57373f7f45bf\"}],\"ips\":[{\"address\":\"10.42.1.6/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2440738Z W0813 08:53:08.155957    8214 util.go:881] Failed to build global endpoints for port TCP/api/3370: empty IP address endpoints for service piraeus-datastore/linstor-controller
+replication	replication test	2026-08-13T09:02:03.2449729Z I0813 08:53:09.118256    8214 cniserver.go:300] [piraeus-datastore/ha-controller-jrjzd 8f27461fde4cef607bc896e6fabe49ba49fcf09e9a8490b813611d1518f7b363 network default NAD default NAD key default] ADD finished CNI request [piraeus-datastore/ha-controller-jrjzd 8f27461fde4cef607bc896e6fabe49ba49fcf09e9a8490b813611d1518f7b363 network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"ca:92:93:20:53:6e\",\"name\":\"8f27461fde4cef6\"},{\"mac\":\"0a:58:0a:2a:01:07\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/c99e8170-d4b9-4b59-be59-fb649f9a2826\"}],\"ips\":[{\"address\":\"10.42.1.7/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2456442Z E0813 08:53:10.169203    8214 kube.go:244] Error in patching annotations on pod piraeus-datastore/linstor-csi-nfs-server-cjrqz: the server rejected our request due to an error in our request
+replication	replication test	2026-08-13T09:02:03.2464381Z I0813 08:53:10.908819    8214 cniserver.go:300] [piraeus-datastore/linstor-csi-nfs-server-cjrqz 114034216b9601de98a457370d4673c03567db8126d929329c18cb9b564fe32d network default NAD default NAD key default] ADD finished CNI request [piraeus-datastore/linstor-csi-nfs-server-cjrqz 114034216b9601de98a457370d4673c03567db8126d929329c18cb9b564fe32d network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"a2:f1:84:b9:fb:6c\",\"name\":\"114034216b9601d\"},{\"mac\":\"0a:58:0a:2a:01:08\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/f3f4d723-b685-42d6-ae4d-ad149d5d6f4c\"}],\"ips\":[{\"address\":\"10.42.1.8/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2477084Z I0813 08:53:12.665076    8214 cniserver.go:300] [piraeus-datastore/linstor-satellite.node2-52lzr d28cf8c3ca109db326df96eb8a5ed87f2659ab41397a63396828025fed6f7ef5 network default NAD default NAD key default] ADD finished CNI request [piraeus-datastore/linstor-satellite.node2-52lzr d28cf8c3ca109db326df96eb8a5ed87f2659ab41397a63396828025fed6f7ef5 network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"96:f4:a7:13:b2:f9\",\"name\":\"d28cf8c3ca109db\"},{\"mac\":\"0a:58:0a:2a:01:09\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/0c670130-7d0e-4fd5-93fd-041fd03af3b1\"}],\"ips\":[{\"address\":\"10.42.1.9/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2486488Z W0813 08:53:16.132993    8214 util.go:977] Failed to build node endpoints for node node2 port 5353: empty IP address endpoints for service openshift-dns/dns-default
+replication	replication test	2026-08-13T09:02:03.2489135Z W0813 08:53:16.133185    8214 util.go:977] Failed to build node endpoints for node node2 port 5353: empty IP address endpoints for service openshift-dns/dns-default
+replication	replication test	2026-08-13T09:02:03.2491728Z W0813 08:53:16.133772    8214 util.go:977] Failed to build node endpoints for node node2 port 9154: empty IP address endpoints for service openshift-dns/dns-default
+replication	replication test	2026-08-13T09:02:03.2494521Z E0813 08:53:17.537697    8214 link_network_manager.go:104] Error while syncing link "d28cf8c3ca109db": failed to get address from link "d28cf8c3ca109db": failed to list addresses for "d28cf8c3ca109db": no such device
+replication	replication test	2026-08-13T09:02:03.2497673Z W0813 08:54:17.524845    8214 util.go:977] Failed to build node endpoints for node node2 port 3370: empty IP address endpoints for service piraeus-datastore/linstor-controller
+replication	replication test	2026-08-13T09:02:03.2504172Z I0813 08:56:47.126895    8214 cniserver.go:300] [stornas-system/steer-share0 9581e32a83d58f3dd95cddab0a9e6b4499b0c8b031eec9430ca6c1192ebd2f04 network default NAD default NAD key default] ADD finished CNI request [stornas-system/steer-share0 9581e32a83d58f3dd95cddab0a9e6b4499b0c8b031eec9430ca6c1192ebd2f04 network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"e2:b9:57:3e:ad:f6\",\"name\":\"9581e32a83d58f3\"},{\"mac\":\"0a:58:0a:2a:01:0a\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/1a7031b4-1018-4259-9f8c-9602d4683184\"}],\"ips\":[{\"address\":\"10.42.1.10/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2513840Z I0813 08:56:57.419960    8214 cniserver.go:300] [stornas-system/steer-lun0 eeff4079f20133ddc89cb991921165e63c3edd4dbb6b1b86f4a51c5bc89213dc network default NAD default NAD key default] ADD finished CNI request [stornas-system/steer-lun0 eeff4079f20133ddc89cb991921165e63c3edd4dbb6b1b86f4a51c5bc89213dc network default NAD default NAD key default], result "{\"interfaces\":[{\"mac\":\"06:e5:08:d8:7b:fb\",\"name\":\"eeff4079f20133d\"},{\"mac\":\"0a:58:0a:2a:01:0b\",\"name\":\"eth0\",\"sandbox\":\"/var/run/netns/56989feb-2069-4fc6-9d8d-4562a2849464\"}],\"ips\":[{\"address\":\"10.42.1.11/24\",\"gateway\":\"10.42.1.1\",\"interface\":1}]}", err <nil>
+replication	replication test	2026-08-13T09:02:03.2541914Z 
+replication	replication test	2026-08-13T09:02:03.2543819Z == DIAGNOSTICS: node2 microshift journal errors
+replication	replication test	2026-08-13T09:02:03.4320752Z -- No entries --
+replication	replication test	2026-08-13T09:02:03.4342748Z 
+replication	replication test	2026-08-13T09:02:03.4343334Z == DIAGNOSTICS: linstor state
+replication	replication test	2026-08-13T09:02:03.9132966Z ╭─────────────────────────────────────────────────────────────────────╮
+replication	replication test	2026-08-13T09:02:03.9134958Z │ Node  │ Platform │ NodeType  │ Addresses                   │ State  │
+replication	replication test	2026-08-13T09:02:03.9136233Z ╞═════════════════════════════════════════════════════════════════════╡
+replication	replication test	2026-08-13T09:02:03.9137108Z │ node1 │ LINUX    │ SATELLITE │ 192.168.100.11:3366 (PLAIN) │ [1;32mOnline[0m │
+replication	replication test	2026-08-13T09:02:03.9138011Z │ node2 │ LINUX    │ SATELLITE │ 192.168.100.12:3366 (PLAIN) │ [1;32mOnline[0m │
+replication	replication test	2026-08-13T09:02:03.9138643Z ╰─────────────────────────────────────────────────────────────────────╯
+replication	replication test	2026-08-13T09:02:04.5850900Z ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+replication	replication test	2026-08-13T09:02:04.5854940Z │ StoragePool          │ Node  │ Driver   │ PoolName                │ FreeCapacity │ TotalCapacity │ CanSnapshots │ State │ SharedName                 │
+replication	replication test	2026-08-13T09:02:04.5857500Z ╞══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
+replication	replication test	2026-08-13T09:02:04.5860593Z │ DfltDisklessStorPool │ node1 │ DISKLESS │                         │              │               │ False        │ [1;32mOk   [0m │ node1;DfltDisklessStorPool │
+replication	replication test	2026-08-13T09:02:04.5863576Z │ DfltDisklessStorPool │ node2 │ DISKLESS │                         │              │               │ False        │ [1;32mOk   [0m │ node2;DfltDisklessStorPool │
+replication	replication test	2026-08-13T09:02:04.5867021Z │ stornas              │ node1 │ LVM_THIN │ stornas-pool-node1/thin │    17.93 GiB │     18.00 GiB │ True         │ [1;32mOk   [0m │ node1;stornas              │
+replication	replication test	2026-08-13T09:02:04.5869336Z │ stornas              │ node2 │ LVM_THIN │ stornas-pool-node2/thin │    17.93 GiB │     18.00 GiB │ True         │ [1;32mOk   [0m │ node2;stornas              │
+replication	replication test	2026-08-13T09:02:04.5871701Z ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+replication	replication test	2026-08-13T09:02:05.1047919Z ╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+replication	replication test	2026-08-13T09:02:05.1049500Z │ ResourceName                             │ Node  │ Layers       │ Usage  │ Conns │    State │ Vote │
+replication	replication test	2026-08-13T09:02:05.1053853Z ╞════════════════════════════════════════════════════════════════════════════════════════════════════╡
+replication	replication test	2026-08-13T09:02:05.1056053Z │ pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168 │ node1 │ DRBD,STORAGE │ [1;32mInUse [0m │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1059638Z │ pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168 │ node2 │ DRBD,STORAGE │ Unused │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1061957Z │ pvc-780687f7-a845-425f-9b44-489ebdbf19df │ node1 │ DRBD,STORAGE │ Unused │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1068236Z │ pvc-780687f7-a845-425f-9b44-489ebdbf19df │ node2 │ DRBD,STORAGE │ [1;32mInUse [0m │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1070513Z │ pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa │ node1 │ DRBD,STORAGE │ Unused │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1073014Z │ pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa │ node2 │ DRBD,STORAGE │ [1;32mInUse [0m │ [0;32mOk   [0m │ [0;32mUpToDate[0m │ Yes  │
+replication	replication test	2026-08-13T09:02:05.1075043Z ╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+replication	replication test	2026-08-13T09:02:05.6752182Z ╭──────────────────────────────────╮
+replication	replication test	2026-08-13T09:02:05.6753435Z │ Id │ Datetime │ Node │ Exception │
+replication	replication test	2026-08-13T09:02:05.6754323Z ╞══════════════════════════════════╡
+replication	replication test	2026-08-13T09:02:05.6755094Z ╰──────────────────────────────────╯
+replication	replication test	2026-08-13T09:02:05.6755566Z 
+replication	replication test	2026-08-13T09:02:05.6756184Z == DIAGNOSTICS: DRBD kernel view per node
+replication	replication test	2026-08-13T09:02:05.8445131Z node1
+replication	replication test	2026-08-13T09:02:05.8469632Z pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168 node-id:0 role:Primary suspended:no
+replication	replication test	2026-08-13T09:02:05.8470454Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:05.8471130Z   volume:0 minor:1000 disk:UpToDate
+replication	replication test	2026-08-13T09:02:05.8473111Z       backing_dev:/dev/stornas-pool-node1/pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168_00000
+replication	replication test	2026-08-13T09:02:05.8477435Z       quorum:yes open:yes blocked:no
+replication	replication test	2026-08-13T09:02:05.8478237Z   node2 node-id:1 connection:Connected role:Secondary tls:no congested:no
+replication	replication test	2026-08-13T09:02:05.8479042Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:05.8479986Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:05.8480520Z 
+replication	replication test	2026-08-13T09:02:05.8481089Z pvc-780687f7-a845-425f-9b44-489ebdbf19df node-id:1 role:Secondary suspended:no
+replication	replication test	2026-08-13T09:02:05.8482175Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:05.8482760Z   volume:0 minor:1002 disk:UpToDate
+replication	replication test	2026-08-13T09:02:05.8483936Z       backing_dev:/dev/stornas-pool-node1/pvc-780687f7-a845-425f-9b44-489ebdbf19df_00000
+replication	replication test	2026-08-13T09:02:05.8484746Z       quorum:yes open:no blocked:no
+replication	replication test	2026-08-13T09:02:05.8485429Z   node2 node-id:0 connection:Connected role:Primary tls:no congested:no
+replication	replication test	2026-08-13T09:02:05.8486305Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:05.8487418Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:05.8488024Z 
+replication	replication test	2026-08-13T09:02:05.8488661Z pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node-id:1 role:Secondary suspended:no
+replication	replication test	2026-08-13T09:02:05.8489568Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:05.8490163Z   volume:0 minor:1001 disk:UpToDate
+replication	replication test	2026-08-13T09:02:05.8491596Z       backing_dev:/dev/stornas-pool-node1/pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa_00000
+replication	replication test	2026-08-13T09:02:05.8492696Z       quorum:yes open:no blocked:no
+replication	replication test	2026-08-13T09:02:05.8493592Z   node2 node-id:0 connection:Connected role:Primary tls:no congested:no
+replication	replication test	2026-08-13T09:02:05.8495417Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:05.8500316Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:05.8500756Z 
+replication	replication test	2026-08-13T09:02:05.8586739Z [  609.075100] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: repl( WFBitMapT -> SyncTarget ) peer_replication( yes -> no ) [receive-bitmap]
+replication	replication test	2026-08-13T09:02:05.8589500Z [  609.079373] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: Began resync as SyncTarget (will sync 0 KB [0 bits set]).
+replication	replication test	2026-08-13T09:02:05.8591866Z [  609.086595] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: peer_replication( no -> yes ) [enable-peer-replication]
+replication	replication test	2026-08-13T09:02:05.8593591Z [  609.203232] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: Resync done (total 1 sec; paused 0 sec; 0 K/sec)
+replication	replication test	2026-08-13T09:02:05.8595560Z [  609.207175] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: updated UUIDs DC938A381ABA9D94:0000000000000000:0000000000000000:0000000000000000
+replication	replication test	2026-08-13T09:02:05.8597449Z [  609.213101] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001: disk( Inconsistent -> UpToDate ) [resync-finished]
+replication	replication test	2026-08-13T09:02:05.8599220Z [  609.217459] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa/0 drbd1001 node2: repl( SyncTarget -> Established ) [resync-finished]
+replication	replication test	2026-08-13T09:02:05.8601091Z [  610.393935] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing remote state change 2892502559: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:05.8603272Z [  610.408273] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: Committing remote state change 2892502559 (primary_nodes=1)
+replication	replication test	2026-08-13T09:02:05.8604851Z [  610.413030] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: peer( Secondary -> Primary ) [remote]
+replication	replication test	2026-08-13T09:02:05.8606281Z [  610.433558] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing remote state change 390321730: 0->all role( Secondary )
+replication	replication test	2026-08-13T09:02:05.8608235Z [  610.442923] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: Committing remote state change 390321730 (primary_nodes=0)
+replication	replication test	2026-08-13T09:02:05.8609301Z [  610.446866] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: peer( Primary -> Secondary ) [remote]
+replication	replication test	2026-08-13T09:02:05.8610236Z [  610.597565] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing remote state change 732215670: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:05.8612305Z [  610.612783] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: Committing remote state change 732215670 (primary_nodes=1)
+replication	replication test	2026-08-13T09:02:05.8614149Z [  610.616462] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df node2: peer( Secondary -> Primary ) [remote]
+replication	replication test	2026-08-13T09:02:05.8616645Z [  620.460400] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing remote state change 2075423390: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:05.8618822Z [  620.501485] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: Committing remote state change 2075423390 (primary_nodes=1)
+replication	replication test	2026-08-13T09:02:05.8620564Z [  620.508212] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: peer( Secondary -> Primary ) [remote]
+replication	replication test	2026-08-13T09:02:05.8622713Z [  620.524483] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing remote state change 1670316521: 0->all role( Secondary )
+replication	replication test	2026-08-13T09:02:05.8630552Z [  620.569336] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: Committing remote state change 1670316521 (primary_nodes=0)
+replication	replication test	2026-08-13T09:02:05.8632574Z [  620.574950] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: peer( Primary -> Secondary ) [remote]
+replication	replication test	2026-08-13T09:02:05.8634422Z [  620.650967] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing remote state change 2568705043: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:05.8637076Z [  620.689972] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: Committing remote state change 2568705043 (primary_nodes=1)
+replication	replication test	2026-08-13T09:02:06.0373690Z [  620.695156] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node2: peer( Secondary -> Primary ) [remote]
+replication	replication test	2026-08-13T09:02:06.0374774Z node2
+replication	replication test	2026-08-13T09:02:06.0398849Z pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168 node-id:1 role:Secondary suspended:no
+replication	replication test	2026-08-13T09:02:06.0402615Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:06.0403846Z   volume:0 minor:1000 disk:UpToDate
+replication	replication test	2026-08-13T09:02:06.0404971Z       backing_dev:/dev/stornas-pool-node2/pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168_00000
+replication	replication test	2026-08-13T09:02:06.0406305Z       quorum:yes open:no blocked:no
+replication	replication test	2026-08-13T09:02:06.0407127Z   node1 node-id:0 connection:Connected role:Primary tls:no congested:no
+replication	replication test	2026-08-13T09:02:06.0407969Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:06.0409044Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:06.0409653Z 
+replication	replication test	2026-08-13T09:02:06.0410245Z pvc-780687f7-a845-425f-9b44-489ebdbf19df node-id:0 role:Primary suspended:no
+replication	replication test	2026-08-13T09:02:06.0411006Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:06.0411984Z   volume:0 minor:1002 disk:UpToDate
+replication	replication test	2026-08-13T09:02:06.0413375Z       backing_dev:/dev/stornas-pool-node2/pvc-780687f7-a845-425f-9b44-489ebdbf19df_00000
+replication	replication test	2026-08-13T09:02:06.0414407Z       quorum:yes open:yes blocked:no
+replication	replication test	2026-08-13T09:02:06.0415287Z   node1 node-id:1 connection:Connected role:Secondary tls:no congested:no
+replication	replication test	2026-08-13T09:02:06.0416199Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:06.0417284Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:06.0417891Z 
+replication	replication test	2026-08-13T09:02:06.0418489Z pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa node-id:0 role:Primary suspended:no
+replication	replication test	2026-08-13T09:02:06.0419304Z     force-io-failures:no
+replication	replication test	2026-08-13T09:02:06.0419830Z   volume:0 minor:1001 disk:UpToDate
+replication	replication test	2026-08-13T09:02:06.0420907Z       backing_dev:/dev/stornas-pool-node2/pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa_00000
+replication	replication test	2026-08-13T09:02:06.0422041Z       quorum:yes open:yes blocked:no
+replication	replication test	2026-08-13T09:02:06.0422958Z   node1 node-id:1 connection:Connected role:Secondary tls:no congested:no
+replication	replication test	2026-08-13T09:02:06.0423852Z       ap-in-flight:0 rs-in-flight:0
+replication	replication test	2026-08-13T09:02:06.0424818Z     volume:0 replication:Established peer-disk:UpToDate resync-suspended:no
+replication	replication test	2026-08-13T09:02:06.0425443Z 
+replication	replication test	2026-08-13T09:02:06.0503881Z [  608.471856] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing cluster-wide state change 2892502559: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:06.0505889Z [  608.478435] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: State change 2892502559: primary_nodes=1, weak_nodes=FFFFFFFFFFFFFFFC
+replication	replication test	2026-08-13T09:02:06.0513258Z [  608.481557] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Committing cluster-wide state change 2892502559 (10ms)
+replication	replication test	2026-08-13T09:02:06.0515217Z [  608.484551] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: role( Secondary -> Primary ) [fsck.ext4:11636 auto-promote]
+replication	replication test	2026-08-13T09:02:06.0517121Z [  608.511233] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing cluster-wide state change 390321730: 0->all role( Secondary )
+replication	replication test	2026-08-13T09:02:06.0518890Z [  608.518977] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: State change 390321730: primary_nodes=0, weak_nodes=0
+replication	replication test	2026-08-13T09:02:06.0520783Z [  608.521927] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Committing cluster-wide state change 390321730 (10ms)
+replication	replication test	2026-08-13T09:02:06.0522543Z [  608.524433] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: role( Primary -> Secondary ) [fsck.ext4:11636 auto-demote]
+replication	replication test	2026-08-13T09:02:06.0524320Z [  608.675260] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Preparing cluster-wide state change 732215670: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:06.0526314Z [  608.682490] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: State change 732215670: primary_nodes=1, weak_nodes=FFFFFFFFFFFFFFFC
+replication	replication test	2026-08-13T09:02:06.0528880Z [  608.685436] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: Committing cluster-wide state change 732215670 (10ms)
+replication	replication test	2026-08-13T09:02:06.0530699Z [  608.688186] drbd pvc-780687f7-a845-425f-9b44-489ebdbf19df: role( Secondary -> Primary ) [mount:11638 auto-promote]
+replication	replication test	2026-08-13T09:02:06.0532895Z [  608.714041] EXT4-fs (drbd1002): mounted filesystem d3ca2f1b-dbcc-455a-998e-8fab8db3aa4e r/w with ordered data mode. Quota mode: none.
+replication	replication test	2026-08-13T09:02:06.0535072Z [  618.533432] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing cluster-wide state change 2075423390: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:06.0537157Z [  618.550214] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: State change 2075423390: primary_nodes=1, weak_nodes=FFFFFFFFFFFFFFFC
+replication	replication test	2026-08-13T09:02:06.0539163Z [  618.558940] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Committing cluster-wide state change 2075423390 (25ms)
+replication	replication test	2026-08-13T09:02:06.0541031Z [  618.565615] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: role( Secondary -> Primary ) [linstor-csi:10334 auto-promote]
+replication	replication test	2026-08-13T09:02:06.0543966Z [  618.581386] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing cluster-wide state change 1670316521: 0->all role( Secondary )
+replication	replication test	2026-08-13T09:02:06.0545012Z [  618.618830] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: State change 1670316521: primary_nodes=0, weak_nodes=0
+replication	replication test	2026-08-13T09:02:06.0545948Z [  618.631708] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Committing cluster-wide state change 1670316521 (50ms)
+replication	replication test	2026-08-13T09:02:06.0546892Z [  618.648020] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: role( Primary -> Secondary ) [linstor-csi:10334 auto-demote]
+replication	replication test	2026-08-13T09:02:06.0547925Z [  618.727401] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Preparing cluster-wide state change 2568705043: 0->all role( Primary )
+replication	replication test	2026-08-13T09:02:06.0549605Z [  618.745906] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: State change 2568705043: primary_nodes=1, weak_nodes=FFFFFFFFFFFFFFFC
+replication	replication test	2026-08-13T09:02:06.0550599Z [  618.752542] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: Committing cluster-wide state change 2568705043 (25ms)
+replication	replication test	2026-08-13T09:02:06.0552197Z [  618.759140] drbd pvc-b9d6976f-44fc-42e6-b41d-9e094e17c0fa: role( Secondary -> Primary ) [losetup:11748 auto-promote]
+replication	replication test	2026-08-13T09:02:06.0553149Z 
+replication	replication test	2026-08-13T09:02:06.0553480Z == DIAGNOSTICS: CSI capacity view
+replication	replication test	2026-08-13T09:02:06.3275482Z NAMESPACE           NAME          CREATED AT
+replication	replication test	2026-08-13T09:02:06.3276626Z piraeus-datastore   csisc-5dk6b   2026-08-13T08:54:51Z
+replication	replication test	2026-08-13T09:02:06.3277429Z piraeus-datastore   csisc-9m7x6   2026-08-13T08:54:40Z
+replication	replication test	2026-08-13T09:02:06.3278179Z piraeus-datastore   csisc-kstl6   2026-08-13T08:54:51Z
+replication	replication test	2026-08-13T09:02:06.3278636Z piraeus-datastore   csisc-lkllb   2026-08-13T08:54:40Z
+replication	replication test	2026-08-13T09:02:06.6399898Z Events:
+replication	replication test	2026-08-13T09:02:06.6401710Z   Type    Reason                 Age                   From                                                                                               Message
+replication	replication test	2026-08-13T09:02:06.6422024Z   ----    ------                 ----                  ----                                                                                               -------
+replication	replication test	2026-08-13T09:02:06.6432798Z   Normal  WaitForPodScheduled    5m50s (x3 over 6m6s)  persistentvolume-controller                                                                        waiting for pod repl-consumer to be scheduled
+replication	replication test	2026-08-13T09:02:06.6439126Z   Normal  Provisioning           5m46s                 linstor.csi.linbit.com_linstor-csi-controller-89f669bc-z82c5_0ac86c1a-8065-4c2e-897e-eee3e454a4f3  External provisioner is provisioning volume for claim "stornas-system/repl-test"
+replication	replication test	2026-08-13T09:02:06.6444587Z   Normal  ExternalProvisioning   5m46s                 persistentvolume-controller                                                                        Waiting for a volume to be created either by the external provisioner 'linstor.csi.linbit.com' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.
+replication	replication test	2026-08-13T09:02:06.6448865Z   Normal  ProvisioningSucceeded  5m42s                 linstor.csi.linbit.com_linstor-csi-controller-89f669bc-z82c5_0ac86c1a-8065-4c2e-897e-eee3e454a4f3  Successfully provisioned volume pvc-1d696d6d-ae2b-4c6c-900d-a8870c927168
+replication	replication test	2026-08-13T09:02:06.9337438Z E0813 09:01:43.456859      31 reflector.go:227] "Failed to watch" err="volumesnapshots.snapshot.storage.k8s.io is forbidden: User \"system:serviceaccount:piraeus-datastore:linstor-csi-controller\" cannot watch resource \"volumesnapshots\" in API group \"snapshot.storage.k8s.io\" at the cluster scope" logger="UnhandledError" reflector="pkg/controller/snapshot_finalizer_controller.go:97" type="*v1.VolumeSnapshot"
+replication	replication test	2026-08-13T09:02:06.9345193Z E0813 09:01:44.940219      31 reflector.go:227] "Failed to watch" err="volumesnapshots.snapshot.storage.k8s.io is forbidden: User \"system:serviceaccount:piraeus-datastore:linstor-csi-controller\" cannot watch resource \"volumesnapshots\" in API group \"snapshot.storage.k8s.io\" at the cluster scope" logger="UnhandledError" reflector="pkg/controller/snapshot_finalizer_controller.go:97" type="*v1.VolumeSnapshot"
+replication	replication test	2026-08-13T09:02:06.9351849Z E0813 09:01:47.647715      31 reflector.go:227] "Failed to watch" err="volumesnapshots.snapshot.storage.k8s.io is forbidden: User \"system:serviceaccount:piraeus-datastore:linstor-csi-controller\" cannot watch resource \"volumesnapshots\" in API group \"snapshot.storage.k8s.io\" at the cluster scope" logger="UnhandledError" reflector="pkg/controller/snapshot_finalizer_controller.go:97" type="*v1.VolumeSnapshot"
+replication	replication test	2026-08-13T09:02:06.9358444Z E0813 09:01:52.030345      31 reflector.go:227] "Failed to watch" err="volumesnapshots.snapshot.storage.k8s.io is forbidden: User \"system:serviceaccount:piraeus-datastore:linstor-csi-controller\" cannot watch resource \"volumesnapshots\" in API group \"snapshot.storage.k8s.io\" at the cluster scope" logger="UnhandledError" reflector="pkg/controller/snapshot_finalizer_controller.go:97" type="*v1.VolumeSnapshot"
+replication	replication test	2026-08-13T09:02:06.9396597Z E0813 09:02:01.110117      31 reflector.go:227] "Failed to watch" err="volumesnapshots.snapshot.storage.k8s.io is forbidden: User \"system:serviceaccount:piraeus-datastore:linstor-csi-controller\" cannot watch resource \"volumesnapshots\" in API group \"snapshot.storage.k8s.io\" at the cluster scope" logger="UnhandledError" reflector="pkg/controller/snapshot_finalizer_controller.go:97" type="*v1.VolumeSnapshot"
+replication	replication test	2026-08-13T09:02:06.9399573Z 
+replication	replication test	2026-08-13T09:02:06.9400039Z == DIAGNOSTICS: failover placement and host state
+replication	replication test	2026-08-13T09:02:07.2207688Z     - device: /dev/drbd1001
+replication	replication test	2026-08-13T09:02:07.2208610Z       id: 0
+replication	replication test	2026-08-13T09:02:07.2209293Z     state: Failed
+replication	replication test	2026-08-13T09:02:07.2210449Z - apiVersion: storage.stornas.io/v1alpha1
+replication	replication test	2026-08-13T09:02:07.2211124Z   kind: Share
+replication	replication test	2026-08-13T09:02:07.2212010Z   metadata:
+replication	replication test	2026-08-13T09:02:07.2212703Z     annotations:
+replication	replication test	2026-08-13T09:02:07.2213801Z       kubectl.kubernetes.io/last-applied-configuration: |
+replication	replication test	2026-08-13T09:02:07.2216095Z         {"apiVersion":"storage.stornas.io/v1alpha1","kind":"Share","metadata":{"annotations":{},"name":"failover","namespace":"stornas-system"},"spec":{"claimName":"share0","nfs":{"clients":["192.168.100.0/24(rw,no_root_squash)"]}}}
+replication	replication test	2026-08-13T09:02:07.2218119Z     creationTimestamp: "2026-08-13T08:56:58Z"
+replication	replication test	2026-08-13T09:02:07.2218896Z     generation: 1
+replication	replication test	2026-08-13T09:02:07.2219539Z     name: failover
+replication	replication test	2026-08-13T09:02:07.2219942Z     namespace: stornas-system
+replication	replication test	2026-08-13T09:02:07.2220368Z     resourceVersion: "3637"
+replication	replication test	2026-08-13T09:02:07.2220854Z     uid: a99ca155-7d9d-4fd7-9646-097521ba9adc
+replication	replication test	2026-08-13T09:02:07.2221638Z   spec:
+replication	replication test	2026-08-13T09:02:07.2222459Z     claimName: share0
+replication	replication test	2026-08-13T09:02:07.2223293Z --
+replication	replication test	2026-08-13T09:02:07.2225421Z   status:
+replication	replication test	2026-08-13T09:02:07.2225999Z     conditions:
+replication	replication test	2026-08-13T09:02:07.2226675Z     - lastTransitionTime: "2026-08-13T08:56:58Z"
+replication	replication test	2026-08-13T09:02:07.2227856Z       message: waiting for the node agent to mount and export
+replication	replication test	2026-08-13T09:02:07.2228873Z       observedGeneration: 1
+replication	replication test	2026-08-13T09:02:07.2229544Z       reason: WaitingForAgent
+replication	replication test	2026-08-13T09:02:07.2230170Z       status: "False"
+replication	replication test	2026-08-13T09:02:07.2230728Z       type: Available
+replication	replication test	2026-08-13T09:02:07.2231678Z     - lastTransitionTime: "2026-08-13T08:56:58Z"
+replication	replication test	2026-08-13T09:02:07.2232363Z       message: |-
+replication	replication test	2026-08-13T09:02:07.2234796Z         mount -t xfs /dev/drbd1002 /var/lib/stornas/shares/stornas-system-failover: exit status 32: mount: /var/lib/stornas/shares/stornas-system-failover: fsconfig system call failed: /dev/drbd1002: Can't open blockdev.
+replication	replication test	2026-08-13T09:02:07.2237341Z                dmesg(1) may have more information after failed mount system call.
+replication	replication test	2026-08-13T09:02:07.2238710Z       observedGeneration: 1
+replication	replication test	2026-08-13T09:02:07.2239820Z       reason: HostError
+replication	replication test	2026-08-13T09:02:07.2241828Z       status: "False"
+replication	replication test	2026-08-13T09:02:07.2242158Z       type: HostReady
+replication	replication test	2026-08-13T09:02:07.2242439Z     device: /dev/drbd1002
+replication	replication test	2026-08-13T09:02:07.2242919Z     node: node2
+replication	replication test	2026-08-13T09:02:07.2243158Z     state: Failed
+replication	replication test	2026-08-13T09:02:07.2243571Z kind: List
+replication	replication test	2026-08-13T09:02:07.2243961Z metadata:
+replication	replication test	2026-08-13T09:02:07.2244394Z   resourceVersion: ""
+replication	replication test	2026-08-13T09:02:07.3930001Z node1
+replication	replication test	2026-08-13T09:02:07.3958731Z []
+replication	replication test	2026-08-13T09:02:07.6754991Z Cannot set dbroot to /var/target. Please check if this directory exists.
+replication	replication test	2026-08-13T09:02:07.8842132Z node2
+replication	replication test	2026-08-13T09:02:07.8885063Z []
+replication	replication test	2026-08-13T09:02:08.1738300Z Cannot set dbroot to /var/target. Please check if this directory exists.
+replication	replication test	2026-08-13T09:02:08.2030741Z 
+replication	replication test	2026-08-13T09:02:08.2033218Z == DIAGNOSTICS: consoles (last 15 lines each)
+replication	replication test	2026-08-13T09:02:09.8179504Z make: *** [Makefile:99: replication-test] Error 1
+replication	replication test	2026-08-13T09:02:09.8227960Z ##[error]Process completed with exit code 2.

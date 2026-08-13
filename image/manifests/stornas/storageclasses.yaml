@@ -12,6 +12,9 @@ parameters:
   linstor.csi.linbit.com/storagePool: stornas
   linstor.csi.linbit.com/layerList: storage
   linstor.csi.linbit.com/placementCount: "1"
+  # XFS everywhere (DESIGN.md); the CSI default is ext4, and the agent
+  # mounts shares as xfs.
+  csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 ---
@@ -28,5 +31,6 @@ parameters:
   # the UI owns the manual pick-survivor flow (DESIGN.md failure matrix).
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
+  csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true

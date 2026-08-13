@@ -25,6 +25,7 @@ func TestEnsureShareMountsAndExports(t *testing.T) {
 	}
 	f := &fakeRunner{results: map[string]result{
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
+		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"exportfs -ra": {},
 	}}
@@ -78,6 +79,7 @@ func TestEnsureShareRemountsWrongDevice(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {out: "/dev/drbd1042\n"},
 		"umount /var/lib/stornas/shares/default-media":                     {},
+		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"exportfs -ra": {},
 	}}
@@ -99,6 +101,60 @@ func TestEnsureShareRemountsWrongDevice(t *testing.T) {
 	}
 }
 
+// A fresh PVC is a raw device: the CSI only formats volumes pods mount,
+// so first placement must mkfs before mounting.
+func TestEnsureShareFormatsRawDevice(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root+"/etc/exports.d", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{results: map[string]result{
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
+		"blkid -o value -s TYPE /dev/drbd1000":                             {err: errExit},
+		"mkfs.xfs /dev/drbd1000":                                           {},
+		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"exportfs -ra": {},
+	}}
+	m := &ShareManager{Run: f, Node: "node-a", Root: root}
+	s := share("default", "media", "node-a", "/dev/drbd1000",
+		&storagev1alpha1.NFSExport{Clients: []string{"*"}}, nil)
+
+	if err := m.EnsureShare(context.Background(), &s); err != nil {
+		t.Fatal(err)
+	}
+	formatted := false
+	for _, c := range f.calls {
+		if c == "mkfs.xfs /dev/drbd1000" {
+			formatted = true
+		}
+	}
+	if !formatted {
+		t.Fatalf("raw device not formatted: %v", f.calls)
+	}
+}
+
+// A foreign filesystem is someone's data; refusing beats clobbering it
+// with mkfs or a forced xfs mount.
+func TestEnsureShareRefusesForeignFilesystem(t *testing.T) {
+	root := t.TempDir()
+	f := &fakeRunner{results: map[string]result{
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media": {err: errExit},
+		"blkid -o value -s TYPE /dev/drbd1000":                       {out: "ext4\n"},
+	}}
+	m := &ShareManager{Run: f, Node: "node-a", Root: root}
+	s := share("default", "media", "node-a", "/dev/drbd1000",
+		&storagev1alpha1.NFSExport{Clients: []string{"*"}}, nil)
+
+	if err := m.EnsureShare(context.Background(), &s); err == nil {
+		t.Fatal("want error for a foreign filesystem")
+	}
+	for _, c := range f.calls {
+		if c == "mkfs.xfs /dev/drbd1000" {
+			t.Fatal("clobbered a foreign filesystem")
+		}
+	}
+}
+
 // Teardown must erase everything Present keys on, so a standby node that
 // already converged never reruns the removal commands.
 func TestRemoveShareConvergesPresence(t *testing.T) {
@@ -108,6 +164,7 @@ func TestRemoveShareConvergesPresence(t *testing.T) {
 	}
 	f := &fakeRunner{results: map[string]result{
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
+		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"exportfs -ra": {},
 		"umount /var/lib/stornas/shares/default-media": {},

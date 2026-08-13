@@ -83,14 +83,18 @@ func TestEnsureTargetToleratesExisting(t *testing.T) {
 	iqn := "iqn.2026-08.io.stornas:vms"
 	exists := result{err: errExitWith("This Target already exists in configFS")}
 	f := &fakeRunner{results: map[string]result{
-		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       exists,
-		"targetcli /iscsi create " + iqn:                                                   exists,
+		// The backstore phrasing has no "already"; both spellings must
+		// converge.
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000": {
+			err: errExitWith("Storage object block/stornas-vms-lun0 exists"),
+		},
+		"targetcli /iscsi create " + iqn: exists,
 		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": exists,
 		"targetcli /iscsi/" + iqn + "/tpg1/acls create iqn.1994-05.com.redhat:client1":     exists,
-		"ip -j route show default":                                                         {out: `[{"dev":"eth0"}]`},
-		"ip -j addr show to 192.168.1.50":                                                  {out: `[{"ifname":"eth0"}]`},
-		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
-		"targetcli saveconfig":                                                             {},
+		"ip -j route show default":                 {out: `[{"dev":"eth0"}]`},
+		"ip -j addr show to 192.168.1.50":          {out: `[{"ifname":"eth0"}]`},
+		"ip addr replace 192.168.1.50/24 dev eth0": {},
+		"targetcli saveconfig":                     {},
 	}}
 	m := &LIOManager{Run: f}
 
