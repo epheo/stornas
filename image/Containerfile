@@ -48,13 +48,17 @@ COPY files/stornas.xml /etc/firewalld/services/
 RUN firewall-offline-cmd --zone=public --add-service=stornas
 
 # NAS plane: the agent rewrites only the stornas include; the base config
-# stays image-owned. /var/lib/stornas is tmpfiles-created because bootc
-# images do not ship /var content.
+# stays image-owned. /var content is tmpfiles-created because bootc
+# images do not ship it: /var/target is rtslib's dbroot, without which
+# every targetcli invocation dies at startup.
 COPY files/smb.conf /etc/samba/smb.conf
 RUN touch /etc/samba/stornas-shares.conf \
 	&& printf '%s\n' \
 		'd /var/lib/stornas 0755 root root -' \
 		'd /var/lib/drbd 0755 root root -' \
+		'd /var/target 0755 root root -' \
+		'd /var/target/pr 0755 root root -' \
+		'd /var/target/alua 0755 root root -' \
 		'd /run/drbd 0755 root root -' \
 		'd /run/drbd/lock 0755 root root -' \
 		> /usr/lib/tmpfiles.d/stornas.conf \

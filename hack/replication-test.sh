@@ -126,7 +126,7 @@ diagnostics() {
 	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=25 2>&1 \
 		| grep -iE 'error|fail|capacity' | tail -12 || true
 	log "DIAGNOSTICS: failover placement and host state"
-	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A20 'status:' | tail -40 || true
+	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A30 'status:' | tail -80 || true
 	for fn in v1 v2; do
 		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs 2>/dev/null" 2>&1 || true
 	done
@@ -465,6 +465,16 @@ spec:
 EOF
 target_on() { kc -n stornas-system get target failover -o jsonpath='{.status.activeNode} {.status.state}' | grep -qx "$1 Exported"; }
 share_on() { kc -n stornas-system get share failover -o jsonpath='{.status.node} {.status.state}' | grep -qx "$1 Exported"; }
+target_placed() { kc -n stornas-system get target failover -o jsonpath='{.status.activeNode}' | grep -qx node2; }
+share_placed() { kc -n stornas-system get share failover -o jsonpath='{.status.node}' | grep -qx node2; }
+retry 120 "target placed on node2" target_placed
+retry 120 "share placed on node2" share_placed
+
+# The steering pods hold the device and filesystem open, which blocks the
+# agent's own exclusive opens (LIO backstore, xfs mount). Placement is
+# sticky, so dropping them now keeps node2 while freeing the devices.
+kc -n stornas-system delete pod steer-lun0 steer-share0 --wait
+
 target_on_node2() { target_on node2; }
 share_on_node2() { share_on node2; }
 retry 300 "target exported from node2" target_on_node2
@@ -477,9 +487,6 @@ retry 120 "VIP held by node2" vip_on_node2
 # The VIP must answer off-node, which is what the GARP buys.
 vip_answers() { timeout 3 bash -c "</dev/tcp/$VIP/3260"; }
 retry 60 "iSCSI reachable on the VIP from the host" vip_answers
-
-# The agent's opens now hold both primaries; the steering pods can go.
-kc -n stornas-system delete pod steer-lun0 steer-share0 --wait
 
 log "killing node2: writes must survive the peer loss"
 sudo kill "$(sudo cat "$WORKDIR/qemu2.pid")"
