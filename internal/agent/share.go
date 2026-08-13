@@ -69,6 +69,12 @@ func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.S
 		if _, err := m.Run.Run(ctx, "mount", "-t", "xfs", share.Status.Device, mnt); err != nil {
 			return err
 		}
+		// A fresh xfs carries no SELinux labels; unlabeled_t makes
+		// mountd's export path check fail and smbd refuse the tree.
+		// Best effort: enforcement may be off.
+		if _, err := m.Run.Run(ctx, "restorecon", "-R", mnt); err != nil {
+			fmt.Printf("restorecon %s: %v\n", mnt, err)
+		}
 	}
 	path := m.Root + m.exportsFile(share.Namespace, share.Name)
 	if share.Spec.NFS != nil {

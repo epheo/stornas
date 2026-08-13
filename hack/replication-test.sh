@@ -139,7 +139,11 @@ diagnostics() {
 	kc -n stornas-system get pods -o wide 2>&1 || true
 	kc -n stornas-system logs deploy/stornas-operator --tail=30 2>&1 || true
 	log "DIAGNOSTICS: NFS server view on node1"
-	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; findmnt /var/lib/stornas/shares 2>/dev/null; ls /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
+	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; ls -Z /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
+	log "DIAGNOSTICS: one verbose NFS mount attempt from node2"
+	v2 sh -c "mkdir -p /mnt/nfs-diag && mount -t nfs -o nfsvers=4.2 ${IP1:-127.0.0.1}:/var/lib/stornas/shares/stornas-system-failover /mnt/nfs-diag; umount /mnt/nfs-diag 2>/dev/null; true" 2>&1 || true
+	log "DIAGNOSTICS: AVC denials on node1"
+	v1 sh -c 'ausearch -m avc -ts recent 2>/dev/null | tail -15 || dmesg | grep -i avc | tail -15' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
 	tail -15 "$WORKDIR/console1.log" 2>/dev/null || true
 	tail -15 "$WORKDIR/console2.log" 2>/dev/null || true

@@ -27,6 +27,7 @@ func TestEnsureShareMountsAndExports(t *testing.T) {
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
 		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
@@ -81,6 +82,7 @@ func TestEnsureShareRemountsWrongDevice(t *testing.T) {
 		"umount /var/lib/stornas/shares/default-media":                     {},
 		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
@@ -113,6 +115,7 @@ func TestEnsureShareFormatsRawDevice(t *testing.T) {
 		"blkid -o value -s TYPE /dev/drbd1000":                             {err: errExit},
 		"mkfs.xfs /dev/drbd1000":                                           {},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
@@ -166,6 +169,7 @@ func TestRemoveShareConvergesPresence(t *testing.T) {
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
 		"blkid -o value -s TYPE /dev/drbd1000":                             {out: "xfs\n"},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
 		"umount /var/lib/stornas/shares/default-media": {},
 	}}
