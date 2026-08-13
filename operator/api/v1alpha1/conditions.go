@@ -16,8 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-// Condition types. HostReady is written only by the node agent, the rest
-// only by the operator, so the two status writers never fight over an entry.
+// Condition types. HostReady is written by the node agent, the rest only
+// by the operator, so the two status writers never fight over an entry.
+// One exception: the operator resets HostReady when placement moves,
+// because the value left behind describes the losing node.
 const (
 	ConditionAvailable         = "Available"
 	ConditionHostReady         = "HostReady"
@@ -40,6 +42,10 @@ const LinstorPool = "stornas"
 
 // ThinLV is the thin pool LV inside every pool's VG.
 const ThinLV = "thin"
+
+// IQNPrefix is shared by the operator (status.iqn) and the agent (teardown
+// by name after the Target is gone); one constant keeps them in step.
+const IQNPrefix = "iqn.2026-08.io.stornas:"
 
 // VGName prefixes the CR name so appliance VGs are distinguishable from
 // any the user created by hand; the agent never touches foreign VGs.

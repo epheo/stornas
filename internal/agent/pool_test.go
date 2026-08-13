@@ -66,7 +66,7 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 		"pvs /dev/sda":                   {err: errExit},
 		"pvcreate /dev/sda":              {},
 		"vgcreate stornas-tank /dev/sda": {},
-		"lvs stornas-tank/thin":          {err: errExit},
+		"lvs --noheadings --options lv_attr stornas-tank/thin":               {err: errExit},
 		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank": {},
 		"readlink -f /dev/sda": {out: "/dev/sda\n"},
 		vgsCmd:                 {out: vgsOut},
@@ -92,13 +92,13 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 func TestEnsurePoolIdempotent(t *testing.T) {
 	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdb","pv_missing":"","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"vgs stornas-tank":      {},
-		"lvs stornas-tank/thin": {},
-		"readlink -f /dev/sda":  {out: "/dev/sda\n"},
-		"readlink -f /dev/sdb":  {out: "/dev/sdb\n"},
-		vgsCmd:                  {out: vgsOut},
-		pvsCmd:                  {out: pvs},
-		lvsSyncCmd:              {out: lvsIdle},
+		"vgs stornas-tank": {},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
+		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
+		"readlink -f /dev/sdb":                                 {out: "/dev/sdb\n"},
+		vgsCmd:                                                 {out: vgsOut},
+		pvsCmd:                                                 {out: pvs},
+		lvsSyncCmd:                                             {out: lvsIdle},
 	}}
 
 	if _, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb")); err != nil {
@@ -116,14 +116,14 @@ func TestEnsurePoolIdempotent(t *testing.T) {
 func TestEnsurePoolDegradedOnMissingPV(t *testing.T) {
 	pvs := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"[unknown]","pv_missing":"missing","pv_used":"10"}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"vgs stornas-tank":      {},
-		"lvs stornas-tank/thin": {},
-		"readlink -f /dev/sda":  {out: "/dev/sda\n"},
-		"readlink -f /dev/sdb":  {out: "/dev/sdb\n"},
-		"test -b /dev/sdb":      {err: errExit},
-		vgsCmd:                  {out: vgsOut},
-		pvsCmd:                  {out: pvs},
-		lvsSyncCmd:              {out: lvsIdle},
+		"vgs stornas-tank": {},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
+		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
+		"readlink -f /dev/sdb":                                 {out: "/dev/sdb\n"},
+		"test -b /dev/sdb":                                     {err: errExit},
+		vgsCmd:                                                 {out: vgsOut},
+		pvsCmd:                                                 {out: pvs},
+		lvsSyncCmd:                                             {out: lvsIdle},
 	}}
 
 	rep, err := EnsurePool(context.Background(), lvm.NewWithRunner(f), pool("tank", "raid1", "/dev/sda", "/dev/sdb"))
@@ -148,19 +148,19 @@ func TestEnsurePoolRepairsWithReplacement(t *testing.T) {
 	pvsAfter := `{"report":[{"pv":[{"pv_name":"/dev/sda","pv_missing":"","pv_used":"10"},{"pv_name":"/dev/sdc","pv_missing":"","pv_used":"10"}]}]}`
 	lvsSyncing := `{"report":[{"lv":[{"lv_name":"thin_tdata","sync_percent":"37.50","copy_percent":""}]}]}`
 	f := &fakeRunner{results: map[string]result{
-		"vgs stornas-tank":                                 {},
-		"lvs stornas-tank/thin":                            {},
-		"readlink -f /dev/sda":                             {out: "/dev/sda\n"},
-		"readlink -f /dev/sdc":                             {out: "/dev/sdc\n"},
-		"test -b /dev/sdc":                                 {},
-		"pvs /dev/sdc":                                     {err: errExit},
-		"pvcreate /dev/sdc":                                {},
-		"vgextend stornas-tank /dev/sdc":                   {},
-		"lvconvert --repair --yes stornas-tank/thin_tdata": {},
-		"lvconvert --repair --yes stornas-tank/thin_tmeta": {},
-		"vgreduce --removemissing stornas-tank":            {},
-		vgsCmd:                                             {out: vgsOut},
-		lvsSyncCmd:                                         {out: lvsSyncing},
+		"vgs stornas-tank": {},
+		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
+		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
+		"readlink -f /dev/sdc":                                 {out: "/dev/sdc\n"},
+		"test -b /dev/sdc":                                     {},
+		"pvs /dev/sdc":                                         {err: errExit},
+		"pvcreate /dev/sdc":                                    {},
+		"vgextend stornas-tank /dev/sdc":                       {},
+		"lvconvert --repair --yes stornas-tank/thin_tdata":     {},
+		"lvconvert --repair --yes stornas-tank/thin_tmeta":     {},
+		"vgreduce --removemissing stornas-tank":                {},
+		vgsCmd:                                                 {out: vgsOut},
+		lvsSyncCmd:                                             {out: lvsSyncing},
 	}}
 	// First pvs read sees the ghost, the re-read after convergence sees
 	// the new member.

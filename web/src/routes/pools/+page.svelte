@@ -6,6 +6,7 @@
 	import Meter from '$lib/ui/Meter.svelte';
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
 	import Modal from '$lib/ui/Modal.svelte';
+	import ProgressBar from '$lib/ui/ProgressBar.svelte';
 
 	const snap = $derived(app.snap);
 
@@ -19,10 +20,20 @@
 		(snap.nodes.find((n) => n.name === node)?.disks ?? []).filter((d) => !d.claimed),
 	);
 
+	// Device paths are per-node; a stale selection from another node must not survive the switch.
+	$effect(() => {
+		node;
+		disks = [];
+	});
+
+	let createBusy = $state(false);
+
 	async function createPool(e: Event) {
 		e.preventDefault();
 		error = '';
+		createBusy = true;
 		const err = await post('/api/v1/pools', { name, node, devices: disks, raid });
+		createBusy = false;
 		if (err) error = err;
 		else {
 			toasts.show(`Pool ${name} created`, 'success');
@@ -110,12 +121,7 @@
 					{#if pool.rebuildPercent != null}
 						<div class="flex items-center gap-3 border-t border-slate-800 px-4 py-2.5">
 							<span class="text-xs text-slate-400">Rebuilding</span>
-							<div class="h-1.5 w-56 overflow-hidden rounded-full bg-sky-500/15">
-								<div
-									class="h-full rounded-full bg-sky-500"
-									style="width:{pool.rebuildPercent}%"
-								></div>
-							</div>
+							<ProgressBar percent={pool.rebuildPercent} width="w-56" />
 							<span class="text-xs tabular-nums text-slate-400">{pool.rebuildPercent}%</span>
 						</div>
 					{/if}
@@ -124,7 +130,7 @@
 							<span class="inline-flex items-center gap-2 rounded bg-slate-800/60 px-2 py-1">
 								<span class="font-mono text-xs text-slate-300">{d.path}</span>
 								<StatusBadge kind={deviceKind(d.state)} label={d.state || 'pending'} />
-								{#if d.smart && d.smart !== 'PASSED'}
+								{#if d.smart === 'Failed'}
 									<span class="text-xs text-red-400">SMART: {d.smart}</span>
 								{/if}
 								{#if app.role === 'admin'}
@@ -183,8 +189,9 @@
 					{/each}
 				</div>
 				<button
-					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
+					disabled={createBusy}
 				>
 					Create pool
 				</button>

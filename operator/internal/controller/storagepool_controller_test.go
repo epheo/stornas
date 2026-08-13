@@ -32,12 +32,18 @@ import (
 )
 
 type fakeRegistrar struct {
-	calls []string
-	err   error
+	calls   []string
+	deletes []string
+	err     error
 }
 
 func (f *fakeRegistrar) EnsurePool(_ context.Context, node, vg string) error {
 	f.calls = append(f.calls, node+":"+vg)
+	return f.err
+}
+
+func (f *fakeRegistrar) DeletePool(_ context.Context, node string) error {
+	f.deletes = append(f.deletes, node)
 	return f.err
 }
 
@@ -74,6 +80,11 @@ var _ = Describe("StoragePool Controller", func() {
 	deletePool := func(name string) {
 		pool := &storagev1alpha1.StoragePool{ObjectMeta: metav1.ObjectMeta{Name: name}}
 		Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
+		// A reconciled pool carries the finalizer; run one pass to strip it
+		// so the object actually goes away.
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
+		Expect(err).NotTo(HaveOccurred())
 	}
 
 	It("rejects raid levels the device count cannot carry", func() {
@@ -127,6 +138,25 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(pool.Status.LinstorPool).To(Equal(storagev1alpha1.LinstorPool))
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)).To(BeTrue())
+	})
+
+	It("deregisters from LINSTOR on delete via the finalizer", func() {
+		Expect(k8sClient.Create(ctx, newPool("finalized", "none", "/dev/sda"))).To(Succeed())
+		markHostReady("finalized")
+
+		reg := &fakeRegistrar{}
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
+		_, err := reconcileOnce(r, "finalized")
+		Expect(err).NotTo(HaveOccurred())
+
+		pool := &storagev1alpha1.StoragePool{ObjectMeta: metav1.ObjectMeta{Name: "finalized"}}
+		Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
+		_, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
+		Expect(rerr).NotTo(HaveOccurred())
+
+		Expect(reg.deletes).To(Equal([]string{"node-a"}))
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, &storagev1alpha1.StoragePool{})
+		Expect(err).To(HaveOccurred())
 	})
 
 	It("surfaces LINSTOR errors and retries", func() {

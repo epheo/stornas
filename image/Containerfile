@@ -8,11 +8,13 @@ FROM ghcr.io/epheo/microshift:latest
 COPY --from=kmod /out/rpms /tmp/drbd-rpms
 COPY --from=kmod /out/utils/ /
 
+# iputils: arping sends the gratuitous ARP on VIP failover.
 RUN dnf install -y \
 	lvm2 \
 	mdadm \
 	smartmontools \
 	nvme-cli \
+	iputils \
 	targetcli \
 	samba \
 	nfs-utils \

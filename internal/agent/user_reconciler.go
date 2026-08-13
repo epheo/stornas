@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -10,6 +11,11 @@ import (
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
+
+// secretRefreshInterval bounds how long a rotated or late-created Secret
+// goes unnoticed: nothing watches Secrets (get-only RBAC), so reconciles
+// that read one poll instead.
+const secretRefreshInterval = 5 * time.Minute
 
 // UserAgentReconciler provisions SMB users into the host passdb on every
 // node (shares can be placed anywhere). Secrets are read uncached through
@@ -31,14 +37,18 @@ func (r *UserAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	var secret corev1.Secret
 	if err := r.Secrets.Get(ctx, types.NamespacedName{Namespace: user.Namespace, Name: user.Spec.PasswordSecretRef}, &secret); err != nil {
-		// The operator flags missing secrets on the LocalUser; nothing to do here.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		// The operator flags missing secrets on the LocalUser; poll until
+		// the ref appears.
+		return ctrl.Result{RequeueAfter: secretRefreshInterval}, client.IgnoreNotFound(err)
 	}
 	pw := string(secret.Data["password"])
 	if pw == "" {
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
 	}
-	return ctrl.Result{}, EnsureSMBUser(ctx, r.Run, user.Name, pw)
+	if err := EnsureSMBUser(ctx, r.Run, user.Name, pw); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
 }
 
 func (r *UserAgentReconciler) SetupWithManager(mgr ctrl.Manager) error {

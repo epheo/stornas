@@ -32,6 +32,8 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 
 func TestCreateThinPoolRaid(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
+		"lvs vg0/thin":      {err: errExit},
+		"lvs vg0/thin_meta": {err: errExit},
 		"lvcreate --yes --type raid1 --extents 85%VG --name thin vg0":            {},
 		"lvcreate --yes --type raid1 --extents 2%VG --name thin_meta vg0":        {},
 		"lvconvert --yes --type thin-pool --poolmetadata vg0/thin_meta vg0/thin": {},
@@ -39,8 +41,45 @@ func TestCreateThinPoolRaid(t *testing.T) {
 	if err := NewWithRunner(f).CreateThinPool(context.Background(), "vg0", "thin", "raid1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 3 {
+	if len(f.calls) != 5 {
 		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+// A crash between the data LV and the convert leaves a bare raid LV named
+// thin; the rerun must resume at the missing steps, not fail on the name.
+func TestCreateThinPoolRaidResumes(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"lvs vg0/thin":      {},
+		"lvs vg0/thin_meta": {err: errExit},
+		"lvcreate --yes --type raid1 --extents 2%VG --name thin_meta vg0":        {},
+		"lvconvert --yes --type thin-pool --poolmetadata vg0/thin_meta vg0/thin": {},
+	}}
+	if err := NewWithRunner(f).CreateThinPool(context.Background(), "vg0", "thin", "raid1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if c == "lvcreate --yes --type raid1 --extents 85%VG --name thin vg0" {
+			t.Fatalf("recreated existing data LV: %v", f.calls)
+		}
+	}
+}
+
+func TestIsThinPool(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"lvs --noheadings --options lv_attr vg0/thin": {out: "  twi-aotz--\n"},
+		"lvs --noheadings --options lv_attr vg0/bare": {out: "  rwi-a-r---\n"},
+		"lvs --noheadings --options lv_attr vg0/gone": {err: errExit},
+	}}
+	l := NewWithRunner(f)
+	if !l.IsThinPool(context.Background(), "vg0", "thin") {
+		t.Fatal("thin pool not recognized")
+	}
+	if l.IsThinPool(context.Background(), "vg0", "bare") {
+		t.Fatal("bare raid LV mistaken for a thin pool")
+	}
+	if l.IsThinPool(context.Background(), "vg0", "gone") {
+		t.Fatal("missing LV mistaken for a thin pool")
 	}
 }
 

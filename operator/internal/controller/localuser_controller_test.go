@@ -34,13 +34,13 @@ import (
 var _ = Describe("LocalUser Controller", func() {
 	ctx := context.Background()
 
-	reconcileOnce := func(name string) *storagev1alpha1.LocalUser {
+	reconcileOnce := func(name string) (*storagev1alpha1.LocalUser, reconcile.Result) {
 		r := &LocalUserReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: name}})
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: name}})
 		Expect(err).NotTo(HaveOccurred())
 		user := &storagev1alpha1.LocalUser{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: name}, user)).To(Succeed())
-		return user
+		return user, res
 	}
 
 	newUser := func(name, secretRef string) *storagev1alpha1.LocalUser {
@@ -56,19 +56,31 @@ var _ = Describe("LocalUser Controller", func() {
 			Expect(k8sClient.Delete(ctx, newUser("alice", "alice-password"))).To(Succeed())
 		}()
 
-		user := reconcileOnce("alice")
+		user, res := reconcileOnce("alice")
 		cond := meta.FindStatusCondition(user.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
+		// Nothing watches Secrets, so the invalid state must self-requeue
+		// or a later fix would never be seen.
+		Expect(res.RequeueAfter).To(Equal(secretSettleInterval))
 
-		By("going available once the secret carries a password")
+		By("still invalid while the secret has no password key")
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "alice-password", Namespace: "default"},
-			Data:       map[string][]byte{"password": []byte("hunter2")},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-		user = reconcileOnce("alice")
+		user, res = reconcileOnce("alice")
+		cond = meta.FindStatusCondition(user.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(res.RequeueAfter).To(Equal(secretSettleInterval))
+
+		By("going available once the secret carries a password")
+		secret.Data = map[string][]byte{"password": []byte("hunter2")}
+		Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+		user, res = reconcileOnce("alice")
 		Expect(meta.IsStatusConditionTrue(user.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+		Expect(res.RequeueAfter).To(BeZero())
 	})
 })

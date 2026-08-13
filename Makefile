@@ -5,9 +5,12 @@ BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
 .PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test replication-test clean
 
-# The full local gate; .github/workflows/ci.yml runs these same targets.
-# Only the image build stays out: it pulls the base image and kernel-devel.
-ci: generate build lint test web
+# The full local gate; .github/workflows/ci.yml runs these same targets
+# and the same stale-generated-files check. The diff is scoped to generated
+# paths so a dirty working tree does not fail the gate. Only the image
+# build stays out: it pulls the base image and kernel-devel.
+ci: generate build lint types test web
+	git diff --exit-code -- web/src/lib/model.gen.ts operator/api/v1alpha1/zz_generated.deepcopy.go operator/config
 
 build:
 	go build -ldflags '$(LDFLAGS)' ./cmd/stornas ./cmd/stornas-agent
@@ -96,4 +99,4 @@ replication-test:
 
 clean:
 	rm -f stornas stornas-agent
-	rm -rf web/build web/.svelte-kit
+	rm -rf web/build web/.svelte-kit operator/bin image/build

@@ -25,7 +25,7 @@ type User struct {
 
 type ctxKey struct{}
 
-// FromContext returns the identity Require/RequireRole stored; zero when
+// FromContext returns the identity Require/RequireAdmin stored; zero when
 // the handler runs outside those gates.
 func FromContext(ctx context.Context) User {
 	u, _ := ctx.Value(ctxKey{}).(User)
@@ -176,16 +176,15 @@ func (m *Manager) Require(next http.Handler) http.Handler {
 	})
 }
 
-// RequireRole gates a handler behind a session carrying the role; admin
-// implies every role.
-func (m *Manager) RequireRole(role string, next http.Handler) http.Handler {
+// RequireAdmin gates a handler behind an admin session.
+func (m *Manager) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := m.userFor(r)
 		if !ok {
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
-		if user.Role != role && user.Role != "admin" {
+		if user.Role != "admin" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

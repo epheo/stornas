@@ -70,3 +70,15 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
 	}
 	return nil
 }
+
+// DeletePool removes the node's registration from the LINSTOR catalog.
+// The VG itself is host state and stays: pool deletion is a human decision.
+// LINSTOR refuses while resources still live on the pool, which is what
+// makes the finalizer wait instead of orphaning volumes.
+func (r *Registrar) DeletePool(ctx context.Context, node string) error {
+	err := r.client.Nodes.DeleteStoragePool(ctx, node, storagev1alpha1.LinstorPool)
+	if err != nil && !errors.Is(err, lapi.NotFoundError) {
+		return fmt.Errorf("delete storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
+	}
+	return nil
+}

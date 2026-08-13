@@ -11,7 +11,6 @@ package clusterstate
 import (
 	"context"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -77,11 +76,6 @@ type State struct {
 
 	specs []reflectorSpec
 
-	poolsSynced, sharesSynced, invSynced, nodesSynced, pvcsSynced atomic.Bool
-	targetsSynced, snapsSynced, eventsSynced                      atomic.Bool
-	syncedOnce                                                    sync.Once
-	allSynced                                                     chan struct{}
-
 	healthy atomic.Bool // any reflector's List/Watch failing flips this false
 }
 
@@ -96,7 +90,7 @@ type reflectorSpec struct {
 // list/watch), Nodes and PVCs via the typed clientset. bus is optional
 // (nil disables signalling, e.g. in tests).
 func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *State {
-	s := &State{allSynced: make(chan struct{})}
+	s := &State{}
 	s.pools = newIndexer()
 	s.shares = newIndexer()
 	s.inventories = newIndexer()
@@ -117,7 +111,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 
 	s.specs = []reflectorSpec{
 		{
-			reflect.NewStore(s.pools, pool, func() { s.poolsSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.pools, pool, nil),
 			&unstructured.Unstructured{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -129,7 +123,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 			}, &s.healthy),
 		},
 		{
-			reflect.NewStore(s.shares, shareFn, func() { s.sharesSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.shares, shareFn, nil),
 			&unstructured.Unstructured{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -143,7 +137,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 		{
 			// Inventory moves feed the same NodeChanged kind: the UI's
 			// node view is the join of both objects.
-			reflect.NewStore(s.inventories, node, func() { s.invSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.inventories, node, nil),
 			&unstructured.Unstructured{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -155,7 +149,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 			}, &s.healthy),
 		},
 		{
-			reflect.NewStore(s.targets, target, func() { s.targetsSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.targets, target, nil),
 			&unstructured.Unstructured{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -167,7 +161,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 			}, &s.healthy),
 		},
 		{
-			reflect.NewStore(s.snapshots, snapFn, func() { s.snapsSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.snapshots, snapFn, nil),
 			&unstructured.Unstructured{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -179,7 +173,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 			}, &s.healthy),
 		},
 		{
-			reflect.NewStore(s.nodes, node, func() { s.nodesSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.nodes, node, nil),
 			&corev1.Node{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -191,7 +185,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 			}, &s.healthy),
 		},
 		{
-			reflect.NewStore(s.pvcs, volume, func() { s.pvcsSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.pvcs, volume, nil),
 			&corev1.PersistentVolumeClaim{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -205,7 +199,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 		{
 			// Warning-only server side: Normal events churn constantly and
 			// would rebroadcast a frame per pod tick.
-			reflect.NewStore(s.events, alert, func() { s.eventsSynced.Store(true); s.checkSynced() }),
+			reflect.NewStore(s.events, alert, nil),
 			&corev1.Event{},
 			reflect.TrackHealth(&cache.ListWatch{
 				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
@@ -227,31 +221,12 @@ func newIndexer() cache.Indexer {
 }
 
 // Run starts one reflector per resource; each owns its own relist/backoff
-// and stops when ctx is cancelled. Returns immediately - call WaitForSync
-// to block until the initial LIST has populated the snapshot.
+// and stops when ctx is cancelled. Returns immediately; early frames may be
+// partial until the initial LISTs land, and the hub rebroadcasts as they do.
 func (s *State) Run(ctx context.Context) {
 	for _, spec := range s.specs {
 		r := cache.NewReflector(spec.lw, spec.expected, spec.store, 0)
 		go r.Run(ctx.Done())
-	}
-}
-
-// WaitForSync blocks until every reflector's initial LIST has landed or ctx
-// is done.
-func (s *State) WaitForSync(ctx context.Context) error {
-	select {
-	case <-s.allSynced:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (s *State) checkSynced() {
-	if s.poolsSynced.Load() && s.sharesSynced.Load() && s.invSynced.Load() &&
-		s.targetsSynced.Load() && s.snapsSynced.Load() && s.eventsSynced.Load() &&
-		s.nodesSynced.Load() && s.pvcsSynced.Load() {
-		s.syncedOnce.Do(func() { close(s.allSynced) })
 	}
 }
 

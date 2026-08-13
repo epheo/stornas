@@ -8,6 +8,7 @@
 	import Modal from '$lib/ui/Modal.svelte';
 	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
+	import ProgressBar from '$lib/ui/ProgressBar.svelte';
 	import type { Replica } from '$lib/model.gen';
 
 	const snap = $derived(app.snap);
@@ -18,11 +19,14 @@
 	let size = $state('10Gi');
 	let storageClass = $state('stornas-local');
 	let block = $state(false);
+	let createBusy = $state(false);
 
 	async function createVolume(e: Event) {
 		e.preventDefault();
 		actionError = '';
+		createBusy = true;
 		const err = await post('/api/v1/volumes', { name, size, storageClass, block });
+		createBusy = false;
 		if (err) actionError = err;
 		else {
 			toasts.show(`Volume ${name} created`, 'success');
@@ -142,12 +146,7 @@
 									{/each}
 									{#each (vol.replication.replicas ?? []).filter((r) => r.syncPercent != null) as r (r.node)}
 										<div class="mt-1 flex items-center gap-2">
-											<div class="h-1.5 w-28 overflow-hidden rounded-full bg-sky-500/15">
-												<div
-													class="h-full rounded-full bg-sky-500"
-													style="width:{r.syncPercent}%"
-												></div>
-											</div>
+											<ProgressBar percent={r.syncPercent ?? 0} width="w-28" />
 											<span class="tabular-nums text-slate-400">{r.node} {r.syncPercent}%</span>
 										</div>
 									{/each}
@@ -264,7 +263,7 @@
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
-					disabled={!validName(name) || sizeBytes(size) == null}
+					disabled={!validName(name) || sizeBytes(size) == null || createBusy}
 				>
 					Create volume
 				</button>

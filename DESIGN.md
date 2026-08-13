@@ -228,7 +228,7 @@ hack/
 ## Open questions
 
 - LVM raid vs mdadm: proposal is LVM raid; mdadm tooling is more battle-worn.
-- VIP mechanics: agent-managed ip addr plus GARP, or keepalived. Proposal: agent.
+- VIP mechanics: decided, agent-managed ip addr plus GARP; no keepalived.
 - NFS: kernel nfsd (proposal) vs ganesha in a pod.
 - LIO: drive configfs from Go in the agent, or shell out to targetcli. Proposal: configfs.
 - Snapshot scheduling: CSI VolumeSnapshot plus a cron field on the PVC page, post-v1.

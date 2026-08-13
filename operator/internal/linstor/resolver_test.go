@@ -44,12 +44,15 @@ func TestResolvePlacementPrefersPrimary(t *testing.T) {
 	  {"name":"pvc-1","node_name":"node-b","state":{"in_use":true},"volumes":[{"device_path":"/dev/drbd1000"}]},
 	  {"name":"pvc-2","node_name":"node-a","state":{"in_use":true},"volumes":[{"device_path":"/dev/drbd1001"}]}
 	]`
-	node, dev, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1")
+	node, dev, replicas, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1", "node-a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if node != "node-b" || dev != "/dev/drbd1000" {
 		t.Fatalf("placement = %s %s", node, dev)
+	}
+	if replicas != 2 {
+		t.Fatalf("replicas = %d", replicas)
 	}
 }
 
@@ -58,17 +61,65 @@ func TestResolvePlacementSkipsDiskless(t *testing.T) {
 	  {"name":"pvc-1","node_name":"node-c","flags":["DISKLESS"],"volumes":[{"device_path":"/dev/drbd1000"}]},
 	  {"name":"pvc-1","node_name":"node-a","state":{"in_use":false},"volumes":[{"device_path":"/dev/drbd1000"}]}
 	]`
-	node, _, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1")
+	node, _, replicas, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if node != "node-a" {
 		t.Fatalf("node = %s", node)
 	}
+	if replicas != 1 {
+		t.Fatalf("replicas = %d", replicas)
+	}
 }
 
 func TestResolvePlacementNoReplica(t *testing.T) {
-	if _, _, err := viewServer(t, `[]`).ResolvePlacement(context.Background(), "pvc-1"); err == nil {
+	if _, _, _, err := viewServer(t, `[]`).ResolvePlacement(context.Background(), "pvc-1", "", nil); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+// Failover: a primary on an avoided node must not win; the surviving
+// diskful replica takes over.
+func TestResolvePlacementAvoidsDeadPrimary(t *testing.T) {
+	body := `[
+	  {"name":"pvc-1","node_name":"node-a","state":{"in_use":true},"volumes":[{"device_path":"/dev/drbd1000"}]},
+	  {"name":"pvc-1","node_name":"node-b","state":{"in_use":false},"volumes":[{"device_path":"/dev/drbd1000"}]}
+	]`
+	node, _, replicas, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1", "node-a", map[string]bool{"node-a": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-b" {
+		t.Fatalf("node = %s", node)
+	}
+	if replicas != 2 {
+		t.Fatalf("replicas = %d", replicas)
+	}
+}
+
+// No primary and no preference signal: placement sticks to the current
+// node instead of flapping to whichever replica lists first.
+func TestResolvePlacementSticksToCurrent(t *testing.T) {
+	body := `[
+	  {"name":"pvc-1","node_name":"node-a","state":{"in_use":false},"volumes":[{"device_path":"/dev/drbd1000"}]},
+	  {"name":"pvc-1","node_name":"node-b","state":{"in_use":false},"volumes":[{"device_path":"/dev/drbd1000"}]}
+	]`
+	node, _, _, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1", "node-b", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-b" {
+		t.Fatalf("node = %s", node)
+	}
+}
+
+func TestResolvePlacementAllReplicasAvoided(t *testing.T) {
+	body := `[
+	  {"name":"pvc-1","node_name":"node-a","state":{"in_use":false},"volumes":[{"device_path":"/dev/drbd1000"}]}
+	]`
+	avoid := map[string]bool{"node-a": true}
+	if _, _, _, err := viewServer(t, body).ResolvePlacement(context.Background(), "pvc-1", "", avoid); err == nil {
+		t.Fatal("want error when every replica is unhealthy")
 	}
 }

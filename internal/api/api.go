@@ -481,8 +481,10 @@ func (a *API) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Password == "" {
-		http.Error(w, "password required", http.StatusBadRequest)
+	// Same floor as the self-service change; the password lives in a Secret,
+	// so CRD validation cannot enforce it.
+	if len(req.Password) < 8 {
+		http.Error(w, "password needs at least 8 characters", http.StatusBadRequest)
 		return
 	}
 	secretName := req.Name + "-password"

@@ -26,7 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
@@ -34,8 +37,10 @@ import (
 // TargetReconciler owns placement and device resolution for iSCSI targets.
 // v1 failover is active/passive: every LUN is served from one node (the
 // first LUN's DRBD primary), the agent raises the VIP there, initiators
-// reconnect. DRBD device paths are node-agnostic, so colocating LUNs whose
-// primaries differ still works; the mount-side promotion happens on open.
+// reconnect. When the active node goes NotReady, placement re-resolves
+// away from it; the agent on the loser tears down, the winner exports and
+// takes the VIP. DRBD device paths are node-agnostic, so colocating LUNs
+// whose primaries differ still works; promotion happens on open.
 type TargetReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
@@ -45,8 +50,7 @@ type TargetReconciler struct {
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/finalizers,verbs=update
-
-const iqnPrefix = "iqn.2026-08.io.stornas:"
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var target storagev1alpha1.Target
@@ -62,7 +66,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	res := ctrl.Result{}
 	var retErr error
 
-	target.Status.IQN = iqnPrefix + target.Name
+	target.Status.IQN = storagev1alpha1.IQNPrefix + target.Name
 
 	handles := make([]string, 0, len(target.Spec.LUNs))
 	reason, msg := "", ""
@@ -88,10 +92,14 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		available.Message = "no LINSTOR controller configured"
 
 	default:
+		avoid, err := unreadyNodes(ctx, r.Client)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 		luns := make([]storagev1alpha1.LUNStatus, 0, len(handles))
-		node := ""
+		node, replicated := "", false
 		for i, h := range handles {
-			n, device, err := r.Linstor.ResolvePlacement(ctx, h)
+			n, device, replicas, err := r.Linstor.ResolvePlacement(ctx, h, target.Status.ActiveNode, avoid)
 			if err != nil {
 				available.Reason = storagev1alpha1.ReasonLinstorError
 				available.Message = err.Error()
@@ -101,11 +109,33 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			if i == 0 {
 				node = n
 			}
+			replicated = replicated || replicas > 1
 			luns = append(luns, storagev1alpha1.LUNStatus{ID: target.Spec.LUNs[i].ID, Device: device})
 		}
-		if retErr == nil {
+		switch {
+		case retErr != nil:
+
+		case replicated && target.Spec.VIP == "":
+			// Without a VIP initiators cannot follow a failover, so a
+			// replicated LUN behind a fixed node address is a spec error.
+			available.Reason = storagev1alpha1.ReasonInvalidSpec
+			available.Message = "vip is required when a LUN is replicated"
+
+		default:
+			moved := target.Status.ActiveNode != "" && target.Status.ActiveNode != node
 			target.Status.ActiveNode = node
 			target.Status.LUNs = luns
+			if moved {
+				// The old node's HostReady is stale the moment placement
+				// moves; reset it so Available tracks the new node's agent.
+				meta.SetStatusCondition(&target.Status.Conditions, metav1.Condition{
+					Type:               storagev1alpha1.ConditionHostReady,
+					Status:             metav1.ConditionFalse,
+					Reason:             storagev1alpha1.ReasonWaitingForAgent,
+					Message:            "moved to " + node,
+					ObservedGeneration: target.Generation,
+				})
+			}
 			if meta.IsStatusConditionTrue(target.Status.Conditions, storagev1alpha1.ConditionHostReady) {
 				available.Status = metav1.ConditionTrue
 				available.Reason = storagev1alpha1.ReasonReady
@@ -113,6 +143,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				available.Reason = storagev1alpha1.ReasonWaitingForAgent
 				available.Message = "waiting for the node agent to export the target"
 			}
+			res.RequeueAfter = placementRecheckInterval
 		}
 	}
 
@@ -126,30 +157,29 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return res, retErr
 }
 
-// claimHandle resolves a PVC to its LINSTOR resource name; shared by the
-// Share and Target reconcilers. A non-empty reason means not usable yet.
-func claimHandle(ctx context.Context, c client.Reader, namespace, claim string) (handle, reason, msg string) {
-	var pvc corev1.PersistentVolumeClaim
-	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: claim}, &pvc); err != nil {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "claim " + claim + " not found"
+// allTargets re-reconciles every target on a node readiness flip; the
+// fleet is a handful of exports, so a full sweep beats tracking who served
+// what.
+func (r *TargetReconciler) allTargets(ctx context.Context, _ client.Object) []reconcile.Request {
+	var list storagev1alpha1.TargetList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
 	}
-	if pvc.Spec.VolumeName == "" {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "claim " + claim + " not bound"
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for _, t := range list.Items {
+		reqs = append(reqs, reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: t.Namespace, Name: t.Name},
+		})
 	}
-	var pv corev1.PersistentVolume
-	if err := c.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, &pv); err != nil {
-		return "", storagev1alpha1.ReasonWaitingForVolume, "volume " + pvc.Spec.VolumeName + " not found"
-	}
-	if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != "linstor.csi.linbit.com" {
-		return "", storagev1alpha1.ReasonInvalidSpec, "claim is not backed by LINSTOR CSI"
-	}
-	return pv.Spec.CSI.VolumeHandle, "", ""
+	return reqs
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&storagev1alpha1.Target{}).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.allTargets),
+			builder.WithPredicates(nodeReadyChanged)).
 		Named("target").
 		Complete(r)
 }

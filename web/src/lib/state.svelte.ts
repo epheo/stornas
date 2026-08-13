@@ -37,11 +37,14 @@ export function startStream(): () => void {
 	});
 }
 
-export async function loadSession(): Promise<void> {
+// Returns whether a session exists, so the layout's gate check can reuse
+// this fetch instead of probing /api/v1/session a second time.
+export async function loadSession(): Promise<boolean> {
 	const r = await fetch('/api/v1/session').catch(() => undefined);
-	if (!r?.ok) return;
+	if (!r?.ok) return false;
 	const s = await r.json();
 	app.role = s?.role ?? '';
 	app.who = s?.username ?? s?.name ?? '';
 	app.mustChangePassword = s?.mustChangePassword ?? false;
+	return true;
 }

@@ -7,16 +7,21 @@ export function connectState(onFrame: (s: Snapshot) => void): () => void {
 	let ws: WebSocket | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let closed = false;
+	// Once a WS frame lands it is always fresher than the seed; drop a late seed response.
+	let framed = false;
 
 	fetch('/api/v1/state')
 		.then((r) => (r.ok ? r.json() : undefined))
-		.then((s) => s && !closed && onFrame(s))
+		.then((s) => s && !closed && !framed && onFrame(s))
 		.catch(() => {});
 
 	function open() {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		ws = new WebSocket(`${proto}://${location.host}/api/v1/stream`);
-		ws.onmessage = (e) => onFrame(JSON.parse(e.data).snapshot);
+		ws.onmessage = (e) => {
+			framed = true;
+			onFrame(JSON.parse(e.data).snapshot);
+		};
 		ws.onclose = () => {
 			if (!closed) timer = setTimeout(open, 2000);
 		};

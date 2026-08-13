@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -38,6 +39,11 @@ type LocalUserReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+// secretSettleInterval paces re-checks of a missing or empty password
+// Secret: nothing watches Secrets, so a fix would otherwise go unseen
+// until the LocalUser itself is touched.
+const secretSettleInterval = 15 * time.Second
+
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers/finalizers,verbs=update
@@ -55,6 +61,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Reason:             storagev1alpha1.ReasonReady,
 		ObservedGeneration: user.Generation,
 	}
+	res := ctrl.Result{}
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: user.Namespace, Name: user.Spec.PasswordSecretRef}, &secret)
 	switch {
@@ -62,10 +69,12 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		available.Status = metav1.ConditionFalse
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " not found"
+		res.RequeueAfter = secretSettleInterval
 	case len(secret.Data["password"]) == 0:
 		available.Status = metav1.ConditionFalse
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " has no password key"
+		res.RequeueAfter = secretSettleInterval
 	}
 
 	meta.SetStatusCondition(&user.Status.Conditions, available)
@@ -75,7 +84,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
+	return res, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

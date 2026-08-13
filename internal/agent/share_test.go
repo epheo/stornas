@@ -24,7 +24,7 @@ func TestEnsureShareMountsAndExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeRunner{results: map[string]result{
-		"findmnt -n /var/lib/stornas/shares/default-media":            {err: errExit},
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"exportfs -ra": {},
 	}}
@@ -51,7 +51,7 @@ func TestEnsureShareIdempotentMount(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeRunner{results: map[string]result{
-		"findmnt -n /var/lib/stornas/shares/default-media": {},
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media": {out: "/dev/drbd1000\n"},
 		"exportfs -ra": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
@@ -65,6 +65,66 @@ func TestEnsureShareIdempotentMount(t *testing.T) {
 		if c[:5] == "mount" {
 			t.Fatalf("mounted an already-mounted share: %s", c)
 		}
+	}
+}
+
+// A mount left by a previous placement points at the wrong device; the
+// share must remount onto status.device, not trust the path alone.
+func TestEnsureShareRemountsWrongDevice(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root+"/etc/exports.d", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{results: map[string]result{
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {out: "/dev/drbd1042\n"},
+		"umount /var/lib/stornas/shares/default-media":                     {},
+		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"exportfs -ra": {},
+	}}
+	m := &ShareManager{Run: f, Node: "node-a", Root: root}
+	s := share("default", "media", "node-a", "/dev/drbd1000",
+		&storagev1alpha1.NFSExport{Clients: []string{"10.0.0.0/8(ro)"}}, nil)
+
+	if err := m.EnsureShare(context.Background(), &s); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	for _, c := range f.calls {
+		if c[:6] == "umount" || c[:5] == "mount" {
+			seen = append(seen, c)
+		}
+	}
+	if len(seen) != 2 || seen[0][:6] != "umount" {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+// Teardown must erase everything Present keys on, so a standby node that
+// already converged never reruns the removal commands.
+func TestRemoveShareConvergesPresence(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root+"/etc/exports.d", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{results: map[string]result{
+		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media":       {err: errExit},
+		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
+		"exportfs -ra": {},
+		"umount /var/lib/stornas/shares/default-media": {},
+	}}
+	m := &ShareManager{Run: f, Node: "node-a", Root: root}
+	s := share("default", "media", "node-a", "/dev/drbd1000",
+		&storagev1alpha1.NFSExport{Clients: []string{"*"}}, nil)
+	if err := m.EnsureShare(context.Background(), &s); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Present("default", "media") {
+		t.Fatal("share not present after ensure")
+	}
+
+	m.RemoveShare(context.Background(), "default", "media")
+	if m.Present("default", "media") {
+		t.Fatal("share still present after removal")
 	}
 }
 

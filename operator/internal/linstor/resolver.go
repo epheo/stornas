@@ -23,30 +23,54 @@ import (
 )
 
 // ResolvePlacement picks the node that should serve a LINSTOR resource and
-// the block device to mount there: the current primary when one exists
-// (moving an export off a primary would break it), else the first diskful
-// replica. DRBD auto-promote makes the mount itself perform the promotion.
-func (r *Registrar) ResolvePlacement(ctx context.Context, resource string) (node, device string, err error) {
+// the block device to open there. Priority: the current primary (moving an
+// export off a live primary would break it), then prefer (sticky placement
+// avoids flapping), then any diskful replica. Nodes in avoid never serve;
+// skipping an avoided primary is the failover itself, since DRBD
+// auto-promote lets the next opener take over once quorum fenced the old
+// one. replicas counts diskful copies so callers can enforce
+// replication-dependent spec rules.
+func (r *Registrar) ResolvePlacement(ctx context.Context, resource, prefer string, avoid map[string]bool) (node, device string, replicas int, err error) {
 	view, err := r.client.Resources.GetResourceView(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("resource view: %w", err)
+		return "", "", 0, fmt.Errorf("resource view: %w", err)
 	}
-	var diskful []int
-	for i, res := range view {
+	type replica struct {
+		node, device string
+		inUse        bool
+	}
+	var all []replica
+	for _, res := range view {
 		if res.Name != resource || len(res.Volumes) == 0 || res.Volumes[0].DevicePath == "" {
 			continue
 		}
 		if slices.Contains(res.Flags, "DISKLESS") {
 			continue
 		}
-		if res.State != nil && res.State.InUse != nil && *res.State.InUse {
-			return res.NodeName, res.Volumes[0].DevicePath, nil
+		inUse := res.State != nil && res.State.InUse != nil && *res.State.InUse
+		all = append(all, replica{res.NodeName, res.Volumes[0].DevicePath, inUse})
+	}
+	score := func(c replica) int {
+		switch {
+		case c.inUse:
+			return 2
+		case c.node == prefer:
+			return 1
+		default:
+			return 0
 		}
-		diskful = append(diskful, i)
 	}
-	if len(diskful) == 0 {
-		return "", "", fmt.Errorf("resource %s has no diskful replica with a device", resource)
+	pick := -1
+	for i, c := range all {
+		if avoid[c.node] {
+			continue
+		}
+		if pick == -1 || score(c) > score(all[pick]) {
+			pick = i
+		}
 	}
-	res := view[diskful[0]]
-	return res.NodeName, res.Volumes[0].DevicePath, nil
+	if pick == -1 {
+		return "", "", len(all), fmt.Errorf("resource %s has no healthy diskful replica with a device", resource)
+	}
+	return all[pick].node, all[pick].device, len(all), nil
 }

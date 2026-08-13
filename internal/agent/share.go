@@ -39,7 +39,17 @@ func (m *ShareManager) exportsFile(ns, name string) string {
 // primary, which is why placement (status.node) must be decided upstream.
 func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.Share) error {
 	mnt := m.mountPoint(share.Namespace, share.Name)
-	if _, err := m.Run.Run(ctx, "findmnt", "-n", mnt); err != nil {
+	src, err := m.Run.Run(ctx, "findmnt", "-n", "-o", "SOURCE", mnt)
+	mounted := err == nil
+	if mounted && strings.TrimSpace(string(src)) != share.Status.Device {
+		// A mount from a previous placement pins the wrong device; remount
+		// so the export follows status.device.
+		if _, err := m.Run.Run(ctx, "umount", mnt); err != nil {
+			return err
+		}
+		mounted = false
+	}
+	if !mounted {
 		if err := os.MkdirAll(m.Root+mnt, 0o755); err != nil {
 			return err
 		}
@@ -56,16 +66,38 @@ func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.S
 	} else if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	_, err := m.Run.Run(ctx, "exportfs", "-ra")
+	_, err = m.Run.Run(ctx, "exportfs", "-ra")
 	return err
 }
 
-// RemoveShare tears down what EnsureShare built; best effort, because the
-// share object is already gone and there is nothing left to report into.
+// Present reports whether this node still holds state for the share; the
+// standby fast path, so teardown stays quiet where nothing was built.
+func (m *ShareManager) Present(ns, name string) bool {
+	if _, err := os.Stat(m.Root + m.mountPoint(ns, name)); err == nil {
+		return true
+	}
+	_, err := os.Stat(m.Root + m.exportsFile(ns, name))
+	return err == nil
+}
+
+// RemoveShare tears down what EnsureShare built; best effort because the
+// share object may already be gone, but failures are logged so stale
+// mounts and exports leave a trace. The unmount releases the DRBD device,
+// which is what lets the new placement promote.
 func (m *ShareManager) RemoveShare(ctx context.Context, ns, name string) {
-	_ = os.Remove(m.Root + m.exportsFile(ns, name))
-	_, _ = m.Run.Run(ctx, "exportfs", "-ra")
-	_, _ = m.Run.Run(ctx, "umount", m.mountPoint(ns, name))
+	if err := os.Remove(m.Root + m.exportsFile(ns, name)); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("remove export %s-%s: %v\n", ns, name, err)
+	}
+	if _, err := m.Run.Run(ctx, "exportfs", "-ra"); err != nil {
+		fmt.Printf("exportfs reload: %v\n", err)
+	}
+	if out, err := m.Run.Run(ctx, "umount", m.mountPoint(ns, name)); err != nil &&
+		!strings.Contains(err.Error()+string(out), "not mounted") {
+		fmt.Printf("umount %s-%s: %v\n", ns, name, err)
+	}
+	// The empty mountpoint is what Present keys on; keep teardown
+	// convergent by removing it.
+	_ = os.Remove(m.Root + m.mountPoint(ns, name))
 }
 
 // ApplySamba rewrites the single stornas include from every SMB share

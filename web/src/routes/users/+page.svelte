@@ -13,6 +13,7 @@
 	let password = $state('');
 	let role = $state('viewer');
 	let smb = $state(false);
+	let createBusy = $state(false);
 
 	async function loadUsers() {
 		const r = await fetch('/api/v1/users').catch(() => undefined);
@@ -22,7 +23,9 @@
 
 	async function createUser(e: Event) {
 		e.preventDefault();
+		createBusy = true;
 		actionError = await post('/api/v1/users', { name, password, role, smb });
+		createBusy = false;
 		if (!actionError) {
 			toasts.show(`User ${name} created`, 'success');
 			name = '';
@@ -121,8 +124,9 @@
 					<input type="checkbox" bind:checked={smb} /> SMB access (share logins)
 				</label>
 				<button
-					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
+					disabled={createBusy}
 				>
 					Create user
 				</button>

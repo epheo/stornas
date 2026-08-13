@@ -13,9 +13,9 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// TargetAgentReconciler exports targets placed on its node. Moving an
-// export between nodes (teardown on the old primary) is deliberately not
-// handled yet: it belongs to the failover milestone with proper fencing.
+// TargetAgentReconciler exports targets placed on its node and tears them
+// down when placement moves away, releasing the DRBD device and VIP so
+// the new active node can take both.
 type TargetAgentReconciler struct {
 	client.Client
 	Secrets client.Reader
@@ -31,7 +31,11 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if target.Status.ActiveNode != r.Node || len(target.Status.LUNs) == 0 {
+	if target.Status.ActiveNode != r.Node {
+		r.LIO.TeardownTarget(ctx, target.Name, target.Spec.VIP)
+		return ctrl.Result{}, nil
+	}
+	if len(target.Status.LUNs) == 0 {
 		return ctrl.Result{}, nil
 	}
 
@@ -69,7 +73,11 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Status().Update(ctx, &target); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	return ctrl.Result{}, ensureErr
+	if ensureErr != nil {
+		return ctrl.Result{}, ensureErr
+	}
+	// Re-read CHAP secrets on a timer: rotation does not touch the Target.
+	return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
 }
 
 func (r *TargetAgentReconciler) SetupWithManager(mgr ctrl.Manager) error {

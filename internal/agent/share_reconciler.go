@@ -12,8 +12,9 @@ import (
 )
 
 // ShareAgentReconciler executes the operator's placement on its own node:
-// mount, NFS export, samba include. It writes HostReady and State; every
-// other Share condition belongs to the operator.
+// mount, NFS export, samba include; when placement moves away it unmounts
+// and unexports so the share is never served from two nodes. It writes
+// HostReady and State; every other Share condition belongs to the operator.
 type ShareAgentReconciler struct {
 	client.Client
 	Node   string
@@ -32,6 +33,10 @@ func (r *ShareAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if share.Status.Node != r.Node || share.Status.Device == "" {
+		if r.Shares.Present(share.Namespace, share.Name) {
+			r.Shares.RemoveShare(ctx, share.Namespace, share.Name)
+			_ = r.applySamba(ctx)
+		}
 		return ctrl.Result{}, nil
 	}
 

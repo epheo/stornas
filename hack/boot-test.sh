@@ -19,6 +19,8 @@
 # Needs a root-capable podman (PODMAN='sudo podman' in CI) and
 # qemu-system-x86_64. KVM is used when present, TCG otherwise.
 set -euo pipefail
+# shellcheck source=hack/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
 IMAGE=${IMAGE:-localhost/stornas-os:dev}
 PODMAN=${PODMAN:-podman}
@@ -30,9 +32,6 @@ VM_MEM=${VM_MEM:-8192}
 KEEP=${KEEP:-0}
 AIRGAP=${AIRGAP:-1}
 QEMU_PID=""
-
-log() { printf '\n== %s\n' "$*"; }
-die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 diagnostics() {
 	log "DIAGNOSTICS: pods"
@@ -77,19 +76,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-retry() { # retry <seconds> <description> <cmd...>; cmd runs in this shell
-	local deadline=$(( $(date +%s) + $1 )) desc=$2
-	printf 'waiting up to %ss for: %s\n' "$1" "$desc"
-	shift 2
-	until "$@" >/dev/null 2>&1; do
-		if [ "$(date +%s)" -gt "$deadline" ]; then
-			die "timed out waiting for: $desc"
-		fi
-		sleep 5
-	done
-	log "ok: $desc"
-}
-
 # ssh adds a remote shell evaluation layer that strips quoting (the
 # parens in a kubectl jsonpath break the remote shell) — re-quote every
 # arg with printf %q so commands run remotely exactly as written here.
@@ -123,18 +109,7 @@ key = "$(cat "$WORKDIR/id.pub")"
 mountpoint = "/"
 minsize = "30 GiB"
 EOF
-# Sync the image into rootful storage by ID, not mere existence: a stale
-# rootful copy would boot silently and old bugs would resurface.
-if [ "$PODMAN" != podman ] && podman image exists "$IMAGE"; then
-	want=$(podman image inspect -f '{{.Id}}' "$IMAGE")
-	have=$($PODMAN image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)
-	if [ "$want" != "$have" ]; then
-		log "syncing $IMAGE into rootful podman storage"
-		podman save "$IMAGE" | $PODMAN load
-	fi
-else
-	$PODMAN image exists "$IMAGE" || die "image $IMAGE not found in $PODMAN storage"
-fi
+sync_rootful_image "$IMAGE" "$PODMAN"
 $PODMAN run --rm --privileged \
 	--security-opt label=type:unconfined_t \
 	-v "$WORKDIR/config.toml:/config.toml:ro" \

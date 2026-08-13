@@ -5,8 +5,8 @@
 // heartbeat broadcast (a fresh connection gets a frame on attach; a quiet
 // one needs no resend), no send-buffer overflow (each connection's mailbox
 // conflates to the latest frame, so a slow client converges instead of
-// dropping). Same design as dotvirt's hub minus per-identity frames: stornas
-// has one shared snapshot until the auth layer lands.
+// dropping). Same design as dotvirt's hub minus per-identity frames: every
+// session sees the same shared snapshot, so one frame serves all.
 package stream
 
 import (

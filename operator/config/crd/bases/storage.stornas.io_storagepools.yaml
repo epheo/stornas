@@ -64,6 +64,7 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
                 x-kubernetes-validations:
                 - message: devices may be swapped one for one, not added or removed
                   rule: size(self) == size(oldSelf)

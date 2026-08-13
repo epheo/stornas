@@ -196,7 +196,7 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 
 func TestUserLifecycle(t *testing.T) {
 	a := newAPI()
-	w := doReq(t, a.CreateUser, "POST", "/api/v1/users", `{"name":"alice","password":"s3cret","role":"viewer","smb":true}`, nil)
+	w := doReq(t, a.CreateUser, "POST", "/api/v1/users", `{"name":"alice","password":"s3cretpass","role":"viewer","smb":true}`, nil)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -204,7 +204,7 @@ func TestUserLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sec.StringData["password"] != "s3cret" {
+	if sec.StringData["password"] != "s3cretpass" {
 		t.Fatalf("secret = %v", sec.StringData)
 	}
 	got, err := a.Dyn.Resource(userGVR).Namespace("stornas-system").Get(context.Background(), "alice", metav1.GetOptions{})

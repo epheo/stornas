@@ -25,16 +25,19 @@
 	let claim = $state('');
 	let nfsClients = $state('');
 	let smb = $state(false);
+	let createBusy = $state(false);
 
 	async function createShare(e: Event) {
 		e.preventDefault();
 		actionError = '';
+		createBusy = true;
 		const err = await post('/api/v1/shares', {
 			name,
 			claim,
 			nfsClients: nfsClients ? nfsClients.split(',').map((s) => s.trim()) : [],
 			smb,
 		});
+		createBusy = false;
 		if (err) actionError = err;
 		else {
 			toasts.show(`Share ${name} created`, 'success');
@@ -148,8 +151,9 @@
 				</label>
 				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
-					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
+					disabled={createBusy}
 				>
 					Create share
 				</button>

@@ -36,6 +36,10 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumeclaims, persistentvolumes]
     verbs: [get, list, watch]
+  # Node readiness drives failover: placement avoids NotReady nodes.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, list, watch]

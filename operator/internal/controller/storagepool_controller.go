@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
@@ -34,7 +36,12 @@ import (
 // and reported as such rather than failed.
 type LinstorRegistrar interface {
 	EnsurePool(ctx context.Context, node, vg string) error
+	DeletePool(ctx context.Context, node string) error
 }
+
+// poolFinalizer holds deletion until the LINSTOR catalog entry is gone;
+// without it the registration needs manual cleanup after delete-recreate.
+const poolFinalizer = "storage.stornas.io/linstor-deregister"
 
 // StoragePoolReconciler owns every StoragePool condition except HostReady,
 // which belongs to the node agent (internal/agent in the root module).
@@ -52,6 +59,26 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var pool storagev1alpha1.StoragePool
 	if err := r.Get(ctx, req.NamespacedName, &pool); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if !pool.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&pool, poolFinalizer) {
+			if r.Linstor != nil {
+				if err := r.Linstor.DeletePool(ctx, pool.Spec.Node); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+			controllerutil.RemoveFinalizer(&pool, poolFinalizer)
+			if err := r.Update(ctx, &pool); err != nil {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+	if controllerutil.AddFinalizer(&pool, poolFinalizer) {
+		if err := r.Update(ctx, &pool); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	available := metav1.Condition{
@@ -110,6 +137,10 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	meta.SetStatusCondition(&pool.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &pool); err != nil {
+		// The agent writes this status on a timer, so conflicts are routine.
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, retErr

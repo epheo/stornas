@@ -34,6 +34,7 @@ type StoragePoolSpec struct {
 	// one for one (the disk replace flow); the count is fixed so the raid
 	// geometry never changes under a live pool.
 	// +required
+	// +listType=set
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="size(self) == size(oldSelf)",message="devices may be swapped one for one, not added or removed"
 	Devices []string `json:"devices"`

@@ -6,4 +6,3 @@ web/.svelte-kit/
 operator/bin/
 image/build/
 *.out
-.DS_Store

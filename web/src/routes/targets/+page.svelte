@@ -21,16 +21,19 @@
 	let vip = $state('');
 	let luns = $state<string[]>([]);
 	let initiators = $state('');
+	let createBusy = $state(false);
 
 	async function createTarget(e: Event) {
 		e.preventDefault();
 		actionError = '';
+		createBusy = true;
 		const err = await post('/api/v1/targets', {
 			name,
 			vip,
 			luns: luns.map((claim, i) => ({ id: i, claim })),
 			initiators: initiators ? initiators.split(',').map((s) => s.trim()) : [],
 		});
+		createBusy = false;
 		if (err) actionError = err;
 		else {
 			toasts.show(`Target ${name} created`, 'success');
@@ -145,8 +148,9 @@
 				/>
 				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
-					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
+					disabled={createBusy}
 				>
 					Create target
 				</button>

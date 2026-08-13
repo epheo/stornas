@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -34,11 +35,35 @@ import (
 
 type fakePlacer struct {
 	node, device string
+	fallback     string // wins when node is avoided, like a surviving replica
+	replicas     int    // 0 means 1
 	err          error
 }
 
-func (f *fakePlacer) ResolvePlacement(context.Context, string) (string, string, error) {
-	return f.node, f.device, f.err
+func (f *fakePlacer) ResolvePlacement(_ context.Context, _ string, _ string, avoid map[string]bool) (string, string, int, error) {
+	node, replicas := f.node, f.replicas
+	if avoid[node] && f.fallback != "" {
+		node = f.fallback
+	}
+	if replicas == 0 {
+		replicas = 1
+	}
+	return node, f.device, replicas, f.err
+}
+
+// setNode pins a node's Ready condition; envtest runs no node controller,
+// so the value stays until the next call.
+func setNode(ctx context.Context, name string, ready bool) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := k8sClient.Create(ctx, node); err != nil {
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, node)).To(Succeed())
+	}
+	status := corev1.ConditionFalse
+	if ready {
+		status = corev1.ConditionTrue
+	}
+	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
+	Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
 }
 
 var _ = Describe("Share Controller", func() {
@@ -129,6 +154,57 @@ var _ = Describe("Share Controller", func() {
 		share, err = reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "media")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(meta.IsStatusConditionTrue(share.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+	})
+
+	It("surfaces placement errors and retries", func() {
+		boundClaim("erring", "pvc-erring-1")
+		Expect(k8sClient.Create(ctx, newShare("erring", "erring"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newShare("erring", "erring"))).To(Succeed())
+		}()
+
+		placer := &fakePlacer{err: fmt.Errorf("controller unreachable")}
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "erring")
+		Expect(err).To(HaveOccurred())
+
+		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
+	})
+
+	It("moves the share off an unready node and resets HostReady", func() {
+		setNode(ctx, "node-a", true)
+		setNode(ctx, "node-b", true)
+		defer setNode(ctx, "node-a", true)
+
+		boundClaim("failover", "pvc-failover-1")
+		Expect(k8sClient.Create(ctx, newShare("failover", "failover"))).To(Succeed())
+		defer func() {
+			Expect(k8sClient.Delete(ctx, newShare("failover", "failover"))).To(Succeed())
+		}()
+
+		placer := &fakePlacer{node: "node-a", fallback: "node-b", device: "/dev/drbd1000"}
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		share, err := reconcileOnce(r, "failover")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(share.Status.Node).To(Equal("node-a"))
+
+		By("the agent reporting the export up")
+		meta.SetStatusCondition(&share.Status.Conditions, metav1.Condition{
+			Type:   storagev1alpha1.ConditionHostReady,
+			Status: metav1.ConditionTrue,
+			Reason: storagev1alpha1.ReasonReady,
+		})
+		Expect(k8sClient.Status().Update(ctx, share)).To(Succeed())
+
+		By("node-a going NotReady")
+		setNode(ctx, "node-a", false)
+		share, err = reconcileOnce(r, "failover")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(share.Status.Node).To(Equal("node-b"))
+		Expect(meta.IsStatusConditionTrue(share.Status.Conditions, storagev1alpha1.ConditionHostReady)).To(BeFalse())
+		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
 	})
 
 	It("rejects claims not backed by LINSTOR CSI", func() {

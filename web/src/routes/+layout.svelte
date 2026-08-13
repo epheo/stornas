@@ -33,12 +33,10 @@
 	let stopStream: (() => void) | undefined;
 
 	onMount(() => {
-		fetch('/api/v1/session')
-			.then((r) => {
-				gate = r?.ok ? 'in' : 'anon';
-				if (r?.ok) enter();
-			})
-			.catch(() => (gate = 'anon'));
+		loadSession().then((ok) => {
+			gate = ok ? 'in' : 'anon';
+			if (ok) stopStream = startStream();
+		});
 		return () => stopStream?.();
 	});
 
@@ -59,7 +57,7 @@
 			gate = 'in';
 			enter();
 		} else {
-			error = 'Invalid credentials';
+			error = r ? 'Invalid credentials' : 'network error';
 			password = '';
 		}
 	}

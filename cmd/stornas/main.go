@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
@@ -106,7 +107,7 @@ func main() {
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
 	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed, Linstor: poller.Client()}
-	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireRole("admin", h) }
+	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireAdmin(h) }
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
 	mux.Handle("POST /api/v1/pools/{name}/replace", admin(mutate.ReplacePoolDevice))
 	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
@@ -127,7 +128,7 @@ func main() {
 	srv := &http.Server{Addr: *addr, Handler: mux}
 	go func() {
 		<-ctx.Done()
-		_ = srv.Shutdown(nil) //nolint:staticcheck // shutdown at process exit; no drain deadline needed
+		_ = srv.Shutdown(context.Background()) // no drain deadline needed at process exit
 	}()
 
 	log.Printf("stornas %s listening on %s", version, *addr)

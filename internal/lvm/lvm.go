@@ -63,6 +63,13 @@ func (l *LVM) LVExists(ctx context.Context, vg, lv string) bool {
 	return err == nil
 }
 
+// IsThinPool distinguishes a finished pool from a bare LV left by an
+// interrupted raid build; lv_attr starts with t only for thin pools.
+func (l *LVM) IsThinPool(ctx context.Context, vg, lv string) bool {
+	out, err := l.run.Run(ctx, "lvs", "--noheadings", "--options", "lv_attr", vg+"/"+lv)
+	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "t")
+}
+
 // CreateThinPool leaves VG headroom: thin metadata grows, and a full VG
 // blocks lvextend during recovery.
 func (l *LVM) CreateThinPool(ctx context.Context, vg, lv, raid string) error {
@@ -71,12 +78,17 @@ func (l *LVM) CreateThinPool(ctx context.Context, vg, lv, raid string) error {
 		return err
 	}
 	// A raid thin pool needs explicit data and metadata LVs; lvcreate
-	// cannot build both in one call.
-	if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "85%VG", "--name", lv, vg); err != nil {
-		return err
+	// cannot build both in one call. Each step is guarded so a crash
+	// mid-build resumes instead of tripping on the half-made LV.
+	if !l.LVExists(ctx, vg, lv) {
+		if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "85%VG", "--name", lv, vg); err != nil {
+			return err
+		}
 	}
-	if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "2%VG", "--name", lv+"_meta", vg); err != nil {
-		return err
+	if !l.LVExists(ctx, vg, lv+"_meta") {
+		if _, err := l.run.Run(ctx, "lvcreate", "--yes", "--type", raid, "--extents", "2%VG", "--name", lv+"_meta", vg); err != nil {
+			return err
+		}
 	}
 	_, err := l.run.Run(ctx, "lvconvert", "--yes", "--type", "thin-pool", "--poolmetadata", vg+"/"+lv+"_meta", vg+"/"+lv)
 	return err

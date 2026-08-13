@@ -17,15 +17,14 @@
 # Usage: make smoke PODMAN='sudo podman'
 #        CLEAN=1 ./hack/smoke-test.sh   # tear down a kept container
 set -euo pipefail
+# shellcheck source=hack/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
 IMAGE=${IMAGE:-localhost/stornas-os:dev}
 PODMAN=${PODMAN:-podman}
 NAME=${NAME:-stornas-smoke}
 KCFG=/var/lib/microshift/resources/kubeadmin/kubeconfig
 KEEP=${KEEP:-0}
-
-log() { printf -- '--- %s\n' "$*"; }
-die() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 pexec() { $PODMAN exec -i "$NAME" "$@"; }
 kc() { pexec kubectl --kubeconfig "$KCFG" "$@"; }
@@ -57,28 +56,7 @@ fi
 
 trap 'rc=$?; if [ $rc -ne 0 ]; then diagnostics; fi; [ "$KEEP" = 1 ] || clean; exit $rc' EXIT
 
-retry() { # retry <seconds> <description> <cmd...>
-	local deadline=$(( $(date +%s) + $1 )) desc=$2
-	printf 'waiting up to %ss for: %s\n' "$1" "$desc"
-	shift 2
-	until "$@" >/dev/null 2>&1; do
-		[ "$(date +%s)" -gt "$deadline" ] && die "timed out waiting for: $desc"
-		sleep 5
-	done
-	log "ok: $desc"
-}
-
-# Sync the image into rootful storage by ID, same as boot-test.
-if [ "$PODMAN" != podman ] && podman image exists "$IMAGE"; then
-	want=$(podman image inspect -f '{{.Id}}' "$IMAGE")
-	have=$($PODMAN image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)
-	if [ "$want" != "$have" ]; then
-		log "syncing $IMAGE into rootful podman storage"
-		podman save "$IMAGE" | $PODMAN load
-	fi
-else
-	$PODMAN image exists "$IMAGE" || die "image $IMAGE not found in $PODMAN storage"
-fi
+sync_rootful_image "$IMAGE" "$PODMAN"
 
 log "starting $NAME from $IMAGE"
 $PODMAN rm -f "$NAME" 2>/dev/null || true

@@ -60,11 +60,15 @@ func (p *InventoryPublisher) Collect(ctx context.Context) ([]storagev1alpha1.Dis
 		return nil, fmt.Errorf("parse lsblk: %w", err)
 	}
 
+	// A failed pvs must abort the sweep: publishing without it would mark
+	// every disk unclaimed and offer pool members to the create flow.
+	pvout, err := p.Run.Run(ctx, "pvs", "--noheadings", "-o", "pv_name")
+	if err != nil {
+		return nil, err
+	}
 	claimed := map[string]bool{}
-	if pvout, err := p.Run.Run(ctx, "pvs", "--noheadings", "-o", "pv_name"); err == nil {
-		for _, line := range splitLines(string(pvout)) {
-			claimed[line] = true
-		}
+	for _, line := range splitLines(string(pvout)) {
+		claimed[line] = true
 	}
 
 	sweep := p.Smart != nil && time.Since(p.lastSweep) >= smartInterval

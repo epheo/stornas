@@ -50,7 +50,7 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePo
 			return rep, err
 		}
 	}
-	if !l.LVExists(ctx, vg, storagev1alpha1.ThinLV) {
+	if !l.IsThinPool(ctx, vg, storagev1alpha1.ThinLV) {
 		if err := l.CreateThinPool(ctx, vg, storagev1alpha1.ThinLV, pool.Spec.Raid); err != nil {
 			return rep, err
 		}
@@ -166,8 +166,12 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	pool.Status.VG = rep.VG
 	pool.Status.Health = rep.Health
-	pool.Status.Devices = rep.Devices
-	pool.Status.RebuildPercent = rep.Rebuild
+	// Keep last-known devices through a failed pass: a transient LVM error
+	// must not blank the degraded view it is supposed to explain.
+	if len(rep.Devices) > 0 {
+		pool.Status.Devices = rep.Devices
+		pool.Status.RebuildPercent = rep.Rebuild
+	}
 	if rep.Capacity > 0 {
 		pool.Status.Capacity = resource.NewQuantity(rep.Capacity, resource.BinarySI)
 		pool.Status.Free = resource.NewQuantity(rep.Free, resource.BinarySI)
