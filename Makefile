@@ -65,7 +65,7 @@ embed: images
 	grep -v '^#' image/embedded-images.txt | while read -r img; do \
 		[ -z "$$img" ] && continue; \
 		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
-		skopeo copy docker://$$img \
+		skopeo copy --retry-times 3 docker://$$img \
 			oci-archive:image/build/embedded-images/$$out:$$img || exit 1; \
 		echo "/usr/lib/embedded-images/$$out $$img" \
 			>> image/build/embedded-images/manifest.stornas; \
