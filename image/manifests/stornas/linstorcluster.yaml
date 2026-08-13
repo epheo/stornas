@@ -6,3 +6,20 @@ spec:
   # Controller state lives in k8s CRDs, so losing the pod loses no data;
   # IO continues without it, only provisioning stops.
   controller: {}
+  # The controller is the operator's placement source: on a worker it
+  # dies with the node failover needs it for, and taint eviction stalls
+  # re-placement for minutes (failure matrix: it restarts on the master).
+  patches:
+    - target:
+        kind: Deployment
+        name: linstor-controller
+      patch: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: linstor-controller
+        spec:
+          template:
+            spec:
+              nodeSelector:
+                node-role.kubernetes.io/control-plane: ""
