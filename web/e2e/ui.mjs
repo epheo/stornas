@@ -60,6 +60,24 @@ const phases = {
 		}
 	},
 
+	async 'create-pool'() {
+		// The form drives the same API the harness used to hit directly;
+		// disks must surface under their stable by-id paths, and the
+		// wait doubles as the inventory-reported assert.
+		await goTo('Pools', 'Storage pools');
+		const form = page.locator('section', { hasText: 'New pool' });
+		await form.getByPlaceholder('Name').fill('test');
+		await form.locator('select').first().selectOption({ index: 1 });
+		// The agent's first inventory report may still be in flight.
+		await form.locator('input[type=checkbox]').first().waitFor({ timeout: 180_000 });
+		await form.locator('select').nth(1).selectOption('raid1');
+		for (const d of ['virtio-STORNASTEST', 'virtio-STORNASB']) {
+			await form.locator(`input[value="/dev/disk/by-id/${d}"]`).check();
+		}
+		await form.getByRole('button', { name: 'Create pool' }).click();
+		await page.getByText('test', { exact: true }).waitFor();
+	},
+
 	async 'degraded-replace'() {
 		// The stream must surface the pulled disk, then the dialog drives
 		// the same replace the failure matrix promises.

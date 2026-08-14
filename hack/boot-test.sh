@@ -204,20 +204,23 @@ retry 900 "linstor controller up" controller_up
 retry 900 "linstor satellite up" satellite_up
 retry 600 "stornas operator, agent, server running" stornas_up
 
-log "creating the raid1 pool that backs LINSTOR CSI"
-NODE=$(kc get nodes --no-headers | awk '{print $1}')
-kc apply -f - <<EOF
-apiVersion: storage.stornas.io/v1alpha1
-kind: StoragePool
-metadata:
-  name: test
-spec:
-  node: $NODE
-  devices:
-    - /dev/disk/by-id/virtio-STORNASTEST
-    - /dev/disk/by-id/virtio-STORNASB
-  raid: raid1
-EOF
+log "UI answers and login works"
+retry 300 "healthz via hostfwd" curl -fsS "http://127.0.0.1:$UI_PORT/healthz"
+ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
+curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
+curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
+
+# Real-browser phases; need playwright's chromium
+# (npx playwright install chromium, once per machine).
+ui_phase() { # ui_phase <phase> [user] [password]
+	UI_URL="http://127.0.0.1:$UI_PORT" UI_USER="${2:-admin}" ADMIN_PW="${3:-$ADMIN_PW}" \
+		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
+}
+
+log "creating the raid1 pool through the UI form"
+ui_phase create-pool
 retry 600 "storage pool Available" pool_available
 
 log "provisioning a PVC through LINSTOR CSI"
@@ -261,14 +264,6 @@ spec:
 EOF
 retry 600 "PVC Bound" pvc_bound
 
-log "UI answers and login works"
-retry 300 "healthz via hostfwd" curl -fsS "http://127.0.0.1:$UI_PORT/healthz"
-ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
-curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
-
 # The session layer is the security boundary; every refusal is product
 # behavior worth pinning.
 log "auth boundaries: anonymous and wrong-password refused"
@@ -297,12 +292,6 @@ code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
 
-# Real-browser pass over every page; needs playwright's chromium
-# (npx playwright install chromium, once per machine).
-ui_phase() { # ui_phase <phase> [user] [password]
-	UI_URL="http://127.0.0.1:$UI_PORT" UI_USER="${2:-admin}" ADMIN_PW="${3:-$ADMIN_PW}" \
-		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
-}
 log "UI renders live data in a real browser"
 ui_phase smoke
 log "viewer chrome hides management affordances"
