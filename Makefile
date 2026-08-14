@@ -40,9 +40,9 @@ web:
 
 # App images, built into local podman storage under their runtime names.
 images: web
-	podman build -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
-	podman build -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
-	podman build -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
+	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
+	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
+	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
 
 sync-manifests: generate
 	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
@@ -72,13 +72,13 @@ embed: images
 	done
 
 kmod:
-	podman build --target kmod -t stornas-kmod -f image/kmod/Containerfile \
+	podman build --retry 5 --retry-delay 10s --target kmod -t stornas-kmod -f image/kmod/Containerfile \
 		--build-arg KERNEL_VERSION=$$(podman run --rm $(BASE_IMAGE) \
 			rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core) \
 		image/kmod
 
 image: sync-manifests embed kmod
-	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
+	podman build --retry 5 --retry-delay 10s --build-context kmod=docker-image://localhost/stornas-kmod \
 		--from $(BASE_IMAGE) -f image/Containerfile -t stornas-os:$(VERSION) image
 
 # Runtime gates, same harness shapes as the distro's smoke-test and

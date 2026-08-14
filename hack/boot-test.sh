@@ -292,6 +292,21 @@ code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
 
+# Sessions are in-memory by design: a server restart must refuse old
+# cookies (fail closed) and serve fresh logins immediately.
+log "server restart: UI back, stale session refused"
+kc -n stornas-system rollout restart deploy/stornas-server
+kc -n stornas-system rollout status deploy/stornas-server --timeout=180s
+retry 120 "healthz after server restart" curl -fsS "http://127.0.0.1:$UI_PORT/healthz"
+stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
+retry 60 "stale session refused" stale_refused
+relogin() {
+	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
+}
+retry 60 "fresh login after restart" relogin
+
 log "UI renders live data in a real browser"
 ui_phase smoke
 log "viewer chrome hides management affordances"

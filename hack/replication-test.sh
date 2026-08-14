@@ -804,6 +804,150 @@ retry 300 "controller Running again" controller_up
 blocked_bound() { kc -n stornas-system get pvc blocked -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "blocked PVC Bound" blocked_bound
 
+# Failure matrix: master dies, workers alive. The worker's data plane
+# must keep serving with the whole control plane gone, and placement
+# must not have moved when the master returns.
+VIP2=$NET.61
+log "master-death setup: a second target and share active on node2"
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lun1
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Block
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: share1
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: steer-lun1
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeDevices:
+        - name: v
+          devicePath: /dev/steer
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: lun1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: steer-share1
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: share1
+EOF
+lun1_steered() { steered lun1; }
+share1_steered() { steered share1; }
+retry 600 "lun1 primary on node2" lun1_steered
+retry 600 "share1 primary on node2" share1_steered
+retry 60 "appliance API login" api_login
+api POST /targets "{\"name\":\"md\",\"vip\":\"$VIP2/24\",\"luns\":[{\"id\":0,\"claim\":\"lun1\"}],\"initiators\":[\"$INI\"]}" \
+	>/dev/null || die "target md create through the API failed"
+api POST /shares "{\"name\":\"md\",\"claim\":\"share1\",\"nfsClients\":[\"$NET.0/24(rw,no_root_squash)\"]}" \
+	>/dev/null || die "share md create through the API failed"
+target_md_placed() { kc -n stornas-system get target md -o jsonpath='{.status.activeNode}' | grep -qx node2; }
+share_md_placed() { kc -n stornas-system get share md -o jsonpath='{.status.node}' | grep -qx node2; }
+retry 120 "target md placed on node2" target_md_placed
+retry 120 "share md placed on node2" share_md_placed
+kc -n stornas-system delete pod steer-lun1 steer-share1 --wait
+target_md_on_node2() { kc -n stornas-system get target md -o jsonpath='{.status.activeNode} {.status.state}' | grep -qx "node2 Exported"; }
+share_md_on_node2() { kc -n stornas-system get share md -o jsonpath='{.status.node} {.status.state}' | grep -qx "node2 Exported"; }
+retry 300 "target md exported from node2" target_md_on_node2
+retry 300 "share md exported from node2" share_md_on_node2
+vip2_on_node2() { v2 sh -c "ip -j addr show to $VIP2 | grep -q ifname"; }
+retry 120 "VIP2 held by node2" vip2_on_node2
+
+log "killing node1: the worker data plane must not notice"
+sudo kill "$(sudo cat "$WORKDIR/qemu1.pid")"
+sleep 10
+# No apiserver: every assert rides ssh to node2, self-clienting its own
+# exports through the VIP.
+md_nfs_io() {
+	v2 sh -c "umount /mnt/md-e2e 2>/dev/null; mkdir -p /mnt/md-e2e && mount -t nfs -o nfsvers=4.2 $IP2:/stornas-system-md /mnt/md-e2e && echo master-down > /mnt/md-e2e/probe && sync && grep -q master-down /mnt/md-e2e/probe && umount /mnt/md-e2e"
+}
+retry 120 "NFS IO on node2 with the master dead" md_nfs_io
+TIQN2=iqn.2026-08.io.stornas:md
+LUN2_DEV="/dev/disk/by-path/ip-$VIP2:3260-iscsi-$TIQN2-lun-0"
+md_iscsi_io() {
+	v2 sh -c "iscsiadm -m discovery -t sendtargets -p $VIP2 >/dev/null \
+		&& { iscsiadm -m node -T $TIQN2 -p $VIP2:3260 --login >/dev/null 2>&1 || true; } \
+		&& test -b $LUN2_DEV \
+		&& dd if=/dev/urandom of=/tmp/md-probe bs=512 count=1 2>/dev/null \
+		&& dd if=/tmp/md-probe of=$LUN2_DEV bs=512 count=1 oflag=direct 2>/dev/null \
+		&& dd if=$LUN2_DEV bs=512 count=1 iflag=direct 2>/dev/null | cmp - /tmp/md-probe"
+}
+retry 120 "iSCSI IO on node2 with the master dead" md_iscsi_io
+v2 iscsiadm -m node -T "$TIQN2" -p "$VIP2:3260" --logout || true
+
+log "restarting node1: control plane returns, placement must not move"
+boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1
+retry 600 "node1 ssh back" v1 true
+retry 900 "both nodes Ready after master return" both_ready
+retry 300 "target md still exported from node2" target_md_on_node2
+retry 300 "share md still exported from node2" share_md_on_node2
+retry 900 "replicas resynced after master return" resynced
+
+# Restart resilience: the export serves from the kernel, not the agent;
+# an agent restart must be invisible to clients and to placement.
+log "agent restart under live exports on node2"
+AGENT2=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent -o wide --no-headers | awk '$7=="node2" {print $1}')
+[ -n "$AGENT2" ] || die "no agent pod found on node2"
+kc -n stornas-system delete pod "$AGENT2" --wait=false
+retry 120 "NFS IO with node2's agent gone" md_nfs_io
+agents_running() { [ "$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --no-headers | grep -c Running)" -eq 2 ]; }
+retry 300 "agent back" agents_running
+retry 120 "share md stayed exported through the restart" share_md_on_node2
+retry 120 "target md stayed exported through the restart" target_md_on_node2
+
 # Deletion is a feature: the export, VIP, and mount must leave the host,
 # not just the API. The target path exercises the teardown finalizer
 # (the spec carries the VIP, so it must outlive the agent's teardown).
