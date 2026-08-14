@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test replication-test clean
+.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test replication-test upgrade-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets
 # and the same stale-generated-files check. The diff is scoped to generated
@@ -97,6 +97,9 @@ vm-test:
 # the VIP moving and the returned node fenced. Heaviest gate.
 replication-test:
 	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/replication-test.sh
+
+upgrade-test:
+	IMAGE=localhost/stornas-os:$(VERSION) PODMAN="$(PODMAN)" ./hack/upgrade-test.sh
 
 clean:
 	rm -f stornas stornas-agent
