@@ -84,6 +84,8 @@ host_net_up() {
 }
 
 host_net_down() {
+	sudo iptables -D FORWARD -m physdev --physdev-in tap-stornas1 --physdev-out tap-stornas2 -j DROP 2>/dev/null || true
+	sudo iptables -D FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
 	sudo kill "$(cat "$WORKDIR/dnsmasq.pid" 2>/dev/null)" 2>/dev/null || true
 	for t in tap-stornas1 tap-stornas2; do sudo ip link del "$t" 2>/dev/null || true; done
 	sudo ip link del "$BR" 2>/dev/null || true
@@ -611,10 +613,24 @@ log "ok: iSCSI client wrote and read back through the VIP"
 log "splitting the two nodes: writes diverge, pick-survivor resolves"
 REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
 kc -n stornas-system exec repl-consumer -- sh -c 'echo before-split >> /data/marker && sync'
-sudo bridge link set dev tap-stornas1 isolated on
-sudo bridge link set dev tap-stornas2 isolated on
-# Both sides must see the cut: DRBD rides out a dead TCP session until
-# its ping cycle expires, and the force-promote below is refused while
+# Two mechanisms because runners differ: port isolation cuts plain
+# bridge forwarding, the physdev drops cover bridges rerouted through
+# iptables by br_netfilter (docker loads it on GH runners).
+partition() { # partition <on|off>
+	local act=-I
+	[ "$1" = off ] && act=-D
+	sudo bridge link set dev tap-stornas1 isolated "$1"
+	sudo bridge link set dev tap-stornas2 isolated "$1"
+	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas1 --physdev-out tap-stornas2 -j DROP 2>/dev/null || true
+	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
+}
+partition on
+# The cut itself is asserted first: a silently ineffective partition
+# voids every assertion after it.
+partition_effective() { ! v1 ping -c 1 -W 1 "$IP2"; }
+retry 60 "VM to VM traffic cut" partition_effective
+# Both sides must see it: DRBD rides out a dead TCP session until its
+# ping cycle expires, and the force-promote below is refused while
 # node2 still believes in a connected primary peer.
 peer_lost() { v1 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
 retry 300 "DRBD peer connection lost" peer_lost
@@ -629,8 +645,7 @@ v2 sh -c "drbdadm primary --force $REPL_RES \
 	|| die "could not diverge the stale side"
 
 log "healing the partition: DRBD must refuse to merge"
-sudo bridge link set dev tap-stornas1 isolated off
-sudo bridge link set dev tap-stornas2 isolated off
+partition off
 split_detected() {
 	v1 sh -c "dmesg | grep -qi split-brain" || v2 sh -c "dmesg | grep -qi split-brain"
 }
