@@ -215,7 +215,7 @@ func TestApplySambaRendersOnlyLocalSMBShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[media]\n\tpath = /var/lib/stornas/shares/default-media\n\tread only = no\n\tvalid users = alice\n\n"
+	want := "[media]\n\tpath = /var/lib/stornas/shares/default-media\n\tread only = no\n\tforce user = root\n\tvalid users = alice\n\n"
 	if string(got) != want {
 		t.Fatalf("samba conf = %q", got)
 	}

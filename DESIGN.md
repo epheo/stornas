@@ -161,6 +161,10 @@ NFS clients mount server:/<share-name>: the shares directory is the
 fsid=0 pseudo root, because the composefs rootfs cannot anchor the
 NFSv4 tree. v4 only; v3 ports stay closed.
 
+SMB uses the shared-folder model: valid users gate access, and inside
+the share every user acts as one owner (force user root), matching
+NFS's no_root_squash default. Per-user ownership and ACLs are post-v1.
+
 ### LocalUser
 
 ```yaml

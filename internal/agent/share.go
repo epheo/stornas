@@ -136,7 +136,12 @@ func (m *ShareManager) ApplySamba(ctx context.Context, shares []storagev1alpha1.
 		if name == "" {
 			name = s.Name
 		}
-		fmt.Fprintf(&b, "[%s]\n\tpath = %s\n\tread only = no\n", name, m.mountPoint(s.Namespace, s.Name))
+		// Shared-folder model, same as NFS's no_root_squash default:
+		// valid users gate access, and inside the share everyone acts as
+		// one owner. Without this no SMB user can write the root-owned
+		// mountpoint; per-user ownership is post-v1 (needs ACL UX).
+		fmt.Fprintf(&b, "[%s]\n\tpath = %s\n\tread only = no\n\tforce user = root\n",
+			name, m.mountPoint(s.Namespace, s.Name))
 		if len(s.Spec.SMB.ValidUsers) > 0 {
 			fmt.Fprintf(&b, "\tvalid users = %s\n", strings.Join(s.Spec.SMB.ValidUsers, " "))
 		}
