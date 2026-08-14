@@ -638,10 +638,19 @@ retry 120 "NFS client wrote and read back" nfs_io
 log "narrowing the NFS client list takes effect live"
 kc -n stornas-system patch share failover --type merge \
 	-p '{"spec":{"nfs":{"clients":["10.99.0.0/24(rw)"]}}}'
+# v4 pseudo-fs semantics: the out-of-list mount can "succeed" onto the
+# shadowed empty mountpoint of the ro root without ever crossing into
+# the share's filesystem. The property that matters: the share's data
+# (the probe nfs_io wrote) is invisible and writes are refused.
 nfs_denied() {
-	v2 sh -c "umount /mnt/nfs-e2e 2>/dev/null; if mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e; then umount /mnt/nfs-e2e; exit 1; fi"
+	v2 sh -c "umount /mnt/nfs-e2e 2>/dev/null; mkdir -p /mnt/nfs-e2e; \
+		if ! mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e; then exit 0; fi; \
+		rc=0; \
+		if [ -e /mnt/nfs-e2e/probe ]; then rc=1; fi; \
+		if echo x > /mnt/nfs-e2e/denied 2>/dev/null; then rc=1; fi; \
+		umount /mnt/nfs-e2e; exit \$rc"
 }
-retry 120 "client outside the list refused" nfs_denied
+retry 120 "client outside the list cannot reach the data" nfs_denied
 kc -n stornas-system patch share failover --type merge \
 	-p "{\"spec\":{\"nfs\":{\"clients\":[\"$NET.0/24(rw,no_root_squash)\"]}}}"
 retry 120 "restored client list mounts again" nfs_io
