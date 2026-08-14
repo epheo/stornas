@@ -291,6 +291,10 @@ code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-local"}' \
 	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
+curl -fsS -b "$WORKDIR/vcookies" -X POST "http://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
+	|| die "logout failed"
+code=$(http_code -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state")
+[ "$code" = 401 ] || die "logged-out session still valid (got $code)"
 
 # Sessions are in-memory by design: a server restart must refuse old
 # cookies (fail closed) and serve fresh logins immediately.

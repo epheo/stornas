@@ -633,6 +633,19 @@ nfs_io() {
 }
 retry 120 "NFS client wrote and read back" nfs_io
 
+# The client list is live access control: narrowing it must lock the
+# client out without a re-export cycle, restoring it must let it back.
+log "narrowing the NFS client list takes effect live"
+kc -n stornas-system patch share failover --type merge \
+	-p '{"spec":{"nfs":{"clients":["10.99.0.0/24(rw)"]}}}'
+nfs_denied() {
+	v2 sh -c "umount /mnt/nfs-e2e 2>/dev/null; if mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e; then umount /mnt/nfs-e2e; exit 1; fi"
+}
+retry 120 "client outside the list refused" nfs_denied
+kc -n stornas-system patch share failover --type merge \
+	-p "{\"spec\":{\"nfs\":{\"clients\":[\"$NET.0/24(rw,no_root_squash)\"]}}}"
+retry 120 "restored client list mounts again" nfs_io
+
 # SMB rides the same share: user via the appliance API, passdb by the
 # agent, login and IO by a real client. Wrong passwords and deleted
 # users must fail: the passdb is a security boundary.
@@ -686,6 +699,30 @@ v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
 	|| die "iSCSI block IO mismatch"
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
+
+# Rotation is timer-based (nothing watches Secrets); the new password
+# must land within secretRefreshInterval and the old one must die.
+log "CHAP rotation: new secret lands, old one stops working"
+kc -n stornas-system patch secret e2e-chap --type merge \
+	-p '{"stringData":{"password":"rotatedchappass1"}}'
+iscsi_login_rotated() {
+	v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v rotatedchappass1 \
+		&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login"
+}
+retry 400 "iSCSI login with the rotated CHAP secret" iscsi_login_rotated
+v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
+v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v e2echappass123 \
+	&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login" \
+	&& die "retired CHAP secret still accepted"
+
+log "resize and snapshot on the replicated volume"
+retry 60 "appliance API login" api_login
+api POST /volumes/repl-test/resize '{"size":"2Gi"}' >/dev/null || die "replicated resize failed"
+repl_resized() { kc -n stornas-system get pvc repl-test -o jsonpath='{.status.capacity.storage}' | grep -qx 2Gi; }
+retry 300 "replicated PVC grew to 2Gi" repl_resized
+api POST /snapshots '{"name":"repl-snap","volume":"repl-test"}' >/dev/null || die "replicated snapshot failed"
+repl_snap_ready() { kc -n stornas-system get volumesnapshot repl-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
+retry 300 "replicated snapshot ready" repl_snap_ready
 
 log "UI shows the failed-over placements in a real browser"
 ui_phase repl-pages
