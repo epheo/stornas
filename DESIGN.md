@@ -113,6 +113,11 @@ always activate.
 The md state model (active, faulty, spare rebuilding, /proc/mdstat
 progress) maps directly onto device status and rebuildPercent.
 
+Pool deletion is refused while volumes remain, then finalizer-chained:
+LINSTOR deregisters, the agent dismantles the host state (VG, array,
+member signatures) and confirms, only then does the CR go. Disks read
+unclaimed again and are reusable from the UI.
+
 ### Target (iSCSI)
 
 ```yaml
