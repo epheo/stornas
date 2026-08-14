@@ -145,10 +145,12 @@ const phases = {
 		const newPw = process.env.NEW_PW;
 		const nudge = page.getByText('generated first-boot password', { exact: false });
 		await nudge.waitFor();
-		await page.getByPlaceholder('Current password').fill(password);
-		await page.getByPlaceholder('New password (8+ characters)').fill(newPw);
-		await page.getByPlaceholder('Repeat new password').fill(newPw);
-		await page.getByRole('button', { name: 'Change password' }).click();
+		// Scoped to the dialog: the sidebar carries a same-named button.
+		const dialog = page.getByRole('dialog');
+		await dialog.getByPlaceholder('Current password').fill(password);
+		await dialog.getByPlaceholder('New password (8+ characters)').fill(newPw);
+		await dialog.getByPlaceholder('Repeat new password').fill(newPw);
+		await dialog.getByRole('button', { name: 'Change password' }).click();
 		await page.getByText('Password changed').waitFor();
 		await page.getByRole('button', { name: 'Sign out' }).click();
 		await page.getByRole('button', { name: 'Sign in' }).waitFor();
