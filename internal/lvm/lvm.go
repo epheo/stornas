@@ -108,6 +108,25 @@ func (l *LVM) PVRemove(ctx context.Context, dev string) error {
 	return err
 }
 
+// VGRemove wipes the VG and every LV on it; an absent VG is the
+// converged case (pool teardown re-runs until confirmed).
+func (l *LVM) VGRemove(ctx context.Context, vg string) error {
+	out, err := l.run.Run(ctx, "vgremove", "-ff", "-y", vg)
+	if err != nil && strings.Contains(string(out), "not found") {
+		return nil
+	}
+	return err
+}
+
+// PVWipe clears the PV label after vgremove; "No PV label" means done.
+func (l *LVM) PVWipe(ctx context.Context, dev string) error {
+	out, err := l.run.Run(ctx, "pvremove", "-ff", "-y", dev)
+	if err != nil && strings.Contains(string(out), "o PV label") {
+		return nil
+	}
+	return err
+}
+
 // PVMove starts a background evacuation of dev, onto dst when given,
 // else wherever the allocator finds room; "already in progress" from a
 // previous pass is not an error.

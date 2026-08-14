@@ -98,6 +98,34 @@ type replaceRequest struct {
 // ReplacePoolDevice swaps one member of spec.devices; the agent converges
 // the VG (extend, repair or evacuate, reduce). The CRD's same-size CEL
 // rule keeps this a swap, never a grow or shrink.
+// DeletePool refuses while LINSTOR still holds resources on the pool's
+// node: without the check the CR hangs in terminating and the user
+// never learns why. v1 has one pool per node, so node scope is pool
+// scope. The operator's finalizer chain (LINSTOR deregister, agent host
+// wipe) remains the real guard.
+func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	u, err := a.Dyn.Resource(poolGVR).Get(r.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		respondDelete(w, err)
+		return
+	}
+	node, _, _ := unstructured.NestedString(u.Object, "spec", "node")
+	if a.Linstor != nil {
+		if view, verr := a.Linstor.Resources.GetResourceView(r.Context()); verr == nil {
+			for _, res := range view {
+				if res.NodeName == node {
+					http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
+					return
+				}
+			}
+		}
+	}
+	derr := a.Dyn.Resource(poolGVR).Delete(r.Context(), name, metav1.DeleteOptions{})
+	a.record(r, "delete pool", name, derr)
+	respondDelete(w, derr)
+}
+
 func (a *API) ReplacePoolDevice(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var req replaceRequest

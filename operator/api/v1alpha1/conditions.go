@@ -24,6 +24,10 @@ const (
 	ConditionAvailable         = "Available"
 	ConditionHostReady         = "HostReady"
 	ConditionLinstorRegistered = "LinstorRegistered"
+	// TornDown is the agent's confirmation that a deleting pool's host
+	// state (VG, array, signatures) is gone; it releases the operator's
+	// finalizer.
+	ConditionTornDown = "TornDown"
 )
 
 const (

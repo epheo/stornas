@@ -386,3 +386,32 @@ func TestEnsurePoolFailsClosed(t *testing.T) {
 func errExitWith(msg string) error {
 	return fmt.Errorf("exit status 1: %s", msg)
 }
+
+func TestTeardownRaidPoolWipesEverything(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"vgremove -ff -y stornas-tank":      {},
+		"mdadm --stop /dev/md/stornas-tank": {},
+		"readlink -f /dev/disk/by-id/a":     {out: "/dev/vdb\n"},
+		"readlink -f /dev/disk/by-id/b":     {out: "/dev/vdc\n"},
+		"mdadm --zero-superblock /dev/vdb":  {},
+		"mdadm --zero-superblock /dev/vdc":  {},
+	}}
+	p := pool("tank", "raid1", "/dev/disk/by-id/a", "/dev/disk/by-id/b")
+	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 6 {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+func TestTeardownLinearPoolToleratesAbsence(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"vgremove -ff -y stornas-tank": {out: `Volume group "stornas-tank" not found`, err: errExit},
+		"pvremove -ff -y /dev/vdb":     {out: "No PV label found on /dev/vdb.", err: errExit},
+	}}
+	p := pool("tank", "none", "/dev/vdb")
+	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -968,6 +968,12 @@ share_unmounted() { ! v1 findmnt /var/lib/stornas/shares/stornas-system-failover
 retry 120 "NFS export gone from node1" share_unexported
 retry 60 "share mount gone from node1" share_unmounted
 
+log "pool delete refused while volumes remain"
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
+	"http://$IP1:30080/api/v1/pools/pool-node1")
+[ "$code" = 409 ] || die "pool delete got $code, want 409"
+kc get storagepool pool-node1 >/dev/null 2>&1 || die "guarded pool was deleted anyway"
+
 # Run the packaged check scripts directly (distro multinode-test shape):
 # exactly what greenboot executes, and the stornas check must pass on
 # the controller (full stack) and short-circuit on the worker.

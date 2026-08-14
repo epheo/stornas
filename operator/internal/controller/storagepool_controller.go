@@ -66,16 +66,31 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if !pool.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&pool, poolFinalizer) {
-			if r.Linstor != nil {
-				if err := r.Linstor.DeletePool(ctx, pool.Spec.Node); err != nil {
-					return ctrl.Result{}, err
-				}
+		if !controllerutil.ContainsFinalizer(&pool, poolFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		if r.Linstor != nil {
+			// LINSTOR refuses to drop a pool that still backs resources:
+			// the deletion guard, retried flat while volumes remain.
+			if err := r.Linstor.DeletePool(ctx, pool.Spec.Node); err != nil {
+				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 			}
-			controllerutil.RemoveFinalizer(&pool, poolFinalizer)
-			if err := r.Update(ctx, &pool); err != nil {
-				return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		// The agent wipes the host next (the spec is the map of what to
+		// wipe) and confirms with TornDown. A dead node cannot confirm,
+		// and its host state is unreachable anyway.
+		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionTornDown) {
+			unready, err := unreadyNodes(ctx, r.Client)
+			if err != nil {
+				return ctrl.Result{}, err
 			}
+			if !unready[pool.Spec.Node] {
+				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+			}
+		}
+		controllerutil.RemoveFinalizer(&pool, poolFinalizer)
+		if err := r.Update(ctx, &pool); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 		return ctrl.Result{}, nil
 	}

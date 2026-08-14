@@ -141,7 +141,8 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)).To(BeTrue())
 	})
 
-	It("deregisters from LINSTOR on delete via the finalizer", func() {
+	It("deregisters from LINSTOR and waits for the host wipe on delete", func() {
+		setNode(ctx, "node-a", true)
 		Expect(k8sClient.Create(ctx, newPool("finalized", "none", "/dev/sda"))).To(Succeed())
 		markHostReady("finalized")
 
@@ -152,10 +153,22 @@ var _ = Describe("StoragePool Controller", func() {
 
 		pool := &storagev1alpha1.StoragePool{ObjectMeta: metav1.ObjectMeta{Name: "finalized"}}
 		Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
-		_, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
+		res, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
 		Expect(rerr).NotTo(HaveOccurred())
-
+		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
 		Expect(reg.deletes).To(Equal([]string{"node-a"}))
+
+		By("the CR held until the agent confirms the wipe")
+		got := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, got)).To(Succeed())
+		meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
+			Type:   storagev1alpha1.ConditionTornDown,
+			Status: metav1.ConditionTrue,
+			Reason: storagev1alpha1.ReasonReady,
+		})
+		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+		_, rerr = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
+		Expect(rerr).NotTo(HaveOccurred())
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, &storagev1alpha1.StoragePool{})
 		Expect(err).To(HaveOccurred())
 	})

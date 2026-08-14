@@ -44,6 +44,33 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1a
 	return ensureRaidPool(ctx, l, md, pool)
 }
 
+// TeardownPool wipes what EnsurePool built so the disks read unclaimed
+// again: VG (with every LV), then the array and member signatures or
+// the PV labels. Every step tolerates absence; teardown re-runs until
+// the operator sees TornDown.
+func TeardownPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1alpha1.StoragePool) error {
+	if err := l.VGRemove(ctx, pool.VGName()); err != nil {
+		return err
+	}
+	if pool.Spec.Raid != "" && pool.Spec.Raid != "none" {
+		if err := md.Stop(ctx, mdraid.DevPath(pool.Name)); err != nil {
+			return err
+		}
+		for _, dev := range pool.Spec.Devices {
+			if err := md.ZeroSuperblock(ctx, l.ResolvePath(ctx, dev)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, dev := range pool.Spec.Devices {
+		if err := l.PVWipe(ctx, dev); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func ensureLinearPool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.StoragePool) (Report, error) {
 	vg := pool.VGName()
 	rep := Report{VG: vg, Health: "Failed"}
@@ -308,6 +335,26 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if pool.Spec.Node != r.Node {
+		return ctrl.Result{}, nil
+	}
+	if pool.DeletionTimestamp != nil {
+		// The operator's finalizer holds the CR until TornDown: the spec
+		// (devices, raid level) is the only map of what to wipe.
+		if meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionTornDown) {
+			return ctrl.Result{}, nil
+		}
+		if err := TeardownPool(ctx, r.LVM, r.MD, &pool); err != nil {
+			return ctrl.Result{}, err
+		}
+		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+			Type:               storagev1alpha1.ConditionTornDown,
+			Status:             metav1.ConditionTrue,
+			Reason:             storagev1alpha1.ReasonReady,
+			ObservedGeneration: pool.Generation,
+		})
+		if err := r.Status().Update(ctx, &pool); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
 		return ctrl.Result{}, nil
 	}
 

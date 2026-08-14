@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { app } from '$lib/state.svelte';
 	import { formatBytes } from '$lib/stream';
-	import { post } from '$lib/api';
+	import { post, del } from '$lib/api';
 	import { toasts } from '$lib/toast.svelte';
 	import Meter from '$lib/ui/Meter.svelte';
 	import StatusBadge from '$lib/ui/StatusBadge.svelte';
 	import Modal from '$lib/ui/Modal.svelte';
+	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
 	import ProgressBar from '$lib/ui/ProgressBar.svelte';
 
 	const snap = $derived(app.snap);
@@ -76,6 +77,22 @@
 		}
 	}
 
+	let deleting = $state('');
+	let deleteError = $state('');
+	let deleteBusy = $state(false);
+
+	async function doDelete() {
+		deleteBusy = true;
+		deleteError = '';
+		const err = await del(`/api/v1/pools/${deleting}`);
+		deleteBusy = false;
+		if (err) deleteError = err;
+		else {
+			toasts.show(`Pool ${deleting} deleted`, 'success');
+			deleting = '';
+		}
+	}
+
 	function healthKind(h: string): 'ok' | 'warn' | 'bad' | 'neutral' {
 		return h === 'Online' ? 'ok' : h === 'Degraded' ? 'warn' : h === 'Failed' ? 'bad' : 'neutral';
 	}
@@ -117,6 +134,14 @@
 								pool.capacityBytes,
 							)}
 						</span>
+						{#if app.role === 'admin'}
+							<button
+								class="rounded bg-red-500/10 px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20"
+								onclick={() => ((deleting = pool.name), (deleteError = ''))}
+							>
+								delete
+							</button>
+						{/if}
 					</div>
 					{#if pool.rebuildPercent != null}
 						<div class="flex items-center gap-3 border-t border-slate-800 px-4 py-2.5">
@@ -199,6 +224,22 @@
 		</section>
 	{/if}
 </div>
+
+{#if deleting}
+	<ConfirmDelete
+		title="Delete pool"
+		confirmWord={deleting}
+		busy={deleteBusy}
+		error={deleteError}
+		onconfirm={doDelete}
+		onclose={() => (deleting = '')}
+	>
+		<p>
+			Pool <span class="font-mono text-slate-200">{deleting}</span> is dismantled and its disks wiped
+			clean. Volumes on it block the delete.
+		</p>
+	</ConfirmDelete>
+{/if}
 
 {#if replacing}
 	{@const rep = replacing}

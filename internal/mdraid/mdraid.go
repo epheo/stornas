@@ -150,6 +150,28 @@ func (m *MD) Fail(ctx context.Context, dev, member string) error {
 	return err
 }
 
+// Stop disassembles the array on pool teardown; an already-absent array
+// is the converged case.
+func (m *MD) Stop(ctx context.Context, dev string) error {
+	out, err := m.run.Run(ctx, "mdadm", "--stop", dev)
+	if err != nil && (strings.Contains(string(out), "No such file") ||
+		strings.Contains(err.Error(), "No such file")) {
+		return nil
+	}
+	return err
+}
+
+// ZeroSuperblock erases the member signature so the disk reads unclaimed
+// again; a member without one is the converged case.
+func (m *MD) ZeroSuperblock(ctx context.Context, member string) error {
+	out, err := m.run.Run(ctx, "mdadm", "--zero-superblock", member)
+	if err != nil && (strings.Contains(string(out), "Unrecognised") ||
+		strings.Contains(string(out), "No such file")) {
+		return nil
+	}
+	return err
+}
+
 // Members lists kernel paths of current member disks straight from
 // /proc/mdstat; inventory uses it to mark disks claimed.
 func (m *MD) Members(ctx context.Context) map[string]bool {

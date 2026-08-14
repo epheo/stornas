@@ -114,6 +114,19 @@ const phases = {
 		}
 	},
 
+	async 'delete-pool'() {
+		// Typed confirmation, then the card must leave the page once the
+		// operator's finalizer chain (deregister, host wipe) completes.
+		await goTo('Pools', 'Storage pools');
+		await page.getByRole('button', { name: 'delete' }).click();
+		const dialog = page.getByRole('dialog');
+		await dialog.getByRole('heading', { name: 'Delete pool' }).waitFor();
+		await dialog.locator('#confirm-delete-input').fill('test');
+		await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog.waitFor({ state: 'hidden' });
+		await page.getByText('No storage pools yet.').waitFor({ timeout: 120_000 });
+	},
+
 	async 'create-exports'() {
 		// The creation dialogs drive the same specs the harness used to
 		// kubectl apply; placement steering happened before this runs.

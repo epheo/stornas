@@ -390,6 +390,22 @@ curl -fsS -b "$WORKDIR/cookies" -X DELETE \
 restore_gone() { ! kc -n stornas-system get pvc boot-restore >/dev/null 2>&1; }
 retry 180 "restored volume gone" restore_gone
 
+log "pool delete through the UI dismantles the host state"
+kc -n stornas-system delete pod boot-test-consumer --wait
+curl -fsS -b "$WORKDIR/cookies" -X DELETE \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-test" || die "volume delete failed"
+# PV gone means the CSI finished dropping the LINSTOR resource; only
+# then does the pool's delete guard open.
+pvs_gone() { [ "$(kc get pv --no-headers 2>/dev/null | wc -l)" = 0 ]; }
+retry 300 "all PVs gone" pvs_gone
+ui_phase delete-pool
+pool_gone() { ! kc get storagepool test >/dev/null 2>&1; }
+retry 300 "pool CR gone (host wipe confirmed)" pool_gone
+vssh sh -c 'vgs stornas-test 2>/dev/null' && die "VG survived the pool delete"
+vssh test -e /dev/md/stornas-test && die "md array survived the pool delete"
+vssh sh -c 'mdadm --examine /dev/disk/by-id/virtio-STORNASTEST 2>/dev/null' \
+	&& die "member superblock survived the pool delete"
+
 # Last: it retires the generated password every step above logs in with.
 log "first-boot onboarding: nudge, password change, relogin"
 NEW_PW=stornas-e2e-pw1 ui_phase onboarding
