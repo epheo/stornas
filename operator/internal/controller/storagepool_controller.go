@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -51,13 +51,14 @@ type StoragePoolReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Linstor  LinstorRegistrar
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var pool storagev1alpha1.StoragePool
@@ -111,7 +112,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				msg += "; " + d.Path + " " + d.State
 			}
 		}
-		r.Recorder.Event(&pool, corev1.EventTypeWarning, "Pool"+pool.Status.Health, msg)
+		r.Recorder.Eventf(&pool, nil, corev1.EventTypeWarning, "Pool"+pool.Status.Health, "Degrade", "%s", msg)
 	}
 
 	available := metav1.Condition{

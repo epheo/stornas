@@ -199,7 +199,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Linstor:  registrar,
-		Recorder: mgr.GetEventRecorderFor("stornas-operator"),
+		Recorder: mgr.GetEventRecorder("stornas-operator"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "StoragePool")
 		os.Exit(1)
