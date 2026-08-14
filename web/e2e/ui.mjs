@@ -142,9 +142,7 @@ const phases = {
 		const sform = page.locator('section', { hasText: 'New share' });
 		await sform.getByPlaceholder('Name').fill('failover');
 		await sform.locator('select').selectOption('share0');
-		await sform
-			.getByPlaceholder('NFS clients (comma separated)')
-			.fill(process.env.REPL_NFS_CLIENTS);
+		await sform.getByPlaceholder('NFS clients').fill(process.env.REPL_NFS_CLIENTS);
 		await sform.locator('label', { hasText: 'SMB' }).locator('input').check();
 		await sform
 			.getByPlaceholder('Valid SMB users (comma separated, empty allows all)')
