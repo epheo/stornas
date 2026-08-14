@@ -152,6 +152,15 @@ diagnostics() {
 	log "DIAGNOSTICS: iSCSI target tree, auth attributes, one verbose login"
 	v1 sh -c "targetcli ls /iscsi/${TIQN:-none} 3 2>/dev/null; targetcli /iscsi/${TIQN:-none}/tpg1 get attribute authentication generate_node_acls demo_mode_write_protect 2>/dev/null; targetcli /iscsi/${TIQN:-none}/tpg1/acls/${INI:-none} get auth 2>/dev/null" 2>&1 || true
 	v2 sh -c "iscsiadm -m discovery -t sendtargets -p ${VIP:-127.0.0.1} 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.authmethod -v CHAP 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.username -v e2e 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 -o update -n node.session.auth.password -v e2echappass123 2>&1; iscsiadm -m node -T ${TIQN:-none} -p ${VIP:-127.0.0.1}:3260 --login 2>&1; iscsiadm -m session 2>&1; dmesg | grep -iE 'iscsi|chap' | tail -8" 2>&1 || true
+	log "DIAGNOSTICS: SMB state on node1"
+	v1 sh -c 'systemctl is-active smb; pdbedit -L; id e2esmb; cat /etc/samba/stornas-shares.conf; testparm -s 2>/dev/null | sed -n "/\[failover\]/,\$p"' 2>&1 || true
+	log "DIAGNOSTICS: agent logs per node"
+	for p in $(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent -o name 2>/dev/null); do
+		echo "--- ${p}"
+		kc -n stornas-system logs "${p#pod/}" --tail=25 2>&1 | grep -iE 'smb|useradd|localuser|error' | tail -10 || true
+	done
+	log "DIAGNOSTICS: verbose smbclient from node2"
+	v2 sh -c "smbclient //${IP1:-127.0.0.1}/failover -U e2esmb%e2esmbpass123 -d 3 -c exit" 2>&1 | tail -20 || true
 	log "DIAGNOSTICS: AVC denials on node1"
 	v1 sh -c 'ausearch -m avc -ts recent 2>/dev/null | tail -15 || dmesg | grep -i avc | tail -15' 2>&1 || true
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
@@ -599,6 +608,9 @@ kc -n stornas-system patch share failover --type merge \
 	-p '{"spec":{"smb":{"validUsers":["e2esmb"]}}}'
 api POST /users '{"name":"e2esmb","password":"e2esmbpass123","role":"viewer","smb":true}' >/dev/null \
 	|| die "user create through the API failed"
+# Provisioning asserted apart from IO so a failure names its layer.
+smb_provisioned() { v1 sh -c 'pdbedit -L | grep -q e2esmb'; }
+retry 180 "e2esmb in the node1 passdb" smb_provisioned
 smb_io() {
 	v2 sh -c "echo smb-io > /tmp/smb-probe \
 		&& smbclient //$IP1/failover -U e2esmb%e2esmbpass123 \
