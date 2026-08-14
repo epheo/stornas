@@ -124,9 +124,10 @@ RUN printf '#!/bin/bash\necho e2e poisoned image\nexit 1\n' \
 EOF
 $PODMAN build -q -t localhost/stornas-e2e:good -f "$WORKDIR/Containerfile.good" "$WORKDIR"
 $PODMAN build -q -t localhost/stornas-e2e:bad -f "$WORKDIR/Containerfile.bad" "$WORKDIR"
+# Written by the (possibly rootful) podman with umask 022: readable by
+# the scp below without any ownership dance.
 $PODMAN save --format oci-archive -o "$WORKDIR/good.tar" localhost/stornas-e2e:good
 $PODMAN save --format oci-archive -o "$WORKDIR/bad.tar" localhost/stornas-e2e:bad
-chmod a+r "$WORKDIR/good.tar" "$WORKDIR/bad.tar"
 
 log "booting image A"
 truncate -s 10G "$WORKDIR/scratch.raw"
