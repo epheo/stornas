@@ -114,6 +114,16 @@ const phases = {
 		}
 	},
 
+	async 'node-down'() {
+		// A dead node must read as dead everywhere it matters: the node
+		// list, and a plain unavailability verdict on its local volumes.
+		await goTo('Nodes', 'Nodes');
+		await page.getByText('NotReady', { exact: true }).waitFor();
+		await goTo('Volumes', 'Volumes');
+		await page.getByText('local-n2', { exact: true }).waitFor();
+		await page.getByText('unavailable, node down', { exact: true }).first().waitFor();
+	},
+
 	async 'repl-pages'() {
 		// Two-node data after the failover cycle: the pages must show the
 		// moved placements and live replica states, not just render.

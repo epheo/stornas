@@ -386,6 +386,30 @@ log "writing through the replicated volume"
 kc -n stornas-system exec repl-consumer -- sh -c 'echo before-failover > /data/marker && sync'
 
 VIP=$NET.60
+# The appliance API and browser drive every mutation from here on, as a
+# user would; kubectl stays for cluster-level scaffolding only.
+ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
+api_login() {
+	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+		"http://$IP1:30080/api/v1/login" >/dev/null
+}
+api() { # api <method> <path> [json body]
+	if [ $# -ge 3 ]; then
+		curl -fsS -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
+			-d "$3" "http://$IP1:30080/api/v1$2"
+	else
+		curl -fsS -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
+	fi
+}
+retry 60 "appliance API login" api_login
+# Real-browser phases; need playwright's chromium.
+ui_phase() { # ui_phase <phase>
+	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
+		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
+		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
+}
+
 log "failover setup: a Target and a Share active on node2"
 # Placement follows the DRBD primary and the primary is the first opener,
 # so a consumer pinned to node2 steers initial placement; the agent's own
@@ -467,6 +491,49 @@ spec:
       persistentVolumeClaim:
         claimName: share0
 EOF
+# A local volume on node2 rides along: the matrix row "node dies, local
+# volume" needs one to exist when the node goes down.
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-n2
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-local
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: local-n2-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: local-n2
+EOF
+local_bound() { kc -n stornas-system get pvc local-n2 -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 300 "local volume Bound on node2" local_bound
+
 steered() { # steered <pvc>
 	h=$(kc -n stornas-system get pvc "$1" -o jsonpath='{.spec.volumeName}' 2>/dev/null) || return 1
 	[ -n "$h" ] || return 1
@@ -543,6 +610,9 @@ retry 60 "iSCSI reachable on the moved VIP from the host" vip_answers
 share_served_node1() { v1 sh -c 'exportfs | grep -q stornas-system-failover'; }
 retry 60 "NFS export live on node1" share_served_node1
 
+log "UI states the dead node and its stranded local volume"
+ui_phase node-down
+
 log "restarting node2: replica must resync to UpToDate"
 boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2
 retry 600 "node2 ssh back" v2 true
@@ -569,24 +639,6 @@ retry 120 "node2 shed the share mount" node2_shed_mount
 target_on node1 || die "target moved off node1 after node2 returned"
 share_on node1 || die "share moved off node1 after node2 returned"
 retry 60 "iSCSI still reachable on the VIP" vip_answers
-
-# The appliance API drives every mutation from here on, exactly as the
-# UI does; kubectl stays for cluster-level scaffolding only.
-ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-api_login() {
-	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-		"http://$IP1:30080/api/v1/login" >/dev/null
-}
-api() { # api <method> <path> [json body]
-	if [ $# -ge 3 ]; then
-		curl -fsS -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
-			-d "$3" "http://$IP1:30080/api/v1$2"
-	else
-		curl -fsS -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
-	fi
-}
-retry 60 "appliance API login" api_login
 
 # Real clients against the failed-over exports: reachability proves the
 # wiring, only IO proves the product.
@@ -656,12 +708,6 @@ v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
 
-# Real-browser pass over the two-node state; needs playwright's chromium.
-ui_phase() { # ui_phase <phase>
-	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
-		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
-		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
-}
 log "UI shows the failed-over placements in a real browser"
 ui_phase repl-pages
 

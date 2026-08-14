@@ -130,6 +130,13 @@
 											><StatusBadge kind="bad" label="split brain" /></span
 										>
 									{/if}
+									<!-- The matrix promise: every diskful node down is said
+									     plainly, not left to badge archaeology. -->
+									{#if (vol.replication.replicas ?? []).length > 0 && (vol.replication.replicas ?? []).every( (r) => downNodes.has(r.node) )}
+										<span class="mr-1 inline-block"
+											><StatusBadge kind="bad" label="unavailable, node down" /></span
+										>
+									{/if}
 									{#each vol.replication.replicas ?? [] as r (r.node)}
 										<span class="mr-1 inline-block">
 											<StatusBadge
