@@ -86,7 +86,18 @@ func (m *ShareManager) EnsureShare(ctx context.Context, share *storagev1alpha1.S
 	} else if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	_, err = m.Run.Run(ctx, "exportfs", "-ra")
+	return m.reexport(ctx)
+}
+
+// reexport syncs etab and flushes the kernel's export caches: -ra alone
+// leaves the auth cache warm, so a client dropped from the list would
+// keep access until TTL. Revocation is a security boundary; it must be
+// immediate.
+func (m *ShareManager) reexport(ctx context.Context) error {
+	if _, err := m.Run.Run(ctx, "exportfs", "-ra"); err != nil {
+		return err
+	}
+	_, err := m.Run.Run(ctx, "exportfs", "-f")
 	return err
 }
 
@@ -108,7 +119,7 @@ func (m *ShareManager) RemoveShare(ctx context.Context, ns, name string) {
 	if err := os.Remove(m.Root + m.exportsFile(ns, name)); err != nil && !os.IsNotExist(err) {
 		fmt.Printf("remove export %s-%s: %v\n", ns, name, err)
 	}
-	if _, err := m.Run.Run(ctx, "exportfs", "-ra"); err != nil {
+	if err := m.reexport(ctx); err != nil {
 		fmt.Printf("exportfs reload: %v\n", err)
 	}
 	if out, err := m.Run.Run(ctx, "umount", m.mountPoint(ns, name)); err != nil &&

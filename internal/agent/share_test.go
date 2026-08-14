@@ -30,6 +30,7 @@ func TestEnsureShareMountsAndExports(t *testing.T) {
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
+		"exportfs -f":  {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
 	s := share("default", "media", "node-a", "/dev/drbd1000",
@@ -56,6 +57,7 @@ func TestEnsureShareIdempotentMount(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
 		"findmnt -n -o SOURCE /var/lib/stornas/shares/default-media": {out: "/dev/drbd1000\n"},
 		"exportfs -ra": {},
+		"exportfs -f":  {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
 	s := share("default", "media", "node-a", "/dev/drbd1000",
@@ -85,6 +87,7 @@ func TestEnsureShareRemountsWrongDevice(t *testing.T) {
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
+		"exportfs -f":  {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
 	s := share("default", "media", "node-a", "/dev/drbd1000",
@@ -118,6 +121,7 @@ func TestEnsureShareFormatsRawDevice(t *testing.T) {
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
+		"exportfs -f":  {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
 	s := share("default", "media", "node-a", "/dev/drbd1000",
@@ -172,6 +176,7 @@ func TestRemoveShareConvergesPresence(t *testing.T) {
 		"mount -t xfs /dev/drbd1000 /var/lib/stornas/shares/default-media": {},
 		"restorecon -R /var/lib/stornas/shares/default-media":              {},
 		"exportfs -ra": {},
+		"exportfs -f":  {},
 		"umount /var/lib/stornas/shares/default-media": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
