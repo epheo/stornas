@@ -169,7 +169,8 @@ const phases = {
 			await page.getByText(n, { exact: true }).first().waitFor();
 		}
 		await goTo('Volumes', 'Volumes');
-		await page.getByText('repl-test', { exact: true }).waitFor();
+		// The snapshot table's volume column carries the same exact text.
+		await page.getByText('repl-test', { exact: true }).first().waitFor();
 		await page.getByText('node1: UpToDate', { exact: false }).first().waitFor();
 		await page.getByText('node2: UpToDate', { exact: false }).first().waitFor();
 		await goTo('Targets', 'iSCSI targets');
