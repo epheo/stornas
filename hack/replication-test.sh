@@ -613,8 +613,13 @@ REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName
 kc -n stornas-system exec repl-consumer -- sh -c 'echo before-split >> /data/marker && sync'
 sudo bridge link set dev tap-stornas1 isolated on
 sudo bridge link set dev tap-stornas2 isolated on
+# Both sides must see the cut: DRBD rides out a dead TCP session until
+# its ping cycle expires, and the force-promote below is refused while
+# node2 still believes in a connected primary peer.
 peer_lost() { v1 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
-retry 120 "DRBD peer connection lost" peer_lost
+retry 300 "DRBD peer connection lost" peer_lost
+peer_lost_node2() { v2 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
+retry 120 "node2 sees the partition" peer_lost_node2
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
 	|| die "IO blocked on the primary during the partition"
 v2 sh -c "drbdadm primary --force $REPL_RES \
