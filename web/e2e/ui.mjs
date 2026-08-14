@@ -85,6 +85,13 @@ const phases = {
 		await goTo('Pools', 'Storage pools');
 		await page.getByText('Degraded', { exact: true }).waitFor();
 		await page.getByText('Missing', { exact: true }).waitFor();
+		// The other half of the matrix row: the degradation raises an
+		// alert, not just a badge on a page nobody is watching.
+		await goTo('Alerts', 'Alerts');
+		await page.getByText('PoolDegraded').waitFor();
+		await page.getByText('pool test is Degraded', { exact: false }).waitFor();
+		await goTo('Pools', 'Storage pools');
+		await page.getByText('Missing', { exact: true }).waitFor();
 		await page
 			.locator('span.inline-flex', { hasText: 'Missing' })
 			.getByRole('button', { name: 'replace' })

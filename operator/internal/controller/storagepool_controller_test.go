@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -171,5 +172,30 @@ var _ = Describe("StoragePool Controller", func() {
 		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
+	})
+
+	It("emits a warning event when the pool degrades", func() {
+		Expect(k8sClient.Create(ctx, newPool("hurting", "raid1", "/dev/sda", "/dev/sdb"))).To(Succeed())
+		defer deletePool("hurting")
+		markHostReady("hurting")
+
+		pool := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "hurting"}, pool)).To(Succeed())
+		pool.Status.Health = "Degraded"
+		pool.Status.Devices = []storagev1alpha1.DeviceStatus{
+			{Path: "/dev/sda", State: "InSync"},
+			{Path: "/dev/sdb", State: "Missing"},
+		}
+		Expect(k8sClient.Status().Update(ctx, pool)).To(Succeed())
+
+		rec := record.NewFakeRecorder(4)
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: rec}
+		_, err := reconcileOnce(r, "hurting")
+		Expect(err).NotTo(HaveOccurred())
+
+		var ev string
+		Eventually(rec.Events).Should(Receive(&ev))
+		Expect(ev).To(ContainSubstring("PoolDegraded"))
+		Expect(ev).To(ContainSubstring("/dev/sdb Missing"))
 	})
 })

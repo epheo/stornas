@@ -196,9 +196,10 @@ func main() {
 	}
 
 	if err := (&controller.StoragePoolReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Linstor: registrar,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Linstor:  registrar,
+		Recorder: mgr.GetEventRecorderFor("stornas-operator"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "StoragePool")
 		os.Exit(1)

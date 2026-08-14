@@ -331,6 +331,15 @@ EOF
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
+log "resize through the API grows the mounted volume"
+curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"size":"2Gi"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-test/resize" >/dev/null || die "resize failed"
+resized() { kc -n stornas-system get pvc boot-test -o jsonpath='{.status.capacity.storage}' | grep -qx 2Gi; }
+retry 300 "PVC capacity grew to 2Gi" resized
+kc -n stornas-system exec boot-test-consumer -- sh -c 'df -k /data | tail -1' \
+	| awk '{exit ($2 > 1900000) ? 0 : 1}' || die "filesystem did not grow with the volume"
+
 log "pulling a raid1 member: status must degrade and name the victim"
 qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}' || die "device_del refused"
 kc -n stornas-system exec boot-test-consumer -- sh -c 'echo during-pull > /data/marker && sync' \

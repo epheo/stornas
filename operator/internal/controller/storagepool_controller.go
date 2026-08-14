@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -47,13 +49,15 @@ const poolFinalizer = "storage.stornas.io/linstor-deregister"
 // which belongs to the node agent (internal/agent in the root module).
 type StoragePoolReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Linstor LinstorRegistrar
+	Scheme   *runtime.Scheme
+	Linstor  LinstorRegistrar
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var pool storagev1alpha1.StoragePool
@@ -79,6 +83,20 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err := r.Update(ctx, &pool); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// The failure matrix promises an alert when a pool degrades; the UI's
+	// alert feed is Warning events, so unhealthy health (written by the
+	// agent) emits one, naming the bad members. The recorder's event
+	// series absorbs the repeats.
+	if r.Recorder != nil && (pool.Status.Health == "Degraded" || pool.Status.Health == "Failed") {
+		msg := "pool " + pool.Name + " is " + pool.Status.Health
+		for _, d := range pool.Status.Devices {
+			if d.State == "Missing" || d.State == "Failed" {
+				msg += "; " + d.Path + " " + d.State
+			}
+		}
+		r.Recorder.Event(&pool, corev1.EventTypeWarning, "Pool"+pool.Status.Health, msg)
 	}
 
 	available := metav1.Condition{
