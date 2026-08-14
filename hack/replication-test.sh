@@ -629,19 +629,23 @@ partition on
 # voids every assertion after it.
 partition_effective() { ! v1 ping -c 1 -W 1 "$IP2"; }
 retry 60 "VM to VM traffic cut" partition_effective
-# Both sides must see it: DRBD rides out a dead TCP session until its
-# ping cycle expires, and the force-promote below is refused while
+# drbdsetup, never drbdadm: LINSTOR keeps its res files out of
+# /etc/drbd.d, so only kernel-direct commands see these resources.
+# Both sides must see the cut: DRBD rides out a dead TCP session until
+# its ping cycle expires, and the force-promote below is refused while
 # node2 still believes in a connected primary peer.
-peer_lost() { v1 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
+peer_lost() { v1 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
 retry 300 "DRBD peer connection lost" peer_lost
-peer_lost_node2() { v2 sh -c "drbdadm status $REPL_RES | grep -q Connecting"; }
+peer_lost_node2() { v2 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
 retry 120 "node2 sees the partition" peer_lost_node2
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
 	|| die "IO blocked on the primary during the partition"
-v2 sh -c "drbdadm primary --force $REPL_RES \
-	&& mount \"\$(drbdadm sh-dev $REPL_RES)\" /mnt \
+# The accident under test: an operator force-promotes the stale side.
+v2 sh -c "minor=\$(drbdsetup status $REPL_RES --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1) \
+	&& drbdsetup primary --force $REPL_RES \
+	&& mount /dev/drbd\$minor /mnt \
 	&& echo divergent > /mnt/divergent && umount /mnt \
-	&& drbdadm secondary $REPL_RES" \
+	&& drbdsetup secondary $REPL_RES" \
 	|| die "could not diverge the stale side"
 
 log "healing the partition: DRBD must refuse to merge"
