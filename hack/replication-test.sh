@@ -406,6 +406,7 @@ retry 60 "appliance API login" api_login
 # Real-browser phases; need playwright's chromium.
 ui_phase() { # ui_phase <phase>
 	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
+		REPL_VIP_CIDR="$VIP/24" REPL_NFS_CLIENTS="$NET.0/24(rw,no_root_squash)" \
 		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
 		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
 }
@@ -544,28 +545,8 @@ share0_steered() { steered share0; }
 retry 600 "lun0 primary on node2" lun0_steered
 retry 600 "share0 primary on node2" share0_steered
 
-kc apply -f - <<EOF
-apiVersion: storage.stornas.io/v1alpha1
-kind: Target
-metadata:
-  name: failover
-  namespace: stornas-system
-spec:
-  vip: $VIP/24
-  luns:
-    - id: 0
-      claimName: lun0
----
-apiVersion: storage.stornas.io/v1alpha1
-kind: Share
-metadata:
-  name: failover
-  namespace: stornas-system
-spec:
-  claimName: share0
-  nfs:
-    clients: ["$NET.0/24(rw,no_root_squash)"]
-EOF
+log "creating the target and share through the UI dialogs"
+ui_phase create-exports
 target_on() { kc -n stornas-system get target failover -o jsonpath='{.status.activeNode} {.status.state}' | grep -qx "$1 Exported"; }
 share_on() { kc -n stornas-system get share failover -o jsonpath='{.status.node} {.status.state}' | grep -qx "$1 Exported"; }
 target_placed() { kc -n stornas-system get target failover -o jsonpath='{.status.activeNode}' | grep -qx node2; }
@@ -656,8 +637,6 @@ retry 120 "NFS client wrote and read back" nfs_io
 # agent, login and IO by a real client. Wrong passwords and deleted
 # users must fail: the passdb is a security boundary.
 log "SMB user through the API, client IO from node2"
-kc -n stornas-system patch share failover --type merge \
-	-p '{"spec":{"smb":{"validUsers":["e2esmb"]}}}'
 api POST /users '{"name":"e2esmb","password":"e2esmbpass123","role":"viewer","smb":true}' >/dev/null \
 	|| die "user create through the API failed"
 # Provisioning asserted apart from IO so a failure names its layer.

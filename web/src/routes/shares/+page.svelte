@@ -26,6 +26,7 @@
 	let claim = $state('');
 	let nfsClients = $state('');
 	let smb = $state(false);
+	let smbUsers = $state('');
 	let createBusy = $state(false);
 
 	async function createShare(e: Event) {
@@ -37,6 +38,7 @@
 			claim,
 			nfsClients: nfsClients ? nfsClients.split(',').map((s) => s.trim()) : [],
 			smb,
+			validUsers: smb && smbUsers ? smbUsers.split(',').map((s) => s.trim()) : [],
 		});
 		createBusy = false;
 		if (err) actionError = err;
@@ -150,6 +152,13 @@
 				<label class="flex items-center gap-2 text-sm text-slate-300">
 					<input type="checkbox" bind:checked={smb} /> SMB
 				</label>
+				{#if smb}
+					<input
+						class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+						placeholder="Valid SMB users (comma separated, empty allows all)"
+						bind:value={smbUsers}
+					/>
+				{/if}
 				{#if actionError}<p class="text-sm text-red-400">{actionError}</p>{/if}
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"

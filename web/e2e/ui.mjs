@@ -114,6 +114,32 @@ const phases = {
 		}
 	},
 
+	async 'create-exports'() {
+		// The creation dialogs drive the same specs the harness used to
+		// kubectl apply; placement steering happened before this runs.
+		await goTo('Targets', 'iSCSI targets');
+		const tform = page.locator('section', { hasText: 'New target' });
+		await tform.getByPlaceholder('Name').fill('failover');
+		await tform.getByPlaceholder('VIP CIDR (for replicated LUNs)').fill(process.env.REPL_VIP_CIDR);
+		await tform.locator('input[value="lun0"]').check();
+		await tform.getByRole('button', { name: 'Create target' }).click();
+		await page.locator('tr', { hasText: 'failover' }).waitFor();
+
+		await goTo('Shares', 'Shares');
+		const sform = page.locator('section', { hasText: 'New share' });
+		await sform.getByPlaceholder('Name').fill('failover');
+		await sform.locator('select').selectOption('share0');
+		await sform
+			.getByPlaceholder('NFS clients (comma separated)')
+			.fill(process.env.REPL_NFS_CLIENTS);
+		await sform.locator('label', { hasText: 'SMB' }).locator('input').check();
+		await sform
+			.getByPlaceholder('Valid SMB users (comma separated, empty allows all)')
+			.fill('e2esmb');
+		await sform.getByRole('button', { name: 'Create share' }).click();
+		await page.locator('tr', { hasText: 'failover' }).waitFor();
+	},
+
 	async 'node-down'() {
 		// A dead node must read as dead everywhere it matters: the node
 		// list, and a plain unavailability verdict on its local volumes.
