@@ -36,7 +36,9 @@
 		const err = await post('/api/v1/shares', {
 			name,
 			claim,
-			nfsClients: nfsClients ? nfsClients.split(',').map((s) => s.trim()) : [],
+			// Space separated like /etc/exports itself: a client entry
+			// carries commas inside its option parens.
+			nfsClients: nfsClients ? nfsClients.split(/\s+/).filter(Boolean) : [],
 			smb,
 			validUsers: smb && smbUsers ? smbUsers.split(',').map((s) => s.trim()) : [],
 		});
@@ -146,7 +148,7 @@
 				</select>
 				<input
 					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-					placeholder="NFS clients (comma separated)"
+					placeholder="NFS clients, space separated: 10.0.0.0/24(rw)"
 					bind:value={nfsClients}
 				/>
 				<label class="flex items-center gap-2 text-sm text-slate-300">

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -468,10 +469,22 @@ type shareRequest struct {
 	ValidUsers []string `json:"validUsers"`
 }
 
+// nfsClientRE is one /etc/exports client entry: host or subnet, then an
+// optional parenthesised option list. A malformed entry would land in
+// the host's exports file and take every share on the node down with a
+// syntax error, so it is refused here.
+var nfsClientRE = regexp.MustCompile(`^[^\s()]+(\([^\s()]*\))?$`)
+
 func (a *API) CreateShare(w http.ResponseWriter, r *http.Request) {
 	var req shareRequest
 	if !decode(w, r, &req) {
 		return
+	}
+	for _, c := range req.NFSClients {
+		if !nfsClientRE.MatchString(c) {
+			http.Error(w, "invalid NFS client entry: "+c, http.StatusBadRequest)
+			return
+		}
 	}
 	spec := map[string]any{"claimName": req.Claim}
 	if len(req.NFSClients) > 0 {
