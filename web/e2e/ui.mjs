@@ -21,7 +21,7 @@ page.on('pageerror', (err) => {
 // to the aside so getByRole stays unambiguous.
 const nav = (name) => page.locator('aside').getByRole('link', { name });
 
-async function login(user, pw) {
+async function login(user, pw, keepNudge = false) {
 	await page.goto(url);
 	await page.getByPlaceholder('Username').fill(user);
 	await page.getByPlaceholder('Password').fill(pw);
@@ -29,6 +29,7 @@ async function login(user, pw) {
 	await nav('Dashboard').waitFor();
 	// The generated password nudges a change on every load; only the
 	// onboarding phase follows it.
+	if (keepNudge) return;
 	const cancel = page.getByRole('button', { name: 'Cancel' });
 	if (await cancel.isVisible()) await cancel.click();
 }
@@ -131,6 +132,27 @@ const phases = {
 		await srow.getByText('Exported').waitFor();
 	},
 
+	async onboarding() {
+		// The first-boot nudge must lead somewhere: change the password,
+		// sign out, and get back in with the new one.
+		const newPw = process.env.NEW_PW;
+		const nudge = page.getByText('generated first-boot password', { exact: false });
+		await nudge.waitFor();
+		await page.getByPlaceholder('Current password').fill(password);
+		await page.getByPlaceholder('New password (8+ characters)').fill(newPw);
+		await page.getByPlaceholder('Repeat new password').fill(newPw);
+		await page.getByRole('button', { name: 'Change password' }).click();
+		await page.getByText('Password changed').waitFor();
+		await page.getByRole('button', { name: 'Sign out' }).click();
+		await page.getByRole('button', { name: 'Sign in' }).waitFor();
+		await login('admin', newPw, true);
+		// A chosen password must not be nudged again.
+		await page.waitForTimeout(1500);
+		if (await nudge.isVisible()) {
+			throw new Error('nudge still shown after the password change');
+		}
+	},
+
 	async viewer() {
 		// RBAC in the chrome: management affordances must not render for
 		// the viewer role, matching the 403s behind them.
@@ -169,7 +191,7 @@ if (!url || !password || !phases[phase]) {
 }
 
 try {
-	await login(user, password);
+	await login(user, password, phase === 'onboarding');
 	await phases[phase]();
 	console.log(`ui ${phase}: ok`);
 } catch (err) {

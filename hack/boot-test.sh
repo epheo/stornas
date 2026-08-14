@@ -366,6 +366,14 @@ curl -fsS -b "$WORKDIR/cookies" -X DELETE \
 restore_gone() { ! kc -n stornas-system get pvc boot-restore >/dev/null 2>&1; }
 retry 180 "restored volume gone" restore_gone
 
+# Last: it retires the generated password every step above logs in with.
+log "first-boot onboarding: nudge, password change, relogin"
+NEW_PW=stornas-e2e-pw1 ui_phase onboarding
+code=$(http_code -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+	"http://127.0.0.1:$UI_PORT/api/v1/login")
+[ "$code" = 401 ] || die "retired generated password still logs in (got $code)"
+
 # The air-gap contract: every ref in the embedded manifest must come
 # from the store, never a registry. The drbd9-* loader is deliberately
 # outside the set: piraeus renders it once before the satellite patch
