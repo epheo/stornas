@@ -179,9 +179,15 @@ var _ = Describe("StoragePool Controller", func() {
 		markHostReady("failing")
 
 		reg := &fakeRegistrar{err: fmt.Errorf("controller unreachable")}
-		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}, "failing")
-		Expect(err).To(HaveOccurred())
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "failing"}})
+		// Flat requeue, no error: exponential backoff would strand
+		// registration long after LINSTOR or DNS recovers.
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
 
+		pool := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "failing"}, pool)).To(Succeed())
 		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))

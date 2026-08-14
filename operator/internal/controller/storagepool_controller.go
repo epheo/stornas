@@ -119,7 +119,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: pool.Generation,
 	}
-	var retErr error
+	res := ctrl.Result{}
 
 	switch {
 	case len(pool.Spec.Devices) < storagev1alpha1.MinDevices(pool.Spec.Raid):
@@ -154,7 +154,10 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 			available.Reason = storagev1alpha1.ReasonLinstorError
 			available.Message = err.Error()
-			retErr = err
+			// Flat requeue, not an error: LINSTOR and cluster DNS heal on
+			// their own schedule, and exponential backoff would strand
+			// registration for minutes after they recover.
+			res.RequeueAfter = volumeSettleInterval
 		} else {
 			pool.Status.LinstorPool = storagev1alpha1.LinstorPool
 			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
@@ -176,7 +179,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, retErr
+	return res, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
