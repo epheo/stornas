@@ -58,9 +58,11 @@ COPY files/smb.conf /etc/samba/smb.conf
 # The bootc root is composefs, which cannot anchor the NFSv4 pseudo tree
 # (no exportable filehandles); the shares directory on /var is the
 # explicit fsid=0 root instead, so clients mount server:/<share-name>.
-# Per-share client lists stay on the agent's leaf exports.
+# No crossmnt: it would implicitly export every share read-only to the
+# world, bypassing the per-share client lists on the agent's leaf
+# exports. The root exposes share names only; data stays leaf-gated.
 RUN touch /etc/samba/stornas-shares.conf \
-	&& printf '/var/lib/stornas/shares *(ro,fsid=0,crossmnt)\n' \
+	&& printf '/var/lib/stornas/shares *(ro,fsid=0)\n' \
 		> /etc/exports.d/stornas-root.exports \
 	&& printf '%s\n' \
 		'd /var/lib/stornas 0755 root root -' \

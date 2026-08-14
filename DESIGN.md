@@ -164,7 +164,9 @@ status:
 
 NFS clients mount server:/<share-name>: the shares directory is the
 fsid=0 pseudo root, because the composefs rootfs cannot anchor the
-NFSv4 tree. v4 only; v3 ports stay closed.
+NFSv4 tree. v4 only; v3 ports stay closed. The root is exported
+without crossmnt: share data is reachable only through each share's
+own client list; the pseudo root leaks share names at most.
 
 SMB uses the shared-folder model: valid users gate access, and inside
 the share every user acts as one owner (force user root), matching
