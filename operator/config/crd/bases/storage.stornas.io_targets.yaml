@@ -186,10 +186,14 @@ spec:
                 format: int32
                 type: integer
               state:
+                description: |-
+                  Removed is the agent's teardown confirmation on a deleting target;
+                  it releases the operator's finalizer.
                 enum:
                 - Pending
                 - Exported
                 - Failed
+                - Removed
                 type: string
             type: object
         required:

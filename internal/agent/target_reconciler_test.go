@@ -58,3 +58,63 @@ func TestTargetAgentTearsDownWhenPlacedElsewhere(t *testing.T) {
 		t.Fatalf("export left on the losing node: %v", f.calls)
 	}
 }
+
+// A deleting target must be torn down while the spec (the only place the
+// VIP lives) still exists, then confirmed with State Removed so the
+// operator releases its finalizer.
+func TestTargetAgentRemovesOnDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	target := &storagev1alpha1.Target{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "vms", Namespace: "stornas-system",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"storage.stornas.io/teardown"},
+		},
+		Spec: storagev1alpha1.TargetSpec{VIP: "192.168.1.50/24"},
+		Status: storagev1alpha1.TargetStatus{
+			IQN:        "iqn.2026-08.io.stornas:vms",
+			ActiveNode: "node-a",
+			State:      "Exported",
+			LUNs:       []storagev1alpha1.LUNStatus{{ID: 0, Device: "/dev/drbd1000"}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(target).WithStatusSubresource(target).Build()
+
+	iqn := "iqn.2026-08.io.stornas:vms"
+	f := &fakeRunner{results: map[string]result{
+		"targetcli ls /iscsi/" + iqn + " 1":                   {out: "o- vms\n"},
+		"targetcli /iscsi delete " + iqn:                      {},
+		"targetcli ls /backstores/block 1":                    {out: "o- block\n  o- stornas-vms-lun0 [x]\n"},
+		"targetcli /backstores/block delete stornas-vms-lun0": {},
+		"targetcli saveconfig":                                {},
+		"ip -j addr show to 192.168.1.50":                     {out: `[{"ifname":"eth0"}]`},
+		"ip addr del 192.168.1.50/24 dev eth0":                {},
+	}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f}}
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	vipDropped := false
+	for _, call := range f.calls {
+		if call == "ip addr del 192.168.1.50/24 dev eth0" {
+			vipDropped = true
+		}
+	}
+	if !vipDropped {
+		t.Fatalf("VIP left on the node: %v", f.calls)
+	}
+	got := &storagev1alpha1.Target{}
+	if err := c.Get(context.Background(), req.NamespacedName, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.State != "Removed" {
+		t.Fatalf("state = %q, teardown unconfirmed", got.Status.State)
+	}
+}

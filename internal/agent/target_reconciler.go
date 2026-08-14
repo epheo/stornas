@@ -31,6 +31,19 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if target.DeletionTimestamp != nil {
+		// The operator's finalizer keeps the spec (the only place the
+		// VIP lives) alive until this teardown; Removed is the confirm
+		// signal that releases it. Standby probes stay quiet.
+		r.LIO.TeardownTarget(ctx, target.Name, target.Spec.VIP)
+		if target.Status.ActiveNode == r.Node && target.Status.State != "Removed" {
+			target.Status.State = "Removed"
+			if err := r.Status().Update(ctx, &target); err != nil {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+		}
+		return ctrl.Result{}, nil
+	}
 	if target.Status.ActiveNode != r.Node {
 		r.LIO.TeardownTarget(ctx, target.Name, target.Spec.VIP)
 		return ctrl.Result{}, nil

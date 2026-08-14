@@ -28,11 +28,17 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
+
+// teardownFinalizer holds Target deletion open until the active agent
+// sheds the export and VIP: the spec is the only place the VIP lives, so
+// it must outlive the teardown or the address lingers on the node.
+const teardownFinalizer = "storage.stornas.io/teardown"
 
 // TargetReconciler owns placement and device resolution for iSCSI targets.
 // v1 failover is active/passive: every LUN is served from one node (the
@@ -56,6 +62,17 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	var target storagev1alpha1.Target
 	if err := r.Get(ctx, req.NamespacedName, &target); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !target.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &target)
+	}
+	if controllerutil.AddFinalizer(&target, teardownFinalizer) {
+		if err := r.Update(ctx, &target); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, err
+		}
 	}
 
 	available := metav1.Condition{
@@ -159,6 +176,37 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	return res, nil
+}
+
+// reconcileDelete releases the finalizer once the active agent confirms
+// teardown (State Removed), placement never happened, or the active node
+// is unready: a dead node cannot confirm, its exports died with it, and a
+// reboot clears the VIP. Known limit: a node that returns from a partition
+// without rebooting sheds the export (agent sees NotFound) but not the
+// VIP, which only the spec knew.
+func (r *TargetReconciler) reconcileDelete(ctx context.Context, target *storagev1alpha1.Target) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(target, teardownFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	done := target.Status.ActiveNode == "" || target.Status.State == "Removed"
+	if !done {
+		unready, err := unreadyNodes(ctx, r.Client)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		done = unready[target.Status.ActiveNode]
+	}
+	if !done {
+		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+	}
+	controllerutil.RemoveFinalizer(target, teardownFinalizer)
+	if err := r.Update(ctx, target); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 // allTargets re-reconciles every target on a node readiness flip; the

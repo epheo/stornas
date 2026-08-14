@@ -335,6 +335,18 @@ kc -n stornas-system exec boot-test-consumer -- cat /data/marker | grep -q durin
 	|| die "marker written on the degraded pool is missing"
 ui_phase online
 
+log "delete flows: snapshot, then the restored volume"
+curl -fsS -b "$WORKDIR/cookies" -X DELETE \
+	"http://127.0.0.1:$UI_PORT/api/v1/snapshots/boot-snap" || die "snapshot delete failed"
+snap_gone() { ! kc -n stornas-system get volumesnapshot boot-snap >/dev/null 2>&1; }
+retry 120 "snapshot gone" snap_gone
+# pvc-protection holds a claimed volume; the consumer goes first.
+kc -n stornas-system delete pod boot-restore-consumer --wait
+curl -fsS -b "$WORKDIR/cookies" -X DELETE \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-restore" || die "volume delete failed"
+restore_gone() { ! kc -n stornas-system get pvc boot-restore >/dev/null 2>&1; }
+retry 180 "restored volume gone" restore_gone
+
 # The air-gap contract: every ref in the embedded manifest must come
 # from the store, never a registry. The drbd9-* loader is deliberately
 # outside the set: piraeus renders it once before the satellite patch

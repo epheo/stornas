@@ -89,8 +89,10 @@ type TargetStatus struct {
 	LUNs []LUNStatus `json:"luns,omitempty"`
 	// +optional
 	Sessions int32 `json:"sessions,omitempty"`
+	// Removed is the agent's teardown confirmation on a deleting target;
+	// it releases the operator's finalizer.
 	// +optional
-	// +kubebuilder:validation:Enum=Pending;Exported;Failed
+	// +kubebuilder:validation:Enum=Pending;Exported;Failed;Removed
 	State string `json:"state,omitempty"`
 }
 

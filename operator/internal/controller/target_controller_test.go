@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -205,5 +206,73 @@ var _ = Describe("Target Controller", func() {
 		cond := meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
+	})
+
+	It("holds deletion until the agent confirms teardown", func() {
+		setNode(ctx, "node-a", true)
+		boundBlockClaim("disk9", "pvc-disk9")
+		target := &storagev1alpha1.Target{
+			ObjectMeta: metav1.ObjectMeta{Name: "doomed", Namespace: "default"},
+			Spec: storagev1alpha1.TargetSpec{
+				VIP:  "192.168.1.61/24",
+				LUNs: []storagev1alpha1.LUN{{ID: 0, ClaimName: "disk9"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, target)).To(Succeed())
+
+		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1009"}
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		key := types.NamespacedName{Namespace: "default", Name: "doomed"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		got := &storagev1alpha1.Target{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Finalizers).To(ContainElement(teardownFinalizer))
+		Expect(got.Status.ActiveNode).To(Equal("node-a"))
+
+		By("deleting while the agent has not torn down yet")
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+
+		By("the agent confirming with State Removed")
+		got.Status.State = "Removed"
+		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, key, got))).To(BeTrue())
+	})
+
+	It("releases deletion when the active node is unready", func() {
+		setNode(ctx, "node-a", true)
+		defer setNode(ctx, "node-a", true)
+		boundBlockClaim("disk10", "pvc-disk10")
+		target := &storagev1alpha1.Target{
+			ObjectMeta: metav1.ObjectMeta{Name: "orphaned", Namespace: "default"},
+			Spec: storagev1alpha1.TargetSpec{
+				VIP:  "192.168.1.62/24",
+				LUNs: []storagev1alpha1.LUN{{ID: 0, ClaimName: "disk10"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, target)).To(Succeed())
+
+		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1010"}
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		key := types.NamespacedName{Namespace: "default", Name: "orphaned"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		// A dead active node can never confirm; waiting would block
+		// deletion forever.
+		setNode(ctx, "node-a", false)
+		got := &storagev1alpha1.Target{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, key, got))).To(BeTrue())
 	})
 })
