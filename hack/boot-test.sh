@@ -269,14 +269,44 @@ curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
 curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
 
+# The session layer is the security boundary; every refusal is product
+# behavior worth pinning.
+log "auth boundaries: anonymous and wrong-password refused"
+http_code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+code=$(http_code "http://127.0.0.1:$UI_PORT/api/v1/state")
+[ "$code" = 401 ] || die "anonymous state got $code, want 401"
+code=$(http_code -H 'Content-Type: application/json' \
+	-d '{"username":"admin","password":"not-the-password"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/login")
+[ "$code" = 401 ] || die "wrong-password login got $code, want 401"
+
+log "viewer role: read allowed, mutations refused"
+curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"name":"eyes","password":"e2eviewer123","role":"viewer","smb":false}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/users" >/dev/null || die "viewer user create failed"
+viewer_login() {
+	curl -fsS -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
+		-d '{"username":"eyes","password":"e2eviewer123"}' \
+		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
+}
+retry 60 "viewer login" viewer_login
+curl -fsS -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' \
+	|| die "viewer cannot read state"
+code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
+	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-local"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
+[ "$code" = 403 ] || die "viewer mutation got $code, want 403"
+
 # Real-browser pass over every page; needs playwright's chromium
 # (npx playwright install chromium, once per machine).
-ui_phase() { # ui_phase <smoke|degraded-replace|online>
-	UI_URL="http://127.0.0.1:$UI_PORT" ADMIN_PW="$ADMIN_PW" node web/e2e/ui.mjs "$1" \
-		|| die "UI phase $1 failed"
+ui_phase() { # ui_phase <phase> [user] [password]
+	UI_URL="http://127.0.0.1:$UI_PORT" UI_USER="${2:-admin}" ADMIN_PW="${3:-$ADMIN_PW}" \
+		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
 }
 log "UI renders live data in a real browser"
 ui_phase smoke
+log "viewer chrome hides management affordances"
+ui_phase viewer eyes e2eviewer123
 
 log "snapshot and restore through the appliance API"
 curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \

@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 
 const url = process.env.UI_URL;
 const password = process.env.ADMIN_PW;
+const user = process.env.UI_USER || 'admin';
 const phase = process.argv[2];
 
 const browser = await chromium.launch();
@@ -112,6 +113,20 @@ const phases = {
 		await srow.getByText('Exported').waitFor();
 	},
 
+	async viewer() {
+		// RBAC in the chrome: management affordances must not render for
+		// the viewer role, matching the 403s behind them.
+		await goTo('Pools', 'Storage pools');
+		if (await nav('Users').isVisible()) throw new Error('viewer sees the Users page');
+		if (await page.getByRole('heading', { name: 'New pool' }).isVisible()) {
+			throw new Error('viewer sees the create-pool form');
+		}
+		await goTo('Volumes', 'Volumes');
+		if (await page.getByRole('button', { name: 'delete' }).first().isVisible()) {
+			throw new Error('viewer sees volume actions');
+		}
+	},
+
 	async 'split-brain'() {
 		// The failure-matrix promise: divergence is surfaced and resolved
 		// in the UI, not by drbd incantations on the host.
@@ -136,7 +151,7 @@ if (!url || !password || !phases[phase]) {
 }
 
 try {
-	await login('admin', password);
+	await login(user, password);
 	await phases[phase]();
 	console.log(`ui ${phase}: ok`);
 } catch (err) {
