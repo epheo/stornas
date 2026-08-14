@@ -8,13 +8,14 @@
 	const snap = $derived(app.snap);
 	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));
 
-	// Agent conventions: NFS exports /var/lib/stornas/shares/<ns>-<name>,
-	// the SMB section is the share name.
+	// Agent conventions: the shares directory is the NFSv4 fsid=0 pseudo
+	// root, so clients mount /<ns>-<name>, never the on-host directory.
+	// The SMB section is the share name.
 	function nodeIP(name: string): string {
 		return snap.nodes.find((n) => n.name === name)?.addresses?.[0] ?? name;
 	}
 	function nfsPath(s: { namespace: string; name: string; node: string }): string {
-		return `${nodeIP(s.node)}:/var/lib/stornas/shares/${s.namespace}-${s.name}`;
+		return `${nodeIP(s.node)}:/${s.namespace}-${s.name}`;
 	}
 	function smbPath(s: { name: string; node: string }): string {
 		return `\\\\${nodeIP(s.node)}\\${s.name}`;

@@ -41,6 +41,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - name: install playwright chromium for the UI phases
+        run: npx playwright install --with-deps chromium
+        working-directory: web
       - name: build the appliance image
         run: make image PODMAN=podman
       - name: replication test
@@ -50,5 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: repl-consoles
-          path: /tmp/stornas-repl*/console*.log
+          path: |
+            /tmp/stornas-repl*/console*.log
+            ui-*-failed.png
           if-no-files-found: ignore

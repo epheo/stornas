@@ -604,6 +604,16 @@ v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
 
+# Real-browser pass over the two-node state; needs playwright's chromium.
+ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
+ui_phase() { # ui_phase <phase>
+	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
+		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
+		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
+}
+log "UI shows the failed-over placements in a real browser"
+ui_phase repl-pages
+
 # Failure matrix: 2-node split brain. Isolated bridge ports cut only
 # VM-to-VM traffic, the host still reaches both. Divergence needs a
 # primary on each side, so the stale side is force-promoted: the operator
@@ -656,15 +666,8 @@ split_detected() {
 retry 300 "split brain detected" split_detected
 retry 600 "both nodes Ready after heal" both_ready
 
-log "pick-survivor through the appliance API"
-ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-	"http://$IP1:30080/api/v1/login" >/dev/null || die "UI login failed"
-curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d '{"survivor":"node1"}' \
-	"http://$IP1:30080/api/v1/volumes/repl-test/resolve-split" >/dev/null \
-	|| die "resolve-split failed"
+log "pick-survivor through the UI resolve dialog"
+ui_phase split-brain
 retry 900 "replicas resynced after pick-survivor" resynced
 kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-split \
 	|| die "survivor lost its writes"
