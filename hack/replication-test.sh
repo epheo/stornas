@@ -390,16 +390,16 @@ VIP=$NET.60
 # user would; kubectl stays for cluster-level scaffolding only.
 ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
 api_login() {
-	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
 		"http://$IP1:30080/api/v1/login" >/dev/null
 }
 api() { # api <method> <path> [json body]
 	if [ $# -ge 3 ]; then
-		curl -fsS -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
+		curl -fsS -m 15 -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
 			-d "$3" "http://$IP1:30080/api/v1$2"
 	else
-		curl -fsS -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
+		curl -fsS -m 15 -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
 	fi
 }
 retry 60 "appliance API login" api_login
@@ -1016,7 +1016,7 @@ retry 60 "share mount gone from node1" share_unmounted
 log "pool delete refused while volumes remain, in the dialog and the API"
 ui_phase delete-pool-refused
 retry 60 "appliance API login" api_login
-code=$(curl -s -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
+code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
 	"http://$IP1:30080/api/v1/pools/pool-node1")
 [ "$code" = 409 ] || die "pool delete got $code, want 409"
 kc get storagepool pool-node1 >/dev/null 2>&1 || die "guarded pool was deleted anyway"

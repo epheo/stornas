@@ -205,12 +205,12 @@ retry 900 "linstor satellite up" satellite_up
 retry 600 "stornas operator, agent, server running" stornas_up
 
 log "UI answers and login works"
-retry 300 "healthz via hostfwd" curl -fsS "http://127.0.0.1:$UI_PORT/healthz"
+retry 300 "healthz via hostfwd" curl -fsS -m 15 "http://127.0.0.1:$UI_PORT/healthz"
 ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
 	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
-curl -fsS -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
+curl -fsS -m 15 -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
 
 # Real-browser phases; need playwright's chromium
 # (npx playwright install chromium, once per machine).
@@ -257,7 +257,7 @@ retry 600 "PVC Bound" pvc_bound
 # The session layer is the security boundary; every refusal is product
 # behavior worth pinning.
 log "auth boundaries: anonymous and wrong-password refused"
-http_code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+http_code() { curl -s -m 15 -o /dev/null -w '%{http_code}' "$@"; }
 code=$(http_code "http://127.0.0.1:$UI_PORT/api/v1/state")
 [ "$code" = 401 ] || die "anonymous state got $code, want 401"
 code=$(http_code -H 'Content-Type: application/json' \
@@ -268,18 +268,18 @@ code=$(http_code -H 'Content-Type: application/json' \
 log "viewer role: created in the UI, read allowed, mutations refused"
 TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user
 viewer_login() {
-	curl -fsS -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
+	curl -fsS -m 15 -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 		-d '{"username":"eyes","password":"e2eviewer123"}' \
 		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
 }
 retry 60 "viewer login" viewer_login
-curl -fsS -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' \
+curl -fsS -m 15 -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' \
 	|| die "viewer cannot read state"
 code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-local"}' \
 	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
-curl -fsS -b "$WORKDIR/vcookies" -X POST "http://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
+curl -fsS -m 15 -b "$WORKDIR/vcookies" -X POST "http://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
 	|| die "logout failed"
 code=$(http_code -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state")
 [ "$code" = 401 ] || die "logged-out session still valid (got $code)"
@@ -289,11 +289,11 @@ code=$(http_code -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state"
 log "server restart: UI back, stale session refused"
 kc -n stornas-system rollout restart deploy/stornas-server
 kc -n stornas-system rollout status deploy/stornas-server --timeout=180s
-retry 120 "healthz after server restart" curl -fsS "http://127.0.0.1:$UI_PORT/healthz"
+retry 120 "healthz after server restart" curl -fsS -m 15 "http://127.0.0.1:$UI_PORT/healthz"
 stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
 retry 60 "stale session refused" stale_refused
 relogin() {
-	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
 		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
 }
