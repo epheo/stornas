@@ -997,9 +997,8 @@ retry 120 "target md stayed exported through the restart" target_md_on_node2
 # Deletion is a feature: the export, VIP, and mount must leave the host,
 # not just the API. The target path exercises the teardown finalizer
 # (the spec carries the VIP, so it must outlive the agent's teardown).
-log "target delete sheds the export and the VIP"
-retry 60 "appliance API login" api_login
-api DELETE /targets/failover >/dev/null || die "target delete failed"
+log "target delete through the UI sheds the export and the VIP"
+ui_phase delete-target
 target_gone() { ! kc -n stornas-system get target failover >/dev/null 2>&1; }
 retry 180 "target CR gone (finalizer released)" target_gone
 node1_shed_export() { ! v1 sh -c 'targetcli ls /iscsi 1 2>/dev/null | grep -q stornas:failover'; }
@@ -1007,14 +1006,16 @@ node1_shed_vip() { ! v1 sh -c "ip -j addr show to $VIP | grep -q ifname"; }
 retry 120 "node1 shed the deleted export" node1_shed_export
 retry 60 "node1 shed the deleted target's VIP" node1_shed_vip
 
-log "share delete unexports and unmounts"
-api DELETE /shares/failover >/dev/null || die "share delete failed"
+log "share delete through the UI unexports and unmounts"
+ui_phase delete-share
 share_unexported() { ! v1 sh -c 'exportfs | grep -q stornas-system-failover'; }
 share_unmounted() { ! v1 findmnt /var/lib/stornas/shares/stornas-system-failover; }
 retry 120 "NFS export gone from node1" share_unexported
 retry 60 "share mount gone from node1" share_unmounted
 
-log "pool delete refused while volumes remain"
+log "pool delete refused while volumes remain, in the dialog and the API"
+ui_phase delete-pool-refused
+retry 60 "appliance API login" api_login
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
 	"http://$IP1:30080/api/v1/pools/pool-node1")
 [ "$code" = 409 ] || die "pool delete got $code, want 409"

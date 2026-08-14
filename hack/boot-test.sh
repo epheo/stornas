@@ -223,20 +223,10 @@ log "creating the raid1 pool through the UI form"
 ui_phase create-pool
 retry 600 "storage pool Available" pool_available
 
-log "provisioning a PVC through LINSTOR CSI"
+log "creating the volume through the UI form"
+TARGET_VOL=boot-test ui_phase create-volume
+# WaitForFirstConsumer: the consumer pod is scaffolding, not the feature.
 kc apply -f - <<'EOF'
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: boot-test
-  namespace: stornas-system
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: stornas-local
-  resources:
-    requests:
-      storage: 1Gi
----
 apiVersion: v1
 kind: Pod
 metadata:
@@ -275,10 +265,8 @@ code=$(http_code -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/login")
 [ "$code" = 401 ] || die "wrong-password login got $code, want 401"
 
-log "viewer role: read allowed, mutations refused"
-curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d '{"name":"eyes","password":"e2eviewer123","role":"viewer","smb":false}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/users" >/dev/null || die "viewer user create failed"
+log "viewer role: created in the UI, read allowed, mutations refused"
+TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user
 viewer_login() {
 	curl -fsS -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 		-d '{"username":"eyes","password":"e2eviewer123"}' \
@@ -315,16 +303,20 @@ log "UI renders live data in a real browser"
 ui_phase smoke
 log "viewer chrome hides management affordances"
 ui_phase viewer eyes e2eviewer123
+log "user delete revokes the login"
+TARGET_USER=eyes ui_phase delete-user
+eyes_dead() {
+	[ "$(http_code -H 'Content-Type: application/json' \
+		-d '{"username":"eyes","password":"e2eviewer123"}' \
+		"http://127.0.0.1:$UI_PORT/api/v1/login")" = 401 ]
+}
+retry 60 "deleted user cannot log in" eyes_dead
 
-log "snapshot and restore through the appliance API"
-curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d '{"name":"boot-snap","volume":"boot-test"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/snapshots" >/dev/null || die "snapshot create failed"
+log "snapshot and restore through the UI dialogs"
+TARGET_VOL=boot-test TARGET_SNAP=boot-snap ui_phase snapshot-volume
 snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "snapshot ready" snap_ready
-curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d '{"name":"boot-restore","fromSnapshot":"boot-snap"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes" >/dev/null || die "restore create failed"
+TARGET_SNAP=boot-snap TARGET_VOL=boot-restore ui_phase restore-snapshot
 # WaitForFirstConsumer: the restored PVC binds only under a consumer.
 kc apply -f - <<'EOF'
 apiVersion: v1
@@ -350,10 +342,8 @@ EOF
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
-log "resize through the API grows the mounted volume"
-curl -fsS -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
-	-d '{"size":"2Gi"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-test/resize" >/dev/null || die "resize failed"
+log "resize through the UI dialog grows the mounted volume"
+TARGET_VOL=boot-test TARGET_SIZE=2Gi ui_phase resize-volume
 resized() { kc -n stornas-system get pvc boot-test -o jsonpath='{.status.capacity.storage}' | grep -qx 2Gi; }
 retry 300 "PVC capacity grew to 2Gi" resized
 kc -n stornas-system exec boot-test-consumer -- sh -c 'df -k /data | tail -1' \
@@ -382,22 +372,19 @@ kc -n stornas-system exec boot-test-consumer -- cat /data/marker | grep -q durin
 	|| die "marker written on the degraded pool is missing"
 ui_phase online
 
-log "delete flows: snapshot, then the restored volume"
-curl -fsS -b "$WORKDIR/cookies" -X DELETE \
-	"http://127.0.0.1:$UI_PORT/api/v1/snapshots/boot-snap" || die "snapshot delete failed"
+log "delete flows through the UI: snapshot, then the restored volume"
+TARGET_SNAP=boot-snap ui_phase delete-snapshot
 snap_gone() { ! kc -n stornas-system get volumesnapshot boot-snap >/dev/null 2>&1; }
 retry 120 "snapshot gone" snap_gone
 # pvc-protection holds a claimed volume; the consumer goes first.
 kc -n stornas-system delete pod boot-restore-consumer --wait
-curl -fsS -b "$WORKDIR/cookies" -X DELETE \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-restore" || die "volume delete failed"
+TARGET_VOL=boot-restore ui_phase delete-volume
 restore_gone() { ! kc -n stornas-system get pvc boot-restore >/dev/null 2>&1; }
 retry 180 "restored volume gone" restore_gone
 
 log "pool delete through the UI dismantles the host state"
 kc -n stornas-system delete pod boot-test-consumer --wait
-curl -fsS -b "$WORKDIR/cookies" -X DELETE \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes/boot-test" || die "volume delete failed"
+TARGET_VOL=boot-test ui_phase delete-volume
 # PV gone means the CSI finished dropping the LINSTOR resource; only
 # then does the pool's delete guard open.
 pvs_gone() { [ "$(kc get pv --no-headers 2>/dev/null | wc -l)" = 0 ]; }

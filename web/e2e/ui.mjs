@@ -20,6 +20,11 @@ page.on('pageerror', (err) => {
 // The dashboard links to the same pages as the sidebar; scope navigation
 // to the aside so getByRole stays unambiguous.
 const nav = (name) => page.locator('aside').getByRole('link', { name });
+// The volumes page stacks two tables; snapshot rows alias volume names
+// in their volume column, so row lookups must pick the right table.
+const volRow = (name) => page.locator('table').first().locator('tr', { hasText: name });
+const snapRow = (name) => page.locator('table').nth(1).locator('tr', { hasText: name });
+const dialog = () => page.getByRole('dialog');
 
 async function login(user, pw, keepNudge = false) {
 	await page.goto(url);
@@ -112,6 +117,110 @@ const phases = {
 		if (await page.getByText('Missing', { exact: true }).isVisible()) {
 			throw new Error('dead member still shown after replace');
 		}
+	},
+
+	async 'create-volume'() {
+		await goTo('Volumes', 'Volumes');
+		const form = page.locator('section', { hasText: 'New volume' });
+		await form.getByPlaceholder('Name').fill(process.env.TARGET_VOL);
+		await form.getByPlaceholder('Size (10Gi)').fill('1Gi');
+		await form.getByRole('button', { name: 'Create volume' }).click();
+		await volRow(process.env.TARGET_VOL).waitFor();
+	},
+
+	async 'snapshot-volume'() {
+		await goTo('Volumes', 'Volumes');
+		await volRow(process.env.TARGET_VOL).getByRole('button', { name: 'snapshot' }).click();
+		await dialog().locator('#snap-input').fill(process.env.TARGET_SNAP);
+		await dialog().getByRole('button', { name: 'Create snapshot' }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await snapRow(process.env.TARGET_SNAP).waitFor();
+	},
+
+	async 'restore-snapshot'() {
+		await goTo('Volumes', 'Volumes');
+		await snapRow(process.env.TARGET_SNAP).getByRole('button', { name: 'restore' }).click();
+		await dialog().locator('#restore-input').fill(process.env.TARGET_VOL);
+		await dialog().getByRole('button', { name: 'Restore' }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await volRow(process.env.TARGET_VOL).waitFor();
+	},
+
+	async 'resize-volume'() {
+		await goTo('Volumes', 'Volumes');
+		await volRow(process.env.TARGET_VOL).getByRole('button', { name: 'resize' }).click();
+		await dialog().locator('#resize-input').fill(process.env.TARGET_SIZE);
+		await dialog().getByRole('button', { name: 'Resize' }).click();
+		await dialog().waitFor({ state: 'hidden' });
+	},
+
+	async 'delete-snapshot'() {
+		await goTo('Volumes', 'Volumes');
+		await snapRow(process.env.TARGET_SNAP).getByRole('button', { name: 'delete' }).click();
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await snapRow(process.env.TARGET_SNAP).waitFor({ state: 'hidden' });
+	},
+
+	async 'delete-volume'() {
+		const name = process.env.TARGET_VOL;
+		await goTo('Volumes', 'Volumes');
+		await volRow(name).getByRole('button', { name: 'delete' }).click();
+		await dialog().locator('#confirm-delete-input').fill(name);
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await volRow(name).waitFor({ state: 'hidden', timeout: 120_000 });
+	},
+
+	async 'create-user'() {
+		await goTo('Users', 'Users');
+		const form = page.locator('form', { hasText: 'New user' });
+		await form.getByPlaceholder('Username').fill(process.env.TARGET_USER);
+		await form.getByPlaceholder('Password').fill(process.env.TARGET_USER_PW);
+		await form.getByRole('button', { name: 'Create user' }).click();
+		await page.locator('tr', { hasText: process.env.TARGET_USER }).waitFor();
+	},
+
+	async 'delete-user'() {
+		await goTo('Users', 'Users');
+		const row = page.locator('tr', { hasText: process.env.TARGET_USER });
+		await row.getByRole('button', { name: 'delete' }).click();
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await row.waitFor({ state: 'hidden' });
+	},
+
+	async 'delete-target'() {
+		await goTo('Targets', 'iSCSI targets');
+		const row = page.locator('tr', { hasText: 'failover' });
+		await row.getByRole('button', { name: 'delete' }).click();
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		// The teardown finalizer holds the CR until the host sheds the
+		// export and VIP; the row leaves when it releases.
+		await row.waitFor({ state: 'hidden', timeout: 180_000 });
+	},
+
+	async 'delete-share'() {
+		await goTo('Shares', 'Shares');
+		const row = page.locator('tr', { hasText: 'failover' });
+		await row.getByRole('button', { name: 'delete' }).click();
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().waitFor({ state: 'hidden' });
+		await row.waitFor({ state: 'hidden', timeout: 120_000 });
+	},
+
+	async 'delete-pool-refused'() {
+		// The guard must surface in the dialog, not vanish the pool.
+		await goTo('Pools', 'Storage pools');
+		await page
+			.locator('section', { hasText: 'pool-node1' })
+			.getByRole('button', { name: 'delete' })
+			.click();
+		await dialog().locator('#confirm-delete-input').fill('pool-node1');
+		await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+		await dialog().getByText('still backs volumes').waitFor();
+		await dialog().getByRole('button', { name: 'Cancel' }).click();
 	},
 
 	async 'delete-pool'() {
