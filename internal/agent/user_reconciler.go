@@ -30,9 +30,16 @@ type UserAgentReconciler struct {
 func (r *UserAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var user storagev1alpha1.LocalUser
 	if err := r.Get(ctx, req.NamespacedName, &user); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// Deleted: a live passdb entry would keep share logins
+			// working after the user is gone.
+			RemoveSMBUser(ctx, r.Run, req.Name)
+		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !user.Spec.SMB {
+		// Also the smb:true -> false edge; absent entries are quiet.
+		RemoveSMBUser(ctx, r.Run, user.Name)
 		return ctrl.Result{}, nil
 	}
 	var secret corev1.Secret

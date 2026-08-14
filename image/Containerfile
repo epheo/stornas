@@ -19,6 +19,7 @@ RUN dnf install -y \
 	iscsi-initiator-utils \
 	targetcli \
 	samba \
+	samba-client \
 	nfs-utils \
 	/tmp/drbd-rpms/*/kmod-drbd-[0-9]*.rpm \
 	&& dnf clean all \
@@ -72,6 +73,9 @@ RUN touch /etc/samba/stornas-shares.conf \
 		'd /run/drbd/lock 0755 root root -' \
 		> /usr/lib/tmpfiles.d/stornas.conf \
 	&& systemctl enable smb nfs-server
+# Shares live on /var (var_lib_t), which smbd_t cannot touch; the export
+# boolean is the appliance-wide grant, no per-path fcontext to keep in sync.
+RUN setsebool -P samba_export_all_rw on
 
 # Storage kernel modules load at boot, not on demand: the satellite
 # probes DRBD at startup and reports the layer unsupported if absent

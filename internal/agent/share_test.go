@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -222,6 +223,7 @@ func TestApplySambaRendersOnlyLocalSMBShares(t *testing.T) {
 
 func TestEnsureSMBUserFeedsPasswordTwice(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
+		"id -u alice":           {out: "1001"},
 		"smbpasswd -s -a alice": {},
 	}}
 	if err := EnsureSMBUser(context.Background(), f, "alice", "hunter2"); err != nil {
@@ -229,5 +231,34 @@ func TestEnsureSMBUserFeedsPasswordTwice(t *testing.T) {
 	}
 	if f.stdins["smbpasswd -s -a alice"] != "hunter2\nhunter2\n" {
 		t.Fatalf("stdin = %q", f.stdins["smbpasswd -s -a alice"])
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "useradd") {
+			t.Fatalf("useradd ran for an existing account: %v", f.calls)
+		}
+	}
+}
+
+func TestEnsureSMBUserCreatesMissingUnixAccount(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"id -u bob": {err: errExit},
+		"useradd --no-create-home --shell /sbin/nologin bob": {},
+		"smbpasswd -s -a bob":                                {},
+	}}
+	if err := EnsureSMBUser(context.Background(), f, "bob", "hunter22"); err != nil {
+		t.Fatal(err)
+	}
+	if f.stdins["smbpasswd -s -a bob"] != "hunter22\nhunter22\n" {
+		t.Fatalf("stdin = %q", f.stdins["smbpasswd -s -a bob"])
+	}
+}
+
+func TestRemoveSMBUserToleratesAbsentEntry(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"smbpasswd -x ghost": {out: "Failed to find entry for user ghost.", err: errExit},
+	}}
+	RemoveSMBUser(context.Background(), f, "ghost")
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %v", f.calls)
 	}
 }

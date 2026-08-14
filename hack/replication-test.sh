@@ -561,6 +561,24 @@ target_on node1 || die "target moved off node1 after node2 returned"
 share_on node1 || die "share moved off node1 after node2 returned"
 retry 60 "iSCSI still reachable on the VIP" vip_answers
 
+# The appliance API drives every mutation from here on, exactly as the
+# UI does; kubectl stays for cluster-level scaffolding only.
+ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
+api_login() {
+	curl -fsS -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
+		"http://$IP1:30080/api/v1/login" >/dev/null
+}
+api() { # api <method> <path> [json body]
+	if [ $# -ge 3 ]; then
+		curl -fsS -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
+			-d "$3" "http://$IP1:30080/api/v1$2"
+	else
+		curl -fsS -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
+	fi
+}
+retry 60 "appliance API login" api_login
+
 # Real clients against the failed-over exports: reachability proves the
 # wiring, only IO proves the product.
 log "NFS client IO from node2 against the node1 export"
@@ -572,6 +590,28 @@ nfs_io() {
 	v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e"
 }
 retry 120 "NFS client wrote and read back" nfs_io
+
+# SMB rides the same share: user via the appliance API, passdb by the
+# agent, login and IO by a real client. Wrong passwords and deleted
+# users must fail: the passdb is a security boundary.
+log "SMB user through the API, client IO from node2"
+kc -n stornas-system patch share failover --type merge \
+	-p '{"spec":{"smb":{"validUsers":["e2esmb"]}}}'
+api POST /users '{"name":"e2esmb","password":"e2esmbpass123","role":"viewer","smb":true}' >/dev/null \
+	|| die "user create through the API failed"
+smb_io() {
+	v2 sh -c "echo smb-io > /tmp/smb-probe \
+		&& smbclient //$IP1/failover -U e2esmb%e2esmbpass123 \
+			-c 'put /tmp/smb-probe probe.txt; get probe.txt /tmp/smb-back' \
+		&& grep -q smb-io /tmp/smb-back"
+}
+retry 300 "SMB client wrote and read back" smb_io
+v2 sh -c "smbclient //$IP1/failover -U e2esmb%wrongpass -c exit" \
+	&& die "SMB login succeeded with a wrong password"
+api DELETE /users/e2esmb >/dev/null || die "user delete through the API failed"
+smb_revoked() { ! v2 sh -c "smbclient //$IP1/failover -U e2esmb%e2esmbpass123 -c exit"; }
+retry 120 "SMB access revoked after user delete" smb_revoked
+log "ok: SMB IO, wrong-password refusal, and revocation on delete"
 
 log "iSCSI client login with CHAP from node2 via the VIP"
 TIQN=iqn.2026-08.io.stornas:failover
@@ -605,7 +645,6 @@ v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
 
 # Real-browser pass over the two-node state; needs playwright's chromium.
-ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
 ui_phase() { # ui_phase <phase>
 	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
 		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \

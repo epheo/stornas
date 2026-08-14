@@ -149,9 +149,26 @@ func (m *ShareManager) ApplySamba(ctx context.Context, shares []storagev1alpha1.
 	return err
 }
 
-// EnsureSMBUser provisions one user in the host samba passdb. smbpasswd -s
-// is idempotent: re-applying the same password is a no-op in effect.
+// EnsureSMBUser provisions one user in the host samba passdb. The passdb
+// maps to unix accounts, so an absent one is created first, nologin: SMB
+// users never get a shell. smbpasswd -s is idempotent: re-applying the
+// same password is a no-op in effect.
 func EnsureSMBUser(ctx context.Context, run Runner, user, password string) error {
+	if _, err := run.Run(ctx, "id", "-u", user); err != nil {
+		if _, err := run.Run(ctx, "useradd", "--no-create-home", "--shell", "/sbin/nologin", user); err != nil {
+			return err
+		}
+	}
 	_, err := run.RunInput(ctx, password+"\n"+password+"\n", "smbpasswd", "-s", "-a", user)
 	return err
+}
+
+// RemoveSMBUser revokes SMB access. The unix account stays: files keep
+// their owner and a recreate reuses the uid. An absent passdb entry is
+// the converged case (nodes that never provisioned the user).
+func RemoveSMBUser(ctx context.Context, run Runner, user string) {
+	out, err := run.Run(ctx, "smbpasswd", "-x", user)
+	if err != nil && !strings.Contains(err.Error()+string(out), "find") {
+		fmt.Printf("smbpasswd -x %s: %v\n", user, err)
+	}
 }
