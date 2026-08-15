@@ -35,8 +35,15 @@ async function login(user, pw, keepNudge = false) {
 	// The generated password nudges a change on every load; only the
 	// onboarding phase follows it.
 	if (keepNudge) return;
-	const cancel = page.getByRole('button', { name: 'Cancel' });
-	if (await cancel.isVisible()) await cancel.click();
+	// The nudge renders a frame after the dashboard gate opens, so an
+	// instant isVisible() races it and the stranded modal blocks every
+	// later click. The session flag says whether it is coming; when it
+	// is, wait for it properly.
+	const s = await page.request
+		.get(new URL('/api/v1/session', url).href)
+		.then((r) => r.json())
+		.catch(() => null);
+	if (s?.mustChangePassword) await dialog().getByRole('button', { name: 'Cancel' }).click();
 }
 
 async function goTo(link, heading) {
