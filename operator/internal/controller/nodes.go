@@ -21,6 +21,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -44,6 +46,22 @@ func unreadyNodes(ctx context.Context, c client.Client) (map[string]bool, error)
 		}
 	}
 	return down, nil
+}
+
+// nodeGoneOrUnready reports whether name is absent from the cluster or
+// NotReady: either way its agent cannot confirm a teardown, so deletion
+// finalizers must release without one. unreadyNodes cannot answer this:
+// it only maps Nodes that still exist, and a decommissioned node would
+// hold a finalizer forever.
+func nodeGoneOrUnready(ctx context.Context, c client.Client, name string) (bool, error) {
+	var n corev1.Node
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, &n); err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return !nodeReady(&n), nil
 }
 
 func nodeReady(n *corev1.Node) bool {

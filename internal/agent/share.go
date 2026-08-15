@@ -140,7 +140,9 @@ func (m *ShareManager) ApplySamba(ctx context.Context, shares []storagev1alpha1.
 	})
 	var b strings.Builder
 	for _, s := range shares {
-		if s.Spec.SMB == nil || s.Status.Node != m.Node {
+		// A deleting share lingers in the list until its finalizer
+		// releases; regenerating it here would undo its teardown.
+		if s.Spec.SMB == nil || s.Status.Node != m.Node || s.DeletionTimestamp != nil {
 			continue
 		}
 		name := s.Spec.SMB.Name

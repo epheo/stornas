@@ -16,10 +16,21 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/epheo/stornas/internal/model"
+)
+
+// Keepalive bounds how long a half-open connection (sleeping laptop,
+// vanished NAT mapping) can pin its goroutines and hub entry: without a
+// read deadline ReadMessage blocks forever and the conn leaks for the
+// process lifetime. Pings must outpace the deadline that pongs refresh.
+const (
+	pongWait   = 60 * time.Second
+	pingPeriod = 50 * time.Second
+	writeWait  = 10 * time.Second
 )
 
 // Hub is the central snapshot reconciler. One Hub per process.
@@ -149,11 +160,21 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := &conn{out: make(chan []byte, 1), quit: make(chan struct{})}
 	h.add(c)
 	go func() {
+		// A write error closes the socket, which unblocks the read loop
+		// below into remove; that is the only teardown path this side owns.
 		defer func() { _ = ws.Close() }()
+		ping := time.NewTicker(pingPeriod)
+		defer ping.Stop()
 		for {
 			select {
 			case js := <-c.out:
+				_ = ws.SetWriteDeadline(time.Now().Add(writeWait))
 				if err := ws.WriteMessage(websocket.TextMessage, js); err != nil {
+					return
+				}
+			case <-ping.C:
+				_ = ws.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
 			case <-c.quit:
@@ -161,6 +182,10 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+	_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(pongWait))
+	})
 	for {
 		if _, _, err := ws.ReadMessage(); err != nil {
 			break

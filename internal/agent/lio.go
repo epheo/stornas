@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -74,9 +75,15 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 			return err
 		}
 		if cred, ok := chap[ini.IQN]; ok {
+			// targetcli takes the password only as an argument, so a
+			// failure echoes it back through hostExec's error; scrub it
+			// before it can reach Target status, events, or logs. The
+			// transient argv exposure is accepted: the appliance grants
+			// no interactive shells (SMB users are nologin), and root
+			// reads the same secret from configfs anyway.
 			if _, err := m.Run.Run(ctx, "targetcli", "/iscsi/"+iqn+"/tpg1/acls/"+ini.IQN,
 				"set", "auth", "userid="+cred.User, "password="+cred.Password); err != nil {
-				return err
+				return errors.New(strings.ReplaceAll(err.Error(), cred.Password, "<redacted>"))
 			}
 		}
 		if ini.ChapSecretRef != "" {

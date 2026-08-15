@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -113,13 +114,24 @@ func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 	}
 	node, _, _ := unstructured.NestedString(u.Object, "spec", "node")
 	if a.Linstor != nil {
-		if view, verr := a.Linstor.Resources.GetResourceView(r.Context()); verr == nil {
-			for _, res := range view {
-				if res.NodeName == node {
-					http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
-					return
-				}
+		// Fail closed: without the view we cannot prove the pool is idle,
+		// and deleting blind is the data-loss path this guard exists for.
+		view, verr := a.Linstor.Resources.GetResourceView(r.Context())
+		if verr != nil {
+			http.Error(w, "cannot verify the pool is unused, linstor: "+verr.Error(), http.StatusBadGateway)
+			return
+		}
+		for _, res := range view {
+			if res.NodeName != node {
+				continue
 			}
+			// A diskless replica (tiebreaker) lives in the diskless pool
+			// and holds no data here.
+			if slices.Contains(res.Flags, "DISKLESS") {
+				continue
+			}
+			http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
+			return
 		}
 	}
 	derr := a.Dyn.Resource(poolGVR).Delete(r.Context(), name, metav1.DeleteOptions{})
@@ -195,13 +207,23 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		// falling to the cluster default would silently downgrade a
 		// replicated volume to local, or mount a block image as a fs.
 		if src, _, _ := unstructured.NestedString(snap.Object, "spec", "source", "persistentVolumeClaimName"); src != "" {
-			if pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), src, metav1.GetOptions{}); err == nil {
+			pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), src, metav1.GetOptions{})
+			switch {
+			case err == nil:
 				if req.StorageClass == "" && pvc.Spec.StorageClassName != nil {
 					req.StorageClass = *pvc.Spec.StorageClassName
 				}
 				if pvc.Spec.VolumeMode != nil && *pvc.Spec.VolumeMode == corev1.PersistentVolumeBlock {
 					req.Block = true
 				}
+			case req.StorageClass == "":
+				// Fail closed: a source gone or unreadable means the
+				// inheritance cannot happen, and proceeding is exactly the
+				// silent downgrade above. An explicit class is the caller
+				// taking that responsibility, block flag included.
+				http.Error(w, "snapshot source PVC "+src+" is not readable ("+err.Error()+
+					"); pass storageClass (and block) explicitly", http.StatusConflict)
+				return
 			}
 		}
 	}

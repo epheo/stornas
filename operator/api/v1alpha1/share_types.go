@@ -23,19 +23,31 @@ import (
 // NFSExport configures the kernel nfsd export of a Share.
 type NFSExport struct {
 	// clients in exports(5) form, e.g. "192.168.1.0/24(rw,no_root_squash)".
+	// The pattern is a security boundary, not linting: entries land
+	// verbatim in the host's exports file, and whitespace would smuggle
+	// in extra exports (the same rule the UI API enforces).
 	// +required
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +kubebuilder:validation:items:Pattern=`^[^\s()]+(\([^\s()]*\))?$`
 	Clients []string `json:"clients"`
 }
 
 // SMBExport configures the samba share of a Share.
 type SMBExport struct {
-	// name of the SMB share; defaults to the Share's name.
+	// name of the SMB share; defaults to the Share's name. The pattern
+	// is a security boundary: the name lands verbatim in smb.conf, where
+	// "]" or a newline would open a new section.
 	// +optional
+	// +kubebuilder:validation:MaxLength=80
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
 	Name string `json:"name,omitempty"`
 
-	// validUsers references LocalUser names with smb enabled.
+	// validUsers references LocalUser names with smb enabled; object-name
+	// shaped, so a crafted entry cannot extend the smb.conf line.
 	// +optional
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`
 	ValidUsers []string `json:"validUsers,omitempty"`
 }
 
@@ -67,8 +79,10 @@ type ShareStatus struct {
 	Node string `json:"node,omitempty"`
 	// +optional
 	Device string `json:"device,omitempty"`
+	// Removed is the agent's teardown confirmation on a deleting share;
+	// it releases the operator's finalizer.
 	// +optional
-	// +kubebuilder:validation:Enum=Pending;Exported;Failed
+	// +kubebuilder:validation:Enum=Pending;Exported;Failed;Removed
 	State string `json:"state,omitempty"`
 }
 

@@ -213,6 +213,54 @@ var _ = Describe("Share Controller", func() {
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
 	})
 
+	It("holds deletion until the serving agent confirms teardown", func() {
+		setNode(ctx, "node-a", true)
+		Expect(k8sClient.Create(ctx, newShare("finalized", "claim-finalized"))).To(Succeed())
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		key := types.NamespacedName{Namespace: "default", Name: "finalized"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		got := &storagev1alpha1.Share{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Finalizers).To(ContainElement(teardownFinalizer))
+		got.Status.Node = "node-a"
+		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+
+		By("the agent confirms with State Removed")
+		got.Status.State = "Removed"
+		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, key, got)).To(HaveOccurred())
+	})
+
+	It("releases deletion when the serving node object is gone", func() {
+		Expect(k8sClient.Create(ctx, newShare("orphaned", "claim-orphaned"))).To(Succeed())
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		key := types.NamespacedName{Namespace: "default", Name: "orphaned"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		got := &storagev1alpha1.Share{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		// A node that never existed stands in for a decommissioned one:
+		// no agent can ever confirm, so the finalizer must release alone.
+		got.Status.Node = "node-decommissioned"
+		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
+
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, key, got)).To(HaveOccurred())
+	})
+
 	It("rejects claims not backed by LINSTOR CSI", func() {
 		pv := &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{Name: "pv-hostpath"},

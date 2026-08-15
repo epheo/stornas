@@ -204,6 +204,12 @@ func TestApplySambaRendersOnlyLocalSMBShares(t *testing.T) {
 		"smbcontrol all reload-config": {},
 	}}
 	m := &ShareManager{Run: f, Node: "node-a", Root: root}
+	// A deleting share lingers in the list until its finalizer releases;
+	// rendering it would undo its teardown.
+	now := metav1.Now()
+	deleting := share("default", "leaving", "node-a", "/dev/drbd1003", nil,
+		&storagev1alpha1.SMBExport{})
+	deleting.DeletionTimestamp = &now
 	shares := []storagev1alpha1.Share{
 		share("default", "media", "node-a", "/dev/drbd1000", nil,
 			&storagev1alpha1.SMBExport{ValidUsers: []string{"alice"}}),
@@ -211,6 +217,7 @@ func TestApplySambaRendersOnlyLocalSMBShares(t *testing.T) {
 			&storagev1alpha1.SMBExport{}),
 		share("default", "nfsonly", "node-a", "/dev/drbd1002",
 			&storagev1alpha1.NFSExport{Clients: []string{"*"}}, nil),
+		deleting,
 	}
 
 	if err := m.ApplySamba(context.Background(), shares); err != nil {

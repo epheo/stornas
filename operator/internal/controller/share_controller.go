@@ -29,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -65,6 +66,20 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var share storagev1alpha1.Share
 	if err := r.Get(ctx, req.NamespacedName, &share); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !share.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &share)
+	}
+	// Same handshake as Target: without the finalizer a delete while the
+	// serving agent is down vanishes unseen, and the export stays served
+	// forever; revocation is a security boundary.
+	if controllerutil.AddFinalizer(&share, teardownFinalizer) {
+		if err := r.Update(ctx, &share); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, err
+		}
 	}
 
 	available := metav1.Condition{
@@ -134,6 +149,35 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 	return res, nil
+}
+
+// reconcileDelete releases the finalizer once the serving agent confirms
+// teardown (State Removed), placement never happened, or the serving node
+// is gone or unready: a dead node cannot confirm, and its exports died
+// with it.
+func (r *ShareReconciler) reconcileDelete(ctx context.Context, share *storagev1alpha1.Share) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(share, teardownFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	done := share.Status.Node == "" || share.Status.State == "Removed"
+	if !done {
+		gone, err := nodeGoneOrUnready(ctx, r.Client, share.Status.Node)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		done = gone
+	}
+	if !done {
+		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+	}
+	controllerutil.RemoveFinalizer(share, teardownFinalizer)
+	if err := r.Update(ctx, share); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	return ctrl.Result{}, nil
 }
 
 // allShares re-reconciles every share on a node readiness flip; the fleet

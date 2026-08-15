@@ -190,11 +190,11 @@ func (r *TargetReconciler) reconcileDelete(ctx context.Context, target *storagev
 	}
 	done := target.Status.ActiveNode == "" || target.Status.State == "Removed"
 	if !done {
-		unready, err := unreadyNodes(ctx, r.Client)
+		gone, err := nodeGoneOrUnready(ctx, r.Client, target.Status.ActiveNode)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		done = unready[target.Status.ActiveNode]
+		done = gone
 	}
 	if !done {
 		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil

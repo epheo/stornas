@@ -32,6 +32,23 @@ func (r *ShareAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if share.DeletionTimestamp != nil {
+		// The operator's finalizer holds the CR until this node confirms
+		// with State Removed; the NotFound path above stays as backstop
+		// for CRs deleted before the finalizer existed.
+		if r.Shares.Present(share.Namespace, share.Name) {
+			r.Shares.RemoveShare(ctx, share.Namespace, share.Name)
+			_ = r.applySamba(ctx)
+		}
+		if share.Status.Node != r.Node || share.Status.State == "Removed" {
+			return ctrl.Result{}, nil
+		}
+		share.Status.State = "Removed"
+		if err := r.Status().Update(ctx, &share); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		return ctrl.Result{}, nil
+	}
 	if share.Status.Node != r.Node || share.Status.Device == "" {
 		if r.Shares.Present(share.Namespace, share.Name) {
 			r.Shares.RemoveShare(ctx, share.Namespace, share.Name)

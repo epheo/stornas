@@ -199,6 +199,35 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	}
 }
 
+// A restore whose source PVC is gone must fail closed: guessing means
+// the cluster default class and fs mode, the silent downgrade the
+// inheritance exists to prevent. An explicit class opts out.
+func TestRestoreFailsClosedWithoutSourcePVC(t *testing.T) {
+	a := newAPI()
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
+	doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, nil)
+	got, err := a.Dyn.Resource(snapGVR).Namespace("stornas-system").Get(context.Background(), "s1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unstructured.SetNestedField(got.Object, "1Gi", "status", "restoreSize")
+	if _, err := a.Dyn.Resource(snapGVR).Namespace("stornas-system").Update(context.Background(), got, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CS.CoreV1().PersistentVolumeClaims("stornas-system").Delete(context.Background(), "media", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, nil)
+	if w.Code != 409 {
+		t.Fatalf("expected 409 without source PVC, got %d: %s", w.Code, w.Body.String())
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1","storageClass":"stornas-replicated"}`, nil)
+	if w.Code != 201 {
+		t.Fatalf("explicit class must pass, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUserLifecycle(t *testing.T) {
 	a := newAPI()
 	w := doReq(t, a.CreateUser, "POST", "/api/v1/users", `{"name":"alice","password":"s3cretpass","role":"viewer","smb":true}`, nil)

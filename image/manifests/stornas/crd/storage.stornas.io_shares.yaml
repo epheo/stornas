@@ -56,8 +56,14 @@ spec:
                 description: NFSExport configures the kernel nfsd export of a Share.
                 properties:
                   clients:
-                    description: clients in exports(5) form, e.g. "192.168.1.0/24(rw,no_root_squash)".
+                    description: |-
+                      clients in exports(5) form, e.g. "192.168.1.0/24(rw,no_root_squash)".
+                      The pattern is a security boundary, not linting: entries land
+                      verbatim in the host's exports file, and whitespace would smuggle
+                      in extra exports (the same rule the UI API enforces).
                     items:
+                      maxLength: 256
+                      pattern: ^[^\s()]+(\([^\s()]*\))?$
                       type: string
                     minItems: 1
                     type: array
@@ -68,11 +74,20 @@ spec:
                 description: SMBExport configures the samba share of a Share.
                 properties:
                   name:
-                    description: name of the SMB share; defaults to the Share's name.
+                    description: |-
+                      name of the SMB share; defaults to the Share's name. The pattern
+                      is a security boundary: the name lands verbatim in smb.conf, where
+                      "]" or a newline would open a new section.
+                    maxLength: 80
+                    pattern: ^[A-Za-z0-9._-]+$
                     type: string
                   validUsers:
-                    description: validUsers references LocalUser names with smb enabled.
+                    description: |-
+                      validUsers references LocalUser names with smb enabled; object-name
+                      shaped, so a crafted entry cannot extend the smb.conf line.
                     items:
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$
                       type: string
                     type: array
                 type: object
@@ -153,10 +168,14 @@ spec:
                   block device the agent mounts there. The agent only executes.
                 type: string
               state:
+                description: |-
+                  Removed is the agent's teardown confirmation on a deleting share;
+                  it releases the operator's finalizer.
                 enum:
                 - Pending
                 - Exported
                 - Failed
+                - Removed
                 type: string
             type: object
         required:
