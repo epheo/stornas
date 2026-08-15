@@ -535,6 +535,51 @@ EOF
 local_bound() { kc -n stornas-system get pvc local-n2 -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "local volume Bound on node2" local_bound
 
+# The reattach row of the matrix (the hyperconverged story): a consumer
+# on the doomed node must come back on the survivor with its data.
+log "reattach setup: replicated PVC with its consumer on node2"
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reattach
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reattach-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: reattach
+EOF
+reattach_up() { kc -n stornas-system get pod reattach-consumer -o jsonpath='{.status.phase}' | grep -q Running; }
+retry 600 "reattach consumer Running on node2" reattach_up
+kc -n stornas-system exec reattach-consumer -- sh -c 'echo before-node-loss > /data/marker && sync'
+
 steered() { # steered <pvc>
 	h=$(kc -n stornas-system get pvc "$1" -o jsonpath='{.spec.volumeName}' 2>/dev/null) || return 1
 	[ -n "$h" ] || return 1
@@ -593,6 +638,48 @@ retry 60 "NFS export live on node1" share_served_node1
 
 log "UI states the dead node and its stranded local volume"
 ui_phase node-down
+
+# The k8s non-graceful shutdown flow: the pod object on the dead node is
+# force-removed and the out-of-service taint releases its attachments;
+# only then can the survivor mount the replicated volume.
+log "consumer reattaches on the survivor with its data"
+kc -n stornas-system delete pod reattach-consumer --force --grace-period=0 --wait=false
+kc taint node node2 node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reattach-consumer2
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node1
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: reattach
+EOF
+reattach2_up() { kc -n stornas-system get pod reattach-consumer2 -o jsonpath='{.status.phase}' | grep -q Running; }
+retry 600 "consumer reattached on node1" reattach2_up
+kc -n stornas-system exec reattach-consumer2 -- grep -q before-node-loss /data/marker \
+	|| die "data missing after the reattach"
+kc -n stornas-system exec reattach-consumer2 -- sh -c 'echo after-reattach >> /data/marker && sync' \
+	|| die "reattached volume refuses writes"
+# The taint is the admin's statement that the node is down; it must go
+# before the node returns or it evicts everything that lands there.
+kc taint node node2 node.kubernetes.io/out-of-service-
 
 log "restarting node2: replica must resync to UpToDate"
 boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2
@@ -724,14 +811,50 @@ v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.
 	&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login" \
 	&& die "retired CHAP secret still accepted"
 
-log "resize and snapshot on the replicated volume"
-retry 60 "appliance API login" api_login
-api POST /volumes/repl-test/resize '{"size":"2Gi"}' >/dev/null || die "replicated resize failed"
+log "resize, snapshot, restore on the replicated volume through the UI dialogs"
+TARGET_VOL=repl-test TARGET_SIZE=2Gi ui_phase resize-volume
 repl_resized() { kc -n stornas-system get pvc repl-test -o jsonpath='{.status.capacity.storage}' | grep -qx 2Gi; }
 retry 300 "replicated PVC grew to 2Gi" repl_resized
-api POST /snapshots '{"name":"repl-snap","volume":"repl-test"}' >/dev/null || die "replicated snapshot failed"
+kc -n stornas-system exec repl-consumer -- sh -c 'df -k /data | tail -1' \
+	| awk '{exit ($2 > 1900000) ? 0 : 1}' || die "filesystem did not grow with the replicated volume"
+TARGET_VOL=repl-test TARGET_SNAP=repl-snap ui_phase snapshot-volume
 repl_snap_ready() { kc -n stornas-system get volumesnapshot repl-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "replicated snapshot ready" repl_snap_ready
+TARGET_SNAP=repl-snap TARGET_VOL=repl-restore ui_phase restore-snapshot
+# WaitForFirstConsumer: the restored PVC binds only under a consumer.
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: repl-restore-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node1
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: v
+          mountPath: /data
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: repl-restore
+EOF
+restore_bound() { kc -n stornas-system get pvc repl-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 300 "restored volume Bound" restore_bound
+# The restore must stay replicated, not fall to the default local class.
+restore_class=$(kc -n stornas-system get pvc repl-restore -o jsonpath='{.spec.storageClassName}')
+[ "$restore_class" = stornas-replicated ] || die "restore landed on class $restore_class"
+kc -n stornas-system exec repl-restore-consumer -- grep -q during-failover /data/marker \
+	|| die "restored volume misses the snapshot content"
 
 log "UI shows the failed-over placements in a real browser"
 ui_phase repl-pages
@@ -1020,6 +1143,23 @@ code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DEL
 	"http://$IP1:30080/api/v1/pools/pool-node1")
 [ "$code" = 409 ] || die "pool delete got $code, want 409"
 kc get storagepool pool-node1 >/dev/null 2>&1 || die "guarded pool was deleted anyway"
+
+# Replicated lifecycle closes where it opened: deletion must reach the
+# hosts, dropping the DRBD resource on both, not just the PVC.
+log "replicated snapshot and volumes deleted through the UI dialogs"
+TARGET_SNAP=repl-snap ui_phase delete-snapshot
+repl_snap_gone() { ! kc -n stornas-system get volumesnapshot repl-snap >/dev/null 2>&1; }
+retry 120 "replicated snapshot gone" repl_snap_gone
+# pvc-protection holds claimed volumes; the consumers go first.
+kc -n stornas-system delete pod repl-restore-consumer repl-consumer --wait
+TARGET_VOL=repl-restore ui_phase delete-volume
+TARGET_VOL=repl-test ui_phase delete-volume
+pvc_gone() { ! kc -n stornas-system get pvc "$1" >/dev/null 2>&1; }
+retry 180 "repl-restore PVC gone" pvc_gone repl-restore
+retry 180 "repl-test PVC gone" pvc_gone repl-test
+res_gone() { ! $1 sh -c "drbdsetup status $REPL_RES" >/dev/null 2>&1; }
+retry 180 "DRBD resource gone from node1" res_gone v1
+retry 180 "DRBD resource gone from node2" res_gone v2
 
 # Run the packaged check scripts directly (distro multinode-test shape):
 # exactly what greenboot executes, and the stornas check must pass on

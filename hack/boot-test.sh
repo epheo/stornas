@@ -5,7 +5,7 @@
 # scratch disks, ssh rides a user-net hostfwd, and the console log is the
 # failure artifact. On top of the distro's boot checks this validates the
 # storage stack: drbd kmod, piraeus + LINSTOR, a raid1 StoragePool (md
-# below the PV, DESIGN.md) backing LINSTOR CSI, a PVC and snapshot
+# below the PV, README architecture) backing LINSTOR CSI, a PVC and snapshot
 # through it, and the UI in a real browser. The disk failure matrix row
 # runs on the same pool: a member hot-unplugged over QMP must show
 # Degraded in the UI and the dialog-driven replace must rebuild onto the
@@ -13,7 +13,7 @@
 # replace flow); raid IO semantics belong to the kernel.
 #
 # The guest boots with restrict=on by default: no outbound at all, only
-# the hostfwd ports in (DESIGN.md air gap; the distro embeds the full
+# the hostfwd ports in (README air gap; the distro embeds the full
 # MicroShift payload since 2026-08). AIRGAP=0 reopens outbound for
 # debugging. The pull assert stays unconditional: no stornas, piraeus,
 # or sig-storage image may be fetched at runtime.
@@ -348,6 +348,46 @@ resized() { kc -n stornas-system get pvc boot-test -o jsonpath='{.status.capacit
 retry 300 "PVC capacity grew to 2Gi" resized
 kc -n stornas-system exec boot-test-consumer -- sh -c 'df -k /data | tail -1' \
 	| awk '{exit ($2 > 1900000) ? 0 : 1}' || die "filesystem did not grow with the volume"
+
+log "block-mode volume through the UI form, raw IO from a consumer"
+TARGET_VOL=boot-blk ui_phase create-volume-block
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: boot-blk-consumer
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "3600"]
+      securityContext:
+        runAsUser: 0
+      volumeDevices:
+        - name: v
+          devicePath: /dev/blk
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: boot-blk
+EOF
+blk_bound() { kc -n stornas-system get pvc boot-blk -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 600 "block PVC Bound" blk_bound
+blk_mode=$(kc -n stornas-system get pvc boot-blk -o jsonpath='{.spec.volumeMode}')
+[ "$blk_mode" = Block ] || die "UI-created volume has mode $blk_mode, want Block"
+kc -n stornas-system exec boot-blk-consumer -- sh -c \
+	'dd if=/dev/urandom of=/tmp/probe bs=4096 count=4 2>/dev/null \
+	&& dd if=/tmp/probe of=/dev/blk bs=4096 count=4 oflag=direct 2>/dev/null \
+	&& dd if=/dev/blk bs=4096 count=4 iflag=direct 2>/dev/null | cmp - /tmp/probe' \
+	|| die "raw block IO mismatch on the UI-created volume"
+kc -n stornas-system delete pod boot-blk-consumer --wait
+TARGET_VOL=boot-blk ui_phase delete-volume
+blk_gone() { ! kc -n stornas-system get pvc boot-blk >/dev/null 2>&1; }
+retry 180 "block volume gone" blk_gone
 
 log "pulling a raid1 member: status must degrade and name the victim"
 qmp '{"execute": "device_del", "arguments": {"id": "disk-b"}}' || die "device_del refused"

@@ -128,6 +128,19 @@ const phases = {
 		await volRow(process.env.TARGET_VOL).waitFor();
 	},
 
+	async 'create-volume-block'() {
+		// Block mode is a create-time choice; the row must say so.
+		await goTo('Volumes', 'Volumes');
+		const form = page.locator('section', { hasText: 'New volume' });
+		await form.getByPlaceholder('Name').fill(process.env.TARGET_VOL);
+		await form.getByPlaceholder('Size (10Gi)').fill('1Gi');
+		await form.locator('label', { hasText: 'Block mode' }).locator('input').check();
+		await form.getByRole('button', { name: 'Create volume' }).click();
+		const row = volRow(process.env.TARGET_VOL);
+		await row.waitFor();
+		await row.getByText('Block', { exact: true }).waitFor();
+	},
+
 	async 'snapshot-volume'() {
 		await goTo('Volumes', 'Volumes');
 		await volRow(process.env.TARGET_VOL).getByRole('button', { name: 'snapshot' }).click();
