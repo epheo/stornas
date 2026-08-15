@@ -382,12 +382,14 @@ blk_up() { kc -n stornas-system get pod boot-blk-consumer -o jsonpath='{.status.
 retry 300 "block consumer Running" blk_up
 blk_mode=$(kc -n stornas-system get pvc boot-blk -o jsonpath='{.spec.volumeMode}')
 [ "$blk_mode" = Block ] || die "UI-created volume has mode $blk_mode, want Block"
-# The image carries coreutils but not diffutils; the round trip asserts
-# through a marker instead of cmp.
+# The image carries coreutils but not diffutils: sha256sum stands in for
+# cmp, so the whole padded sector must match, not just a marker substring.
+# status=none keeps dd errors on stderr for the CI log.
 kc -n stornas-system exec boot-blk-consumer -- sh -c \
-	'printf blockprobe > /tmp/probe \
-	&& dd if=/tmp/probe of=/dev/blk bs=512 count=1 conv=sync oflag=direct 2>/dev/null \
-	&& dd if=/dev/blk bs=512 count=1 iflag=direct 2>/dev/null | grep -aq blockprobe' \
+	'want=$(printf blockprobe | dd bs=512 count=1 conv=sync status=none | sha256sum) \
+	&& printf blockprobe | dd of=/dev/blk bs=512 count=1 conv=sync oflag=direct status=none \
+	&& got=$(dd if=/dev/blk bs=512 count=1 iflag=direct status=none | sha256sum) \
+	&& [ "$want" = "$got" ]' \
 	|| die "raw block IO round trip failed on the UI-created volume"
 kc -n stornas-system delete pod boot-blk-consumer --wait
 TARGET_VOL=boot-blk ui_phase delete-volume
