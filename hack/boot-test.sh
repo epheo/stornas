@@ -377,6 +377,9 @@ spec:
 EOF
 blk_bound() { kc -n stornas-system get pvc boot-blk -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 600 "block PVC Bound" blk_bound
+# Bound is the claim, not the pod: exec needs the container up.
+blk_up() { kc -n stornas-system get pod boot-blk-consumer -o jsonpath='{.status.phase}' | grep -q Running; }
+retry 300 "block consumer Running" blk_up
 blk_mode=$(kc -n stornas-system get pvc boot-blk -o jsonpath='{.spec.volumeMode}')
 [ "$blk_mode" = Block ] || die "UI-created volume has mode $blk_mode, want Block"
 kc -n stornas-system exec boot-blk-consumer -- sh -c \

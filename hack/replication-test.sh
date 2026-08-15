@@ -850,6 +850,9 @@ spec:
 EOF
 restore_bound() { kc -n stornas-system get pvc repl-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
+# Bound is the claim, not the pod: exec needs the container up.
+restore_up() { kc -n stornas-system get pod repl-restore-consumer -o jsonpath='{.status.phase}' | grep -q Running; }
+retry 300 "restore consumer Running" restore_up
 # The restore must stay replicated, not fall to the default local class.
 restore_class=$(kc -n stornas-system get pvc repl-restore -o jsonpath='{.spec.storageClassName}')
 [ "$restore_class" = stornas-replicated ] || die "restore landed on class $restore_class"
