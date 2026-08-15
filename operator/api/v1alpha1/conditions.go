@@ -28,6 +28,10 @@ const (
 	// state (VG, array, signatures) is gone; it releases the operator's
 	// finalizer.
 	ConditionTornDown = "TornDown"
+	// Deregistered is the operator's clearance for the host wipe: set only
+	// once LINSTOR holds no resources on the pool, so the agent never
+	// wipes a VG that still backs volumes.
+	ConditionDeregistered = "Deregistered"
 )
 
 const (

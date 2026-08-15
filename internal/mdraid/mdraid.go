@@ -162,14 +162,42 @@ func (m *MD) Stop(ctx context.Context, dev string) error {
 }
 
 // ZeroSuperblock erases the member signature so the disk reads unclaimed
-// again; a member without one is the converged case.
+// again; a member without one, or one whose disk vanished mid-teardown,
+// is the converged case.
 func (m *MD) ZeroSuperblock(ctx context.Context, member string) error {
 	out, err := m.run.Run(ctx, "mdadm", "--zero-superblock", member)
 	if err != nil && (strings.Contains(string(out), "Unrecognised") ||
-		strings.Contains(string(out), "No such file")) {
+		strings.Contains(string(out), "No such file") ||
+		strings.Contains(string(out), "Couldn't open")) {
 		return nil
 	}
 	return err
+}
+
+// ExamineName reads the array name from a member's superblock, "" when
+// the device carries none. mdadm prints it as "host:name (local to
+// host)"; only the name part identifies the array.
+func (m *MD) ExamineName(ctx context.Context, member string) string {
+	out, err := m.run.Run(ctx, "mdadm", "--examine", member)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(k) != "Name" {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(v))
+		if len(fields) == 0 {
+			return ""
+		}
+		name := fields[0]
+		if i := strings.LastIndex(name, ":"); i >= 0 {
+			name = name[i+1:]
+		}
+		return name
+	}
+	return ""
 }
 
 // Members lists kernel paths of current member disks straight from

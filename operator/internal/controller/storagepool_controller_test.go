@@ -158,9 +158,12 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
 		Expect(reg.deletes).To(Equal([]string{"node-a"}))
 
-		By("the CR held until the agent confirms the wipe")
+		By("clearing the agent's wipe only after deregistration")
 		got := &storagev1alpha1.StoragePool{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, got)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(got.Status.Conditions, storagev1alpha1.ConditionDeregistered)).To(BeTrue())
+
+		By("the CR held until the agent confirms the wipe")
 		meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
 			Type:   storagev1alpha1.ConditionTornDown,
 			Status: metav1.ConditionTrue,

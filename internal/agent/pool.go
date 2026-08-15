@@ -47,7 +47,10 @@ func EnsurePool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1a
 // TeardownPool wipes what EnsurePool built so the disks read unclaimed
 // again: VG (with every LV), then the array and member signatures or
 // the PV labels. Every step tolerates absence; teardown re-runs until
-// the operator sees TornDown.
+// the operator sees TornDown. The spec names the candidates, but only
+// devices observed to belong to this pool are wiped: a pulled disk has
+// nothing to erase, and a foreign array member or another VG's PV
+// (recovery disk, spec typo) is not ours to destroy.
 func TeardownPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1alpha1.StoragePool) error {
 	if err := l.VGRemove(ctx, pool.VGName()); err != nil {
 		return err
@@ -57,13 +60,25 @@ func TeardownPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev
 			return err
 		}
 		for _, dev := range pool.Spec.Devices {
-			if err := md.ZeroSuperblock(ctx, l.ResolvePath(ctx, dev)); err != nil {
+			path := l.ResolvePath(ctx, dev)
+			if !l.IsBlockDev(ctx, path) || md.ExamineName(ctx, path) != "stornas-"+pool.Name {
+				continue
+			}
+			if err := md.ZeroSuperblock(ctx, path); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	for _, dev := range pool.Spec.Devices {
+		if !l.IsBlockDev(ctx, dev) {
+			continue
+		}
+		// After vgremove our members are orphan labels; a PV claimed by
+		// any other VG belongs to someone else.
+		if vg, isPV := l.PVVG(ctx, dev); !isPV || (vg != "" && vg != pool.VGName()) {
+			continue
+		}
 		if err := l.PVWipe(ctx, dev); err != nil {
 			return err
 		}
@@ -341,6 +356,12 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// The operator's finalizer holds the CR until TornDown: the spec
 		// (devices, raid level) is the only map of what to wipe.
 		if meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionTornDown) {
+			return ctrl.Result{}, nil
+		}
+		// Wipe only on the operator's Deregistered clearance: before it,
+		// LINSTOR may still back live volumes with this VG. The operator's
+		// status write triggers the next pass; no requeue needed.
+		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionDeregistered) {
 			return ctrl.Result{}, nil
 		}
 		if err := TeardownPool(ctx, r.LVM, r.MD, &pool); err != nil {

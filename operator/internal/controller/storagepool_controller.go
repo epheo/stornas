@@ -77,15 +77,33 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 			}
 		}
+		// Deregistered is the agent's go-ahead to wipe: until it is set,
+		// LINSTOR may still back live volumes with this VG, and the agent
+		// wiping concurrently would destroy them.
+		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionDeregistered) {
+			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+				Type:               storagev1alpha1.ConditionDeregistered,
+				Status:             metav1.ConditionTrue,
+				Reason:             storagev1alpha1.ReasonReady,
+				ObservedGeneration: pool.Generation,
+			})
+			if err := r.Status().Update(ctx, &pool); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+			return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+		}
 		// The agent wipes the host next (the spec is the map of what to
 		// wipe) and confirms with TornDown. A dead node cannot confirm,
 		// and its host state is unreachable anyway.
 		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionTornDown) {
-			unready, err := unreadyNodes(ctx, r.Client)
+			gone, err := nodeGoneOrUnready(ctx, r.Client, pool.Spec.Node)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			if !unready[pool.Spec.Node] {
+			if !gone {
 				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 			}
 		}

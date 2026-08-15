@@ -118,13 +118,25 @@ func (l *LVM) VGRemove(ctx context.Context, vg string) error {
 	return err
 }
 
-// PVWipe clears the PV label after vgremove; "No PV label" means done.
+// PVWipe clears the PV label after vgremove; "No PV label" means done,
+// and a device gone from the host has nothing left to wipe.
 func (l *LVM) PVWipe(ctx context.Context, dev string) error {
 	out, err := l.run.Run(ctx, "pvremove", "-ff", "-y", dev)
-	if err != nil && strings.Contains(string(out), "o PV label") {
+	if err != nil && (strings.Contains(string(out), "o PV label") ||
+		strings.Contains(string(out), "not found")) {
 		return nil
 	}
 	return err
+}
+
+// PVVG reports whether dev carries a PV label and which VG claims it;
+// "" with true means an orphan label (its VG is already gone).
+func (l *LVM) PVVG(ctx context.Context, dev string) (string, bool) {
+	out, err := l.run.Run(ctx, "pvs", "--noheadings", "--options", "vg_name", dev)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 // PVMove starts a background evacuation of dev, onto dst when given,

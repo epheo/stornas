@@ -387,12 +387,18 @@ func errExitWith(msg string) error {
 	return fmt.Errorf("exit status 1: %s", msg)
 }
 
+const examineTank = "           Name : host-a:stornas-tank  (local to host host-a)\n"
+
 func TestTeardownRaidPoolWipesEverything(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
 		"vgremove -ff -y stornas-tank":      {},
 		"mdadm --stop /dev/md/stornas-tank": {},
 		"readlink -f /dev/disk/by-id/a":     {out: "/dev/vdb\n"},
 		"readlink -f /dev/disk/by-id/b":     {out: "/dev/vdc\n"},
+		"test -b /dev/vdb":                  {},
+		"test -b /dev/vdc":                  {},
+		"mdadm --examine /dev/vdb":          {out: examineTank},
+		"mdadm --examine /dev/vdc":          {out: examineTank},
 		"mdadm --zero-superblock /dev/vdb":  {},
 		"mdadm --zero-superblock /dev/vdc":  {},
 	}}
@@ -400,18 +406,75 @@ func TestTeardownRaidPoolWipesEverything(t *testing.T) {
 	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 6 {
+	if len(f.calls) != 10 {
 		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
+// A spec entry whose superblock names another array (recovery disk,
+// typo) must survive teardown untouched.
+func TestTeardownRaidPoolSparesForeignMember(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"vgremove -ff -y stornas-tank":      {},
+		"mdadm --stop /dev/md/stornas-tank": {},
+		"readlink -f /dev/disk/by-id/a":     {out: "/dev/vdb\n"},
+		"test -b /dev/vdb":                  {},
+		"mdadm --examine /dev/vdb":          {out: "           Name : elsewhere:backup0\n"},
+	}}
+	p := pool("tank", "raid1", "/dev/disk/by-id/a")
+	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.Contains(c, "zero-superblock") {
+			t.Fatalf("foreign member wiped: %v", f.calls)
+		}
+	}
+}
+
+// A pulled disk resolves to a dangling path; teardown skips it instead
+// of erroring forever and holding the CR in Terminating.
+func TestTeardownRaidPoolSkipsAbsentDisk(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"vgremove -ff -y stornas-tank":      {},
+		"mdadm --stop /dev/md/stornas-tank": {},
+		"readlink -f /dev/disk/by-id/gone":  {out: "/dev/disk/by-id/gone\n"},
+		"test -b /dev/disk/by-id/gone":      {err: errExit},
+	}}
+	p := pool("tank", "raid1", "/dev/disk/by-id/gone")
+	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestTeardownLinearPoolToleratesAbsence(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
-		"vgremove -ff -y stornas-tank": {out: `Volume group "stornas-tank" not found`, err: errExit},
-		"pvremove -ff -y /dev/vdb":     {out: "No PV label found on /dev/vdb.", err: errExit},
+		"vgremove -ff -y stornas-tank":                {out: `Volume group "stornas-tank" not found`, err: errExit},
+		"test -b /dev/vdb":                            {},
+		"pvs --noheadings --options vg_name /dev/vdb": {out: "  \n"},
+		"pvremove -ff -y /dev/vdb":                    {out: "No PV label found on /dev/vdb.", err: errExit},
 	}}
 	p := pool("tank", "none", "/dev/vdb")
 	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A PV claimed by another VG is not ours: pvremove -ff would strip a
+// foreign label, so teardown must never reach it.
+func TestTeardownLinearPoolSparesForeignPV(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"vgremove -ff -y stornas-tank":                {out: `Volume group "stornas-tank" not found`, err: errExit},
+		"test -b /dev/vdb":                            {},
+		"pvs --noheadings --options vg_name /dev/vdb": {out: "  othervg\n"},
+	}}
+	p := pool("tank", "none", "/dev/vdb")
+	if err := TeardownPool(context.Background(), lvm.NewWithRunner(f), mdraid.NewWithRunner(f), p); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.Contains(c, "pvremove") {
+			t.Fatalf("foreign PV wiped: %v", f.calls)
+		}
 	}
 }
