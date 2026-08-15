@@ -67,7 +67,7 @@ func (l *LVM) IsThinPool(ctx context.Context, vg, lv string) bool {
 
 // CreateThinPool leaves VG headroom: thin metadata grows, and a full VG
 // blocks lvextend during recovery. Always linear: raid lives in mdadm
-// below the PV, never in LVM (DESIGN.md).
+// below the PV, never in LVM (README architecture).
 func (l *LVM) CreateThinPool(ctx context.Context, vg, lv string) error {
 	_, err := l.run.Run(ctx, "lvcreate", "--type", "thin-pool", "--extents", "90%VG", "--name", lv, vg)
 	return err

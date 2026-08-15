@@ -36,7 +36,7 @@ type Report struct {
 // It never deletes volumes or shrinks the pool: pool deletion stays a
 // human decision. Membership does converge to spec.devices, which is how
 // a swapped entry (the disk replace flow) reaches the host. Raid pools
-// put mdadm below the PV so the thin pool stays linear (DESIGN.md).
+// put mdadm below the PV so the thin pool stays linear (README architecture).
 func EnsurePool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storagev1alpha1.StoragePool) (Report, error) {
 	if pool.Spec.Raid == "" || pool.Spec.Raid == "none" {
 		return ensureLinearPool(ctx, l, pool)
