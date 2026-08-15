@@ -176,19 +176,34 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Size == "" && req.FromSnapshot != "" {
-		// Restores default to the snapshot's own size.
+	if req.FromSnapshot != "" {
 		snap, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Get(r.Context(), req.FromSnapshot, metav1.GetOptions{})
 		if err != nil {
 			http.Error(w, "snapshot: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		restore, ok, _ := unstructured.NestedString(snap.Object, "status", "restoreSize")
-		if !ok {
-			http.Error(w, "snapshot has no restoreSize yet; pass an explicit size", http.StatusBadRequest)
-			return
+		if req.Size == "" {
+			// Restores default to the snapshot's own size.
+			restore, ok, _ := unstructured.NestedString(snap.Object, "status", "restoreSize")
+			if !ok {
+				http.Error(w, "snapshot has no restoreSize yet; pass an explicit size", http.StatusBadRequest)
+				return
+			}
+			req.Size = restore
 		}
-		req.Size = restore
+		// Restores inherit class and mode from the snapshot's source PVC:
+		// falling to the cluster default would silently downgrade a
+		// replicated volume to local, or mount a block image as a fs.
+		if src, _, _ := unstructured.NestedString(snap.Object, "spec", "source", "persistentVolumeClaimName"); src != "" {
+			if pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), src, metav1.GetOptions{}); err == nil {
+				if req.StorageClass == "" && pvc.Spec.StorageClassName != nil {
+					req.StorageClass = *pvc.Spec.StorageClassName
+				}
+				if pvc.Spec.VolumeMode != nil && *pvc.Spec.VolumeMode == corev1.PersistentVolumeBlock {
+					req.Block = true
+				}
+			}
+		}
 	}
 	size, err := resource.ParseQuantity(req.Size)
 	if err != nil {

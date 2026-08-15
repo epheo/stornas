@@ -150,6 +150,7 @@ func TestCreateTargetShapesSpec(t *testing.T) {
 
 func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	a := newAPI()
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
 	w := doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, nil)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
@@ -186,6 +187,10 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	}
 	if q := pvc.Spec.Resources.Requests["storage"]; q.String() != "3Gi" {
 		t.Fatalf("size = %s", q.String())
+	}
+	// The class rides over from the source PVC, never the cluster default.
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != "stornas-replicated" {
+		t.Fatalf("storageClass = %v", pvc.Spec.StorageClassName)
 	}
 
 	w = doReq(t, a.DeleteSnapshot, "DELETE", "/api/v1/snapshots/s1", "", map[string]string{"name": "s1"})
