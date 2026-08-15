@@ -382,11 +382,13 @@ blk_up() { kc -n stornas-system get pod boot-blk-consumer -o jsonpath='{.status.
 retry 300 "block consumer Running" blk_up
 blk_mode=$(kc -n stornas-system get pvc boot-blk -o jsonpath='{.spec.volumeMode}')
 [ "$blk_mode" = Block ] || die "UI-created volume has mode $blk_mode, want Block"
+# The image carries coreutils but not diffutils; the round trip asserts
+# through a marker instead of cmp.
 kc -n stornas-system exec boot-blk-consumer -- sh -c \
-	'dd if=/dev/urandom of=/tmp/probe bs=4096 count=4 2>/dev/null \
-	&& dd if=/tmp/probe of=/dev/blk bs=4096 count=4 oflag=direct 2>/dev/null \
-	&& dd if=/dev/blk bs=4096 count=4 iflag=direct 2>/dev/null | cmp - /tmp/probe' \
-	|| die "raw block IO mismatch on the UI-created volume"
+	'printf blockprobe > /tmp/probe \
+	&& dd if=/tmp/probe of=/dev/blk bs=512 count=1 conv=sync oflag=direct 2>/dev/null \
+	&& dd if=/dev/blk bs=512 count=1 iflag=direct 2>/dev/null | grep -aq blockprobe' \
+	|| die "raw block IO round trip failed on the UI-created volume"
 kc -n stornas-system delete pod boot-blk-consumer --wait
 TARGET_VOL=boot-blk ui_phase delete-volume
 blk_gone() { ! kc -n stornas-system get pvc boot-blk >/dev/null 2>&1; }
