@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
+	"time"
 
 	golinstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
@@ -32,6 +34,31 @@ import (
 
 type Registrar struct {
 	client *lapi.Client
+
+	// One reconcile burst resolves many placements (a target's LUNs, the
+	// allShares/allTargets sweeps) against what should be one cluster
+	// view; the TTL collapses those into a single REST fetch. Staleness
+	// is bounded well under volumeSettleInterval, so failover decisions
+	// never act on an older picture than the next poll would.
+	viewMu sync.Mutex
+	viewAt time.Time
+	view   []lapi.ResourceWithVolumes
+}
+
+const viewTTL = 5 * time.Second
+
+func (r *Registrar) resourceView(ctx context.Context) ([]lapi.ResourceWithVolumes, error) {
+	r.viewMu.Lock()
+	defer r.viewMu.Unlock()
+	if r.view != nil && time.Since(r.viewAt) < viewTTL {
+		return r.view, nil
+	}
+	view, err := r.client.Resources.GetResourceView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.view, r.viewAt = view, time.Now()
+	return view, nil
 }
 
 func NewRegistrar(controllerURL string) (*Registrar, error) {

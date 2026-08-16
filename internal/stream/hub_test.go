@@ -67,3 +67,45 @@ func TestHubDeliversFirstFrameAndUpdates(t *testing.T) {
 		t.Fatalf("update frame = %+v", got)
 	}
 }
+
+// An idle appliance wakes the bus every minute; with no browser open the
+// hub must not pay for a snapshot build and marshal each time.
+func TestHubSkipsBuildWithoutClients(t *testing.T) {
+	var builds atomic.Int64
+	snapshot := func() model.Snapshot {
+		builds.Add(1)
+		return model.Snapshot{}
+	}
+
+	bus := eventbus.New()
+	wake, cancel := bus.Subscribe(eventbus.PoolChanged)
+	defer cancel()
+	hub := NewHub(snapshot, wake, func() uint64 { return bus.Version(eventbus.PoolChanged) })
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go hub.Run(ctx)
+
+	for range 5 {
+		bus.Publish(eventbus.PoolChanged)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := builds.Load(); n != 0 {
+		t.Fatalf("built %d frames with zero clients", n)
+	}
+
+	// The first client still gets a frame: attach forces the rebuild.
+	srv := httptest.NewServer(hub)
+	defer srv.Close()
+	ws, _, err := websocket.DefaultDialer.Dial(strings.Replace(srv.URL, "http", "ws", 1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ws.Close() }()
+	if err := ws.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ws.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+}

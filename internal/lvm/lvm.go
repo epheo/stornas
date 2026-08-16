@@ -93,6 +93,35 @@ func (l *LVM) ResolvePath(ctx context.Context, dev string) string {
 	return dev
 }
 
+// ResolvePaths is ResolvePath for a whole spec in one host exec: pool
+// passes repeat every minute, and one nsenter+readlink per device was
+// the steady-state process churn. -m prints one line per argument in
+// order even for paths that no longer exist (those come back unchanged,
+// same contract as ResolvePath).
+func (l *LVM) ResolvePaths(ctx context.Context, devs []string) map[string]string {
+	resolved := map[string]string{}
+	for _, d := range devs {
+		resolved[d] = d
+	}
+	if len(devs) == 0 {
+		return resolved
+	}
+	out, err := l.run.Run(ctx, "readlink", append([]string{"-m"}, devs...)...)
+	if err != nil {
+		return resolved
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) != len(devs) {
+		return resolved
+	}
+	for i, d := range devs {
+		if r := strings.TrimSpace(lines[i]); r != "" {
+			resolved[d] = r
+		}
+	}
+	return resolved
+}
+
 func (l *LVM) VGExtend(ctx context.Context, vg, dev string) error {
 	_, err := l.run.Run(ctx, "vgextend", vg, dev)
 	return err

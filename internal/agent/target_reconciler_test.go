@@ -118,3 +118,50 @@ func TestTargetAgentRemovesOnDeletion(t *testing.T) {
 		t.Fatalf("state = %q, teardown unconfirmed", got.Status.State)
 	}
 }
+
+// A quiet refresh tick (same generation, placement, secrets) must skip
+// the targetcli walk: it is a dozen ~1s python spawns per target that
+// reconverge an already-converged state.
+func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	iqn := "iqn.2026-08.io.stornas:vms"
+	target := &storagev1alpha1.Target{
+		ObjectMeta: metav1.ObjectMeta{Name: "vms", Namespace: "stornas-system"},
+		Status: storagev1alpha1.TargetStatus{
+			IQN:        iqn,
+			ActiveNode: "node-a",
+			LUNs:       []storagev1alpha1.LUNStatus{{ID: 0, Device: "/dev/drbd1000"}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(target).WithStatusSubresource(target).Build()
+
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi create " + iqn:                                                   {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=0":                 {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                                      {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                                      {},
+		"targetcli saveconfig":                                                             {},
+	}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f}}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
+
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	converged := len(f.calls)
+	if converged == 0 {
+		t.Fatal("first pass must converge")
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != converged {
+		t.Fatalf("quiet tick reran the walk: %v", f.calls[converged:])
+	}
+}

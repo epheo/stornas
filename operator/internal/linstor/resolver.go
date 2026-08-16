@@ -31,7 +31,7 @@ import (
 // one. replicas counts diskful copies so callers can enforce
 // replication-dependent spec rules.
 func (r *Registrar) ResolvePlacement(ctx context.Context, resource, prefer string, avoid map[string]bool) (node, device string, replicas int, err error) {
-	view, err := r.client.Resources.GetResourceView(ctx)
+	view, err := r.resourceView(ctx)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("resource view: %w", err)
 	}

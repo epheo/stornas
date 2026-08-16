@@ -25,6 +25,12 @@ type UserAgentReconciler struct {
 	client.Client
 	Secrets client.Reader
 	Run     Runner
+
+	// applied remembers the secret version last written to the passdb so
+	// quiet refresh ticks skip the smbpasswd rewrite (NT hash derivation
+	// plus a passdb write per user per node, forever). In-memory: an
+	// agent restart reconverges. Single controller goroutine, no lock.
+	applied map[string]string
 }
 
 func (r *UserAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -33,12 +39,14 @@ func (r *UserAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if client.IgnoreNotFound(err) == nil {
 			// Deleted: a live passdb entry would keep share logins
 			// working after the user is gone.
+			delete(r.applied, req.Name)
 			RemoveSMBUser(ctx, r.Run, req.Name)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !user.Spec.SMB {
 		// Also the smb:true -> false edge; absent entries are quiet.
+		delete(r.applied, user.Name)
 		RemoveSMBUser(ctx, r.Run, user.Name)
 		return ctrl.Result{}, nil
 	}
@@ -52,9 +60,18 @@ func (r *UserAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if pw == "" {
 		return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
 	}
+	if r.applied[user.Name] == secret.ResourceVersion {
+		// Converged and the secret has not rotated: the tick only had to
+		// re-read it.
+		return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
+	}
 	if err := EnsureSMBUser(ctx, r.Run, user.Name, pw); err != nil {
 		return ctrl.Result{}, err
 	}
+	if r.applied == nil {
+		r.applied = map[string]string{}
+	}
+	r.applied[user.Name] = secret.ResourceVersion
 	return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
 }
 

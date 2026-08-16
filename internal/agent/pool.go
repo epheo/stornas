@@ -112,10 +112,7 @@ func ensureLinearPool(ctx context.Context, l *lvm.LVM, pool *storagev1alpha1.Sto
 	if err != nil {
 		return rep, err
 	}
-	resolved := map[string]string{}
-	for _, dev := range pool.Spec.Devices {
-		resolved[dev] = l.ResolvePath(ctx, dev)
-	}
+	resolved := l.ResolvePaths(ctx, pool.Spec.Devices)
 	plan := planDevices(pool.Spec.Devices, resolved, pvs)
 	// A dead member still in the spec plans as an add; a device absent
 	// from the host cannot join, so it stays a Missing report until the
@@ -240,10 +237,7 @@ func ensureRaidPool(ctx context.Context, l *lvm.LVM, md *mdraid.MD, pool *storag
 		}
 	}
 
-	resolved := map[string]string{}
-	for _, d := range pool.Spec.Devices {
-		resolved[d] = l.ResolvePath(ctx, d)
-	}
+	resolved := l.ResolvePaths(ctx, pool.Spec.Devices)
 	members := map[string]bool{}
 	inSpec := map[string]bool{}
 	for _, mb := range detail.Members {

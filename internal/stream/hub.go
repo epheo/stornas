@@ -84,6 +84,14 @@ func (h *Hub) Run(ctx context.Context) {
 		case <-h.kick:
 		}
 		for {
+			// No clients, no frame: the build and marshal are the whole
+			// cost, and kick forces a rebuild when the first one attaches.
+			h.mu.Lock()
+			idle := len(h.conns) == 0
+			h.mu.Unlock()
+			if idle {
+				break
+			}
 			v := h.version()
 			js, err := json.Marshal(frame{Snapshot: h.snapshot()})
 			if err != nil {

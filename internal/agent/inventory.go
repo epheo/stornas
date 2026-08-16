@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -30,9 +31,18 @@ type InventoryPublisher struct {
 	Smart *SmartStore
 
 	lastSweep time.Time
+	// lastDisks and lastWrite gate the status write: an unconditional
+	// ObservedAt bump made every tick an etcd write fanning out to every
+	// watcher, the dominant write traffic on a quiet appliance.
+	lastDisks []storagev1alpha1.Disk
+	lastWrite time.Time
 }
 
 const inventoryInterval = time.Minute
+
+// inventoryHeartbeat bounds ObservedAt staleness while disks are quiet;
+// it is a human signal (printcolumn), not a control input.
+const inventoryHeartbeat = 5 * time.Minute
 
 // smartInterval spaces SMART sweeps out: health changes slowly and every
 // query is a host command per disk.
@@ -185,6 +195,9 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if reflect.DeepEqual(disks, p.lastDisks) && time.Since(p.lastWrite) < inventoryHeartbeat {
+		return nil
+	}
 	var inv storagev1alpha1.NodeInventory
 	if err := p.Client.Get(ctx, types.NamespacedName{Name: p.Node}, &inv); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -197,7 +210,11 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	}
 	inv.Status.Disks = disks
 	inv.Status.ObservedAt = metav1.Now()
-	return p.Client.Status().Update(ctx, &inv)
+	if err := p.Client.Status().Update(ctx, &inv); err != nil {
+		return err
+	}
+	p.lastDisks, p.lastWrite = disks, time.Now()
+	return nil
 }
 
 func splitLines(s string) []string {

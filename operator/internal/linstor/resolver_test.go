@@ -123,3 +123,30 @@ func TestResolvePlacementAllReplicasAvoided(t *testing.T) {
 		t.Fatal("want error when every replica is unhealthy")
 	}
 }
+
+// One reconcile burst (a target's LUNs, a sweep) must cost one view
+// fetch, not one per placement.
+func TestResolvePlacementReusesFreshView(t *testing.T) {
+	fetches := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/view/resources", func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		_, _ = w.Write([]byte(`[
+		  {"name":"pvc-1","node_name":"node-a","state":{"in_use":true},"volumes":[{"device_path":"/dev/drbd1000"}]}
+		]`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	r, err := NewRegistrar(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, _, _, err := r.ResolvePlacement(context.Background(), "pvc-1", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches = %d, want 1", fetches)
+	}
+}

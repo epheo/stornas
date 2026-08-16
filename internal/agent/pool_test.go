@@ -95,7 +95,7 @@ func TestEnsurePoolFreshCreate(t *testing.T) {
 		"vgcreate stornas-tank /dev/sda": {},
 		"lvs --noheadings --options lv_attr stornas-tank/thin":               {err: errExit},
 		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank": {},
-		"readlink -f /dev/sda": {out: "/dev/sda\n"},
+		"readlink -m /dev/sda": {out: "/dev/sda\n"},
 		vgsCmd:                 {out: vgsOut},
 		pvsCmd:                 {out: pvs},
 		lvsSyncCmd:             {out: lvsIdle},
@@ -124,8 +124,7 @@ func TestEnsurePoolLinearMissingNamesVictim(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
 		"vgs stornas-tank": {},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {out: "  twi-aotz--\n"},
-		"readlink -f /dev/sda":                                 {out: "/dev/sda\n"},
-		"readlink -f /dev/sdb":                                 {out: "/dev/sdb\n"},
+		"readlink -m /dev/sda /dev/sdb":                        {out: "/dev/sda\n/dev/sdb\n"},
 		"test -b /dev/sdb":                                     {err: errExit},
 		vgsCmd:                                                 {out: vgsOut},
 		pvsCmd:                                                 {out: pvs},
@@ -196,8 +195,7 @@ func TestEnsureRaidPoolFreshCreate(t *testing.T) {
 		"vgcreate stornas-tank /dev/md/stornas-tank":                         {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin":               {{err: errExit}},
 		"lvcreate --type thin-pool --extents 90%VG --name thin stornas-tank": {{}},
-		"readlink -f /dev/sda":                                               {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdb":                                               {{out: "/dev/sdb\n"}},
+		"readlink -m /dev/sda /dev/sdb":                                      {{out: "/dev/sda\n/dev/sdb\n"}},
 		mdVgsCmd:                                                             {{out: vgsOut}},
 	}}
 
@@ -221,8 +219,7 @@ func TestEnsureRaidPoolIdempotent(t *testing.T) {
 		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
-		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		"readlink -m /dev/sda /dev/sdb":                        {{out: "/dev/sda\n/dev/sdb\n"}},
 		mdVgsCmd:                                               {{out: vgsOut}},
 	}}
 
@@ -244,8 +241,7 @@ func TestEnsureRaidPoolDegradedNamesVictim(t *testing.T) {
 		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
-		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		"readlink -m /dev/sda /dev/sdb":                        {{out: "/dev/sda\n/dev/sdb\n"}},
 		"test -b /dev/sdb":                                     {{err: errExit}},
 		mdVgsCmd:                                               {{out: vgsOut}},
 	}}
@@ -274,8 +270,7 @@ func TestEnsureRaidPoolAddsReplacement(t *testing.T) {
 		mdDetailCmd:        {{out: mdDegraded}, {out: mdDegraded}, {out: mdRebuilding}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
-		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdc":                                 {{out: "/dev/sdc\n"}},
+		"readlink -m /dev/sda /dev/sdc":                        {{out: "/dev/sda\n/dev/sdc\n"}},
 		"test -b /dev/sdc":                                     {{}},
 		"mdadm /dev/md/stornas-tank --add /dev/sdc":            {{}},
 		mdVgsCmd: {{out: vgsOut}},
@@ -305,8 +300,7 @@ func TestEnsureRaidPoolLiveReplace(t *testing.T) {
 		mdDetailCmd:        {{out: mdHealthy}, {out: mdHealthy}, {out: mdRebuilding}},
 		"vgs stornas-tank": {{}},
 		"lvs --noheadings --options lv_attr stornas-tank/thin":          {{out: "  twi-aotz--\n"}},
-		"readlink -f /dev/sda":                                          {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdc":                                          {{out: "/dev/sdc\n"}},
+		"readlink -m /dev/sda /dev/sdc":                                 {{out: "/dev/sda\n/dev/sdc\n"}},
 		"test -b /dev/sdc":                                              {{}},
 		"mdadm /dev/md/stornas-tank --add-spare /dev/sdc":               {{}},
 		"mdadm /dev/md/stornas-tank --replace /dev/sdb --with /dev/sdc": {{}},
@@ -348,8 +342,7 @@ func TestEnsureRaidPoolSweepsFaulty(t *testing.T) {
 		"lvs --noheadings --options lv_attr stornas-tank/thin": {{out: "  twi-aotz--\n"}},
 		"mdadm /dev/md/stornas-tank --remove failed":           {{}},
 		"mdadm /dev/md/stornas-tank --remove detached":         {{}},
-		"readlink -f /dev/sda":                                 {{out: "/dev/sda\n"}},
-		"readlink -f /dev/sdb":                                 {{out: "/dev/sdb\n"}},
+		"readlink -m /dev/sda /dev/sdb":                        {{out: "/dev/sda\n/dev/sdb\n"}},
 		"test -b /dev/sdb":                                     {{err: errExit}},
 		mdVgsCmd:                                               {{out: vgsOut}},
 	}}
