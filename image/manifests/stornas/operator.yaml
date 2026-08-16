@@ -38,8 +38,24 @@ rules:
   - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]
+  # update: the claim binder writes the selected-node annotation that
+  # completes WaitForFirstConsumer for podless claims.
   - apiGroups: [""]
-    resources: [persistentvolumeclaims, persistentvolumes]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch]
+  # The binder acts only on our WFFC classes and stays off claims a pod
+  # references; restores resolve their snapshot's node.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots]
     verbs: [get, list, watch]
   # Node readiness drives failover: placement avoids NotReady nodes.
   - apiGroups: [""]

@@ -8,12 +8,22 @@ rules:
   - ""
   resources:
   - nodes
-  - persistentvolumeclaims
   - persistentvolumes
+  - pods
   - secrets
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -23,6 +33,22 @@ rules:
   verbs:
   - create
   - patch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.stornas.io
   resources:

@@ -225,7 +225,10 @@ retry 600 "storage pool Available" pool_available
 
 log "creating the volume through the UI form"
 TARGET_VOL=boot-test ui_phase create-volume
-# WaitForFirstConsumer: the consumer pod is scaffolding, not the feature.
+# The binder completes WaitForFirstConsumer for podless claims: Bound must
+# arrive before any consumer exists, or the pure NAS flow is broken.
+retry 600 "PVC Bound with no consumer" pvc_bound
+# The pod exercises workload IO on the volume; binding happened above.
 kc apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -252,7 +255,6 @@ spec:
       persistentVolumeClaim:
         claimName: boot-test
 EOF
-retry 600 "PVC Bound" pvc_bound
 
 # The session layer is the security boundary; every refusal is product
 # behavior worth pinning.
@@ -317,28 +319,8 @@ TARGET_VOL=boot-test TARGET_SNAP=boot-snap ui_phase snapshot-volume
 snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "snapshot ready" snap_ready
 TARGET_SNAP=boot-snap TARGET_VOL=boot-restore ui_phase restore-snapshot
-# WaitForFirstConsumer: the restored PVC binds only under a consumer.
-kc apply -f - <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: boot-restore-consumer
-  namespace: stornas-system
-spec:
-  restartPolicy: Never
-  containers:
-    - name: c
-      image: ghcr.io/epheo/stornas:latest
-      imagePullPolicy: Never
-      command: [sleep, "3600"]
-      volumeMounts:
-        - name: v
-          mountPath: /data
-  volumes:
-    - name: v
-      persistentVolumeClaim:
-        claimName: boot-restore
-EOF
+# No consumer on purpose: the binder must pin the restore to the
+# snapshot's node and bind it podless.
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
@@ -351,6 +333,8 @@ kc -n stornas-system exec boot-test-consumer -- sh -c 'df -k /data | tail -1' \
 
 log "block-mode volume through the UI form, raw IO from a consumer"
 TARGET_VOL=boot-blk ui_phase create-volume-block
+blk_bound() { kc -n stornas-system get pvc boot-blk -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 600 "block PVC Bound with no consumer" blk_bound
 kc apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -375,8 +359,6 @@ spec:
       persistentVolumeClaim:
         claimName: boot-blk
 EOF
-blk_bound() { kc -n stornas-system get pvc boot-blk -o jsonpath='{.status.phase}' | grep -q Bound; }
-retry 600 "block PVC Bound" blk_bound
 # Bound is the claim, not the pod: exec needs the container up.
 blk_up() { kc -n stornas-system get pod boot-blk-consumer -o jsonpath='{.status.phase}' | grep -q Running; }
 retry 300 "block consumer Running" blk_up
@@ -423,8 +405,6 @@ log "delete flows through the UI: snapshot, then the restored volume"
 TARGET_SNAP=boot-snap ui_phase delete-snapshot
 snap_gone() { ! kc -n stornas-system get volumesnapshot boot-snap >/dev/null 2>&1; }
 retry 120 "snapshot gone" snap_gone
-# pvc-protection holds a claimed volume; the consumer goes first.
-kc -n stornas-system delete pod boot-restore-consumer --wait
 TARGET_VOL=boot-restore ui_phase delete-volume
 restore_gone() { ! kc -n stornas-system get pvc boot-restore >/dev/null 2>&1; }
 retry 180 "restored volume gone" restore_gone
