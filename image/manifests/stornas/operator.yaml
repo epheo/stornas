@@ -38,18 +38,15 @@ rules:
   - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]
-  # update: the claim binder writes the selected-node annotation that
-  # completes WaitForFirstConsumer for podless claims.
+  # patch: the claim binder writes the selected-node annotation that
+  # completes WaitForFirstConsumer for host-consumed claims: declared by
+  # the API at creation, or referenced by a Share or Target. It never
+  # reads pods; undeclared claims keep upstream WFFC semantics.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, list, watch, update, patch]
   - apiGroups: [""]
     resources: [persistentvolumes]
-    verbs: [get, list, watch]
-  # The binder acts only on our WFFC classes and stays off claims a pod
-  # references; restores resolve their snapshot's node.
-  - apiGroups: [""]
-    resources: [pods]
     verbs: [get, list, watch]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]

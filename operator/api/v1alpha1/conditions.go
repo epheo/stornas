@@ -55,6 +55,16 @@ const ThinLV = "thin"
 // by name after the Target is gone); one constant keeps them in step.
 const IQNPrefix = "iqn.2026-08.io.stornas:"
 
+// ConsumerAnnotation declares who will consume a PVC. The stornas API
+// stamps ConsumerHost on volumes it creates (their consumer is kernel
+// nfsd or LIO, never a pod), and the ClaimBinder completes WFFC only for
+// declared or Share/Target-referenced claims; it never guesses from pod
+// absence. An undeclared claim keeps upstream WFFC semantics untouched.
+const (
+	ConsumerAnnotation = "storage.stornas.io/consumer"
+	ConsumerHost       = "host"
+)
+
 // VGName prefixes the CR name so appliance VGs are distinguishable from
 // any the user created by hand; the agent never touches foreign VGs.
 func (p *StoragePool) VGName() string {

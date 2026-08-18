@@ -27,6 +27,7 @@ import (
 
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/tasks"
+	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
 var (
@@ -237,7 +238,14 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		mode = corev1.PersistentVolumeBlock
 	}
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: req.Name, Namespace: a.Namespace},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: req.Name, Namespace: a.Namespace,
+			// UI volumes are served by nfsd or LIO, never a pod; the
+			// declaration lets the binder complete WFFC without guessing.
+			Annotations: map[string]string{
+				storagev1alpha1.ConsumerAnnotation: storagev1alpha1.ConsumerHost,
+			},
+		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			VolumeMode:  &mode,

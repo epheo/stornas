@@ -9,7 +9,6 @@ rules:
   resources:
   - nodes
   - persistentvolumes
-  - pods
   - secrets
   verbs:
   - get

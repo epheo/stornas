@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -75,7 +74,9 @@ var _ = Describe("Claim binder", func() {
 		}
 	}
 
-	newClaim := func(name, class string) *corev1.PersistentVolumeClaim {
+	// declared mirrors the API: volumes it creates carry the consumer
+	// annotation; undeclared claims model kubectl users.
+	newClaim := func(name, class string, declared bool) *corev1.PersistentVolumeClaim {
 		pvc := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 			Spec: corev1.PersistentVolumeClaimSpec{
@@ -85,6 +86,11 @@ var _ = Describe("Claim binder", func() {
 					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
 				},
 			},
+		}
+		if declared {
+			pvc.Annotations = map[string]string{
+				storagev1alpha1.ConsumerAnnotation: storagev1alpha1.ConsumerHost,
+			}
 		}
 		Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
 		return pvc
@@ -100,21 +106,20 @@ var _ = Describe("Claim binder", func() {
 		return res, pvc
 	}
 
-	// Grace is nonzero so the zero-default path stays out of tests.
-	binder := func() *ClaimBinder { return &ClaimBinder{Client: k8sClient, Grace: time.Nanosecond} }
+	binder := func() *ClaimBinder { return &ClaimBinder{Client: k8sClient} }
 
-	It("holds while no pool is eligible", func() {
+	It("holds a declared claim while no pool is eligible", func() {
 		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
 		setNode(ctx, "bind-node-a", true)
 		pool := newPool("bind-sick", "bind-node-a", "100Gi", false)
 		defer dropPools(pool)
-		newClaim("bind-hold", "bind-wffc")
+		newClaim("bind-hold", "bind-wffc", true)
 		res, pvc := bindOnce(binder(), "bind-hold")
 		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
 		Expect(pvc.Annotations).NotTo(HaveKey(selectedNodeAnnotation))
 	})
 
-	It("binds a podless claim to the freest available pool node", func() {
+	It("binds a declared claim to the freest available pool node", func() {
 		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
 		setNode(ctx, "bind-node-a", true)
 		setNode(ctx, "bind-node-b", true)
@@ -123,8 +128,8 @@ var _ = Describe("Claim binder", func() {
 			newPool("bind-big", "bind-node-b", "100Gi", true),
 		}
 		defer dropPools(pools...)
-		newClaim("bind-podless", "bind-wffc")
-		_, pvc := bindOnce(binder(), "bind-podless")
+		newClaim("bind-declared", "bind-wffc", true)
+		_, pvc := bindOnce(binder(), "bind-declared")
 		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-b"))
 	})
 
@@ -137,33 +142,56 @@ var _ = Describe("Claim binder", func() {
 			newPool("bind-big", "bind-node-b", "100Gi", true),
 		}
 		defer dropPools(pools...)
-		newClaim("bind-avoid-down", "bind-wffc")
+		newClaim("bind-avoid-down", "bind-wffc", true)
 		_, pvc := bindOnce(binder(), "bind-avoid-down")
 		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-a"))
 	})
 
-	It("leaves claims a pod references to the scheduler", func() {
+	It("leaves undeclared, unreferenced claims to upstream WFFC", func() {
 		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
 		setNode(ctx, "bind-node-a", true)
-		pool := newPool("bind-podded-pool", "bind-node-a", "100Gi", true)
+		pool := newPool("bind-bare-pool", "bind-node-a", "100Gi", true)
 		defer dropPools(pool)
-		newClaim("bind-podded", "bind-wffc")
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "bind-consumer", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "busybox"}},
-				Volumes: []corev1.Volume{{
-					Name: "v",
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "bind-podded"},
-					},
-				}},
+		newClaim("bind-bare", "bind-wffc", false)
+		res, pvc := bindOnce(binder(), "bind-bare")
+		// No requeue: a Share or Target arriving re-enqueues via its watch.
+		Expect(res).To(Equal(reconcile.Result{}))
+		Expect(pvc.Annotations).NotTo(HaveKey(selectedNodeAnnotation))
+	})
+
+	It("treats a referencing Share as the first consumer", func() {
+		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
+		setNode(ctx, "bind-node-a", true)
+		pool := newPool("bind-share-pool", "bind-node-a", "100Gi", true)
+		defer dropPools(pool)
+		newClaim("bind-shared", "bind-wffc", false)
+		share := &storagev1alpha1.Share{
+			ObjectMeta: metav1.ObjectMeta{Name: "bind-share", Namespace: "default"},
+			Spec: storagev1alpha1.ShareSpec{
+				ClaimName: "bind-shared",
+				NFS:       &storagev1alpha1.NFSExport{Clients: []string{"192.168.1.0/24(rw)"}},
 			},
 		}
-		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
-		res, pvc := bindOnce(binder(), "bind-podded")
-		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
-		Expect(pvc.Annotations).NotTo(HaveKey(selectedNodeAnnotation))
+		Expect(k8sClient.Create(ctx, share)).To(Succeed())
+		_, pvc := bindOnce(binder(), "bind-shared")
+		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-a"))
+	})
+
+	It("treats a referencing Target LUN as the first consumer", func() {
+		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
+		setNode(ctx, "bind-node-a", true)
+		pool := newPool("bind-lun-pool", "bind-node-a", "100Gi", true)
+		defer dropPools(pool)
+		newClaim("bind-lun", "bind-wffc", false)
+		target := &storagev1alpha1.Target{
+			ObjectMeta: metav1.ObjectMeta{Name: "bind-target", Namespace: "default"},
+			Spec: storagev1alpha1.TargetSpec{
+				LUNs: []storagev1alpha1.LUN{{ID: 0, ClaimName: "bind-lun"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, target)).To(Succeed())
+		_, pvc := bindOnce(binder(), "bind-lun")
+		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-a"))
 	})
 
 	It("ignores classes that are not ours or not WFFC", func() {
@@ -177,19 +205,11 @@ var _ = Describe("Claim binder", func() {
 			if name == "bind-on-immediate" {
 				class = "bind-immediate"
 			}
-			newClaim(name, class)
+			newClaim(name, class, true)
 			res, pvc := bindOnce(binder(), name)
 			Expect(res).To(Equal(reconcile.Result{}))
 			Expect(pvc.Annotations).NotTo(HaveKey(selectedNodeAnnotation))
 		}
-	})
-
-	It("waits out the consumer grace before deciding", func() {
-		ensureClass("bind-wffc", linstorProvisioner, storagev1.VolumeBindingWaitForFirstConsumer)
-		newClaim("bind-fresh", "bind-wffc")
-		res, pvc := bindOnce(&ClaimBinder{Client: k8sClient, Grace: time.Hour}, "bind-fresh")
-		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
-		Expect(pvc.Annotations).NotTo(HaveKey(selectedNodeAnnotation))
 	})
 
 	It("pins a restore to the snapshot's node, not the freest", func() {
@@ -237,7 +257,12 @@ var _ = Describe("Claim binder", func() {
 
 		group := "snapshot.storage.k8s.io"
 		restore := &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: "bind-restore", Namespace: "default"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bind-restore", Namespace: "default",
+				Annotations: map[string]string{
+					storagev1alpha1.ConsumerAnnotation: storagev1alpha1.ConsumerHost,
+				},
+			},
 			Spec: corev1.PersistentVolumeClaimSpec{
 				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				StorageClassName: ptr("bind-wffc"),
@@ -251,7 +276,7 @@ var _ = Describe("Claim binder", func() {
 		}
 		Expect(k8sClient.Create(ctx, restore)).To(Succeed())
 
-		b := &ClaimBinder{Client: k8sClient, Grace: time.Nanosecond,
+		b := &ClaimBinder{Client: k8sClient,
 			Linstor: &fakePlacer{node: "bind-node-a", device: "/dev/drbd1000"}}
 		_, pvc := bindOnce(b, "bind-restore")
 		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-a"))

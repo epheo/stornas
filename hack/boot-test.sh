@@ -225,8 +225,8 @@ retry 600 "storage pool Available" pool_available
 
 log "creating the volume through the UI form"
 TARGET_VOL=boot-test ui_phase create-volume
-# The binder completes WaitForFirstConsumer for podless claims: Bound must
-# arrive before any consumer exists, or the pure NAS flow is broken.
+# UI volumes declare a host consumer, so the binder completes WFFC for
+# them: Bound must arrive before any pod exists, or the NAS flow is broken.
 retry 600 "PVC Bound with no consumer" pvc_bound
 # The pod exercises workload IO on the volume; binding happened above.
 kc apply -f - <<'EOF'
@@ -319,8 +319,8 @@ TARGET_VOL=boot-test TARGET_SNAP=boot-snap ui_phase snapshot-volume
 snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "snapshot ready" snap_ready
 TARGET_SNAP=boot-snap TARGET_VOL=boot-restore ui_phase restore-snapshot
-# No consumer on purpose: the binder must pin the restore to the
-# snapshot's node and bind it podless.
+# No pod on purpose: the UI restore declares a host consumer, and the
+# binder must pin it to the snapshot's node and bind it podless.
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 

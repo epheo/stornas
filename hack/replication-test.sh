@@ -821,8 +821,9 @@ TARGET_VOL=repl-test TARGET_SNAP=repl-snap ui_phase snapshot-volume
 repl_snap_ready() { kc -n stornas-system get volumesnapshot repl-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "replicated snapshot ready" repl_snap_ready
 TARGET_SNAP=repl-snap TARGET_VOL=repl-restore ui_phase restore-snapshot
-# The consumer lands inside the binder's grace, so pod-first placement
-# pins the restore to node1; the podless restore is boot-test's row.
+# The UI restore declares a host consumer, so the binder pins it to a
+# diskful node; the replicated volume attaches on node1 either way.
+# The podless restore assert is boot-test's row.
 kc apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod

@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"sort"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -29,7 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
@@ -42,25 +43,19 @@ const selectedNodeAnnotation = "volume.kubernetes.io/selected-node"
 
 const linstorProvisioner = "linstor.csi.linbit.com"
 
-// defaultBindGrace lets a consumer pod created moments after its claim
-// reach the API before the binder decides, so pod-first placement wins
-// whenever a pod exists.
-const defaultBindGrace = 10 * time.Second
-
-// ClaimBinder completes WaitForFirstConsumer for claims that will never
-// see a pod: UI volumes, CDI imports, any bare PVC. A claim a pod
-// references is left to the scheduler; everything else gets a node picked
-// here, because placement is a decision and decisions live in the
-// operator.
+// ClaimBinder completes WaitForFirstConsumer for claims whose first
+// consumer is the host, not a pod: a Share or Target referencing the
+// claim is that consumer arriving, and API-created volumes declare it
+// up front with the consumer annotation. The binder acts only on that
+// positive evidence; it never infers from pod absence, so an undeclared
+// bare claim keeps upstream WFFC semantics and a pod-referenced claim
+// keeps scheduler placement without the binder having to look.
 type ClaimBinder struct {
 	client.Client
 	Linstor SharePlacer
-	// Grace overrides defaultBindGrace; tests shrink it.
-	Grace time.Duration
 }
 
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch
 
@@ -79,21 +74,14 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 	if err != nil || !eligible {
 		return ctrl.Result{}, err
 	}
-	grace := r.Grace
-	if grace == 0 {
-		grace = defaultBindGrace
-	}
-	if wait := grace - time.Since(pvc.CreationTimestamp.Time); wait > 0 {
-		return ctrl.Result{RequeueAfter: wait}, nil
-	}
-	referenced, err := r.claimHasConsumer(ctx, &pvc)
+	consumed, err := r.hostConsumed(ctx, &pvc)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if referenced {
-		// The scheduler owns this claim. Keep polling: if the pod is
-		// deleted before scheduling, the claim is ours again.
-		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+	if !consumed {
+		// Not declared and no Share or Target references it: not ours.
+		// A Share or Target arriving later re-enqueues via its watch.
+		return ctrl.Result{}, nil
 	}
 	node, err := r.pickNode(ctx, &pvc)
 	if err != nil {
@@ -106,8 +94,8 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 	}
 	// The PVC is the only object stornas writes without owning it: the CSI
-	// provisioner, the scheduler, and CDI write it too. Patch the one key
-	// so managedFields records this operator against the hint alone, not
+	// provisioner and the scheduler write it too. Patch the one key so
+	// managedFields records this operator against the hint alone, not
 	// against every field a whole-object update round-trips.
 	patch := client.MergeFrom(pvc.DeepCopy())
 	if pvc.Annotations == nil {
@@ -117,8 +105,37 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 	if err := r.Patch(ctx, &pvc, patch); err != nil {
 		return ctrl.Result{}, err
 	}
-	logf.FromContext(ctx).Info("bound podless claim", "claim", pvc.Name, "node", node)
+	logf.FromContext(ctx).Info("bound host-consumed claim", "claim", pvc.Name, "node", node)
 	return ctrl.Result{}, nil
+}
+
+// hostConsumed reports whether the claim's first consumer is the host:
+// declared by the API at creation, or a Share or Target referencing it.
+func (r *ClaimBinder) hostConsumed(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+	if pvc.Annotations[storagev1alpha1.ConsumerAnnotation] == storagev1alpha1.ConsumerHost {
+		return true, nil
+	}
+	var shares storagev1alpha1.ShareList
+	if err := r.List(ctx, &shares, client.InNamespace(pvc.Namespace)); err != nil {
+		return false, err
+	}
+	for _, s := range shares.Items {
+		if s.Spec.ClaimName == pvc.Name {
+			return true, nil
+		}
+	}
+	var targets storagev1alpha1.TargetList
+	if err := r.List(ctx, &targets, client.InNamespace(pvc.Namespace)); err != nil {
+		return false, err
+	}
+	for _, t := range targets.Items {
+		for _, lun := range t.Spec.LUNs {
+			if lun.ClaimName == pvc.Name {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // eligibleClass limits the binder to our own WFFC classes; Immediate
@@ -134,24 +151,6 @@ func (r *ClaimBinder) eligibleClass(ctx context.Context, pvc *corev1.PersistentV
 	return sc.Provisioner == linstorProvisioner &&
 		sc.VolumeBindingMode != nil &&
 		*sc.VolumeBindingMode == storagev1.VolumeBindingWaitForFirstConsumer, nil
-}
-
-func (r *ClaimBinder) claimHasConsumer(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(pvc.Namespace)); err != nil {
-		return false, err
-	}
-	for _, p := range pods.Items {
-		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		for _, v := range p.Spec.Volumes {
-			if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvc.Name {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
 
 // pickNode returns "" when no safe choice exists; the caller polls.
@@ -231,10 +230,42 @@ type bindHoldError struct{ msg string }
 
 func (e *bindHoldError) Error() string { return e.msg }
 
+// claimRequests maps a Share or Target event to its claims, so a consumer
+// arriving after the PVC re-enqueues the bind.
+func claimRequests(namespace string, names ...string) []reconcile.Request {
+	reqs := make([]reconcile.Request, 0, len(names))
+	for _, n := range names {
+		reqs = append(reqs, reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: namespace, Name: n},
+		})
+	}
+	return reqs
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClaimBinder) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.PersistentVolumeClaim{}).
+		Watches(&storagev1alpha1.Share{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
+				share, ok := o.(*storagev1alpha1.Share)
+				if !ok {
+					return nil
+				}
+				return claimRequests(share.Namespace, share.Spec.ClaimName)
+			})).
+		Watches(&storagev1alpha1.Target{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
+				target, ok := o.(*storagev1alpha1.Target)
+				if !ok {
+					return nil
+				}
+				names := make([]string, 0, len(target.Spec.LUNs))
+				for _, lun := range target.Spec.LUNs {
+					names = append(names, lun.ClaimName)
+				}
+				return claimRequests(target.Namespace, names...)
+			})).
 		Named("claimbinder").
 		Complete(r)
 }
