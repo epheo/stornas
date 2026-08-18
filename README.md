@@ -171,35 +171,6 @@ The rule they enforce: a feature exists once its UI/UX flow passes e2e;
 kernel, mdadm, and DRBD internals are never the test subject, only
 stornas behavior and configuration.
 
-## Not yet
-
-Volume cloning, raid5/raid10, async remote replication (DRBD protocol A),
-ALUA multipath, scheduled snapshots, quotas, OIDC, per-user SMB
-ownership and ACLs, NVMe/TCP, controller HA.
-
-## Not planned
-
-Fibre Channel, FCoE, NVMe/RDMA, NVMe/FC. Each needs an HBA, a CNA, or a
-lossless DCB fabric, none of which qemu can present, so their flows can
-never pass a gate and the rule above bars them from existing.
-
-Non-disruptive SAN failover, under any transport. A Secondary DRBD device
-is unreadable, so the standby node cannot export a path before promotion;
-active/passive is bounded by DRBD, not by iSCSI. NVMe/TCP above is a
-performance item, and ALUA multipath is per-node link redundancy.
-
-## Layout
-
-```
-cmd/stornas/         API + UI server
-cmd/stornas-agent/   privileged node DaemonSet, only thing touching the host
-internal/            server and agent internals
-web/                 SvelteKit UI
-operator/            CRDs + controllers (StoragePool, Target, Share, LocalUser)
-image/               bootc layer, DRBD 9 kmod build, cluster manifests
-hack/                e2e gates
-```
-
 ## License
 
 Apache License 2.0, see [LICENSE.md](LICENSE.md).
