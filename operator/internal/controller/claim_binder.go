@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -106,14 +105,16 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		// strand the data or the restore.
 		return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 	}
+	// The PVC is the only object stornas writes without owning it: the CSI
+	// provisioner, the scheduler, and CDI write it too. Patch the one key
+	// so managedFields records this operator against the hint alone, not
+	// against every field a whole-object update round-trips.
+	patch := client.MergeFrom(pvc.DeepCopy())
 	if pvc.Annotations == nil {
 		pvc.Annotations = map[string]string{}
 	}
 	pvc.Annotations[selectedNodeAnnotation] = node
-	if err := r.Update(ctx, &pvc); err != nil {
-		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
-		}
+	if err := r.Patch(ctx, &pvc, patch); err != nil {
 		return ctrl.Result{}, err
 	}
 	logf.FromContext(ctx).Info("bound podless claim", "claim", pvc.Name, "node", node)
