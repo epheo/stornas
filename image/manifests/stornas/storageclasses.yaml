@@ -15,7 +15,11 @@ parameters:
   # XFS everywhere (README architecture); the CSI default is ext4, and the agent
   # mounts shares as xfs.
   csi.storage.k8s.io/fstype: xfs
-volumeBindingMode: WaitForFirstConsumer
+# Immediate on purpose: every stornas volume is host-consumed (nfsd, LIO),
+# so no pod ever arrives to complete WaitForFirstConsumer. Pod-consumed
+# disks get their own WFFC classes with the KubeVirt milestone.
+# volumeBindingMode is immutable; pre-flip installs delete both classes once.
+volumeBindingMode: Immediate
 allowVolumeExpansion: true
 ---
 apiVersion: storage.k8s.io/v1
@@ -32,5 +36,6 @@ parameters:
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
   csi.storage.k8s.io/fstype: xfs
-volumeBindingMode: WaitForFirstConsumer
+# Immediate for the same reason as stornas-local above.
+volumeBindingMode: Immediate
 allowVolumeExpansion: true
