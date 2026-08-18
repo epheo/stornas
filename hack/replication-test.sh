@@ -331,6 +331,14 @@ pools_have_capacity() {
 }
 retry 120 "LINSTOR reports free capacity on both pools" pools_have_capacity
 
+# A repro harness reuses the two-node bring-up: with REPRO_SCRIPT set
+# the gate stops here and the sourced steps own the cluster.
+if [ -n "${REPRO_SCRIPT:-}" ]; then
+	# shellcheck disable=SC1090
+	source "$REPRO_SCRIPT"
+	exit 0
+fi
+
 log "provisioning a replicated PVC, consumer pinned to node1"
 kc apply -f - <<'EOF'
 apiVersion: v1
@@ -910,10 +918,17 @@ v2 sh -c "minor=\$(drbdsetup status $REPL_RES --verbose | sed -n 's/.*minor:\([0
 
 log "healing the partition: DRBD must refuse to merge"
 partition off
-split_detected() {
-	v1 sh -c "dmesg | grep -qi split-brain" || v2 sh -c "dmesg | grep -qi split-brain"
+# The assert is the product's own verdict, not a kernel log string: the
+# poller flags splitBrain on a StandAlone connection and the UI resolve
+# flow keys on it. dmesg wording is DRBD's business (CLAUDE.md: kernel
+# internals are never the test subject).
+split_flagged() {
+	curl -fsS -m 15 -b "$WORKDIR/cookies" "http://$IP1:30080/api/v1/state" \
+		| node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
+			const v=JSON.parse(d).volumes.find(v=>v.name==="repl-test");
+			process.exit(v?.replication?.splitBrain===true?0:1)})'
 }
-retry 300 "split brain detected" split_detected
+retry 300 "API flags split brain on repl-test" split_flagged
 retry 600 "both nodes Ready after heal" both_ready
 
 log "pick-survivor through the UI resolve dialog"
