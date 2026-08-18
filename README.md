@@ -34,9 +34,9 @@ Nothing is documented here before its flow is green.
 - Filesystem (XFS) or raw block mode, chosen at creation.
 - Online resize, snapshots, and restore-to-new-volume from the UI.
   Restores inherit the source volume's class and mode.
-- Volumes bind at creation with no consumer: every stornas volume is
-  host-consumed (nfsd, LIO), so classes bind Immediate and restores land
-  where their snapshot lives.
+- Volumes bind at creation with no consumer: the operator places podless
+  claims (UI volumes, imports) and pins restores to their snapshot's
+  node; a claim a pod references keeps scheduler placement.
 
 **SAN (iSCSI)**
 - Targets with per-initiator CHAP; credentials live in Secrets and

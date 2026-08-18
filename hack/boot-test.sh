@@ -225,8 +225,8 @@ retry 600 "storage pool Available" pool_available
 
 log "creating the volume through the UI form"
 TARGET_VOL=boot-test ui_phase create-volume
-# Immediate binding: Bound must arrive before any consumer exists, with
-# no operator involved, or the pure NAS flow is broken.
+# The binder completes WaitForFirstConsumer for podless claims: Bound must
+# arrive before any consumer exists, or the pure NAS flow is broken.
 retry 600 "PVC Bound with no consumer" pvc_bound
 # The pod exercises workload IO on the volume; binding happened above.
 kc apply -f - <<'EOF'
@@ -319,8 +319,8 @@ TARGET_VOL=boot-test TARGET_SNAP=boot-snap ui_phase snapshot-volume
 snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "snapshot ready" snap_ready
 TARGET_SNAP=boot-snap TARGET_VOL=boot-restore ui_phase restore-snapshot
-# No consumer on purpose: linstor-csi must restore where the snapshot
-# lives and bind podless; this row proves that placement is native.
+# No consumer on purpose: the binder must pin the restore to the
+# snapshot's node and bind it podless.
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
