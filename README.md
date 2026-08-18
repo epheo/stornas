@@ -175,7 +175,18 @@ stornas behavior and configuration.
 
 Volume cloning, raid5/raid10, async remote replication (DRBD protocol A),
 ALUA multipath, scheduled snapshots, quotas, OIDC, per-user SMB
-ownership and ACLs, FC/NVMe-oF, controller HA.
+ownership and ACLs, NVMe/TCP, controller HA.
+
+## Not planned
+
+Fibre Channel, FCoE, NVMe/RDMA, NVMe/FC. Each needs an HBA, a CNA, or a
+lossless DCB fabric, none of which qemu can present, so their flows can
+never pass a gate and the rule above bars them from existing.
+
+Non-disruptive SAN failover, under any transport. A Secondary DRBD device
+is unreadable, so the standby node cannot export a path before promotion;
+active/passive is bounded by DRBD, not by iSCSI. NVMe/TCP above is a
+performance item, and ALUA multipath is per-node link redundancy.
 
 ## Layout
 
