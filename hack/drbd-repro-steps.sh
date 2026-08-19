@@ -128,6 +128,50 @@ diverge() { # diverge <res>
 	v1 drbdsetup secondary "$res" 2>/dev/null || true
 }
 
+# Round 2: fresh resources detect split-brain on both paths (run
+# 32199988923), so creation alone is innocent. The failing gate runs
+# had history before the accident; replay its UUID-relevant parts:
+# plain IO, a peer-loss resync (current rotates, bitmap fills), and a
+# CSI resize.
+history() { # history <res> <pvc>
+	local res=$1 pvc=$2 m1
+	m1=$(minor_of v1 "$res")
+	log "repro: history for $res: IO, peer-loss resync, resize"
+	v1 drbdsetup primary "$res" 2>/dev/null || echo "NOTE $res: history promote failed"
+	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=32 oflag=direct conv=fsync" 2>/dev/null \
+		|| echo "NOTE $res: history write failed"
+	partition on
+	hcut() { ! v1 ping -c 1 -W 1 "$IP2"; }
+	retry 60 "history cut for $res" hcut
+	hlost() { v1 sh -c "drbdsetup status $res | grep -q Connecting"; }
+	retry 120 "history peer lost for $res" hlost
+	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=32 seek=32 oflag=direct conv=fsync" 2>/dev/null \
+		|| echo "NOTE $res: lone-primary write failed"
+	partition off
+	retry 300 "$res resynced UpToDate" uptodate "$res"
+	v1 drbdsetup secondary "$res" 2>/dev/null || true
+	kc -n stornas-system patch pvc "$pvc" --type merge \
+		-p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}'
+	# sysfs works on a Secondary; opening the device would not.
+	local t=0
+	while [ "$t" -lt 300 ]; do
+		[ "$(v1 cat "/sys/block/drbd$m1/size" 2>/dev/null || echo 0)" -ge 4194304 ] && break
+		sleep 5
+		t=$((t + 5))
+	done
+	if [ "$t" -ge 300 ]; then
+		echo "NOTE $res: resize did not land in 300s, continuing without it"
+	else
+		log "ok: $res resized to 2Gi"
+	fi
+}
+
+history "$RES_W" repro-wffc
+history "$RES_I" repro-imm
+log "repro: post-history state"
+dump "$RES_W"
+dump "$RES_I"
+
 diverge "$RES_W"
 diverge "$RES_I"
 
