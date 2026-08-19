@@ -26,8 +26,17 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: install qemu and UEFI firmware
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf
+          # The azure apt mirror can stall for hours; pin the main
+          # archive and bound every apt call so a bad mirror fails the
+          # step fast instead of eating the whole job timeout.
+          sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources || true
+          for i in 1 2 3; do
+            sudo timeout 120 apt-get update && break
+            [ "$i" = 3 ] && exit 1
+            sleep 10
+          done
+          sudo timeout 600 apt-get install -y qemu-system-x86 ovmf
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
