@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,7 +44,7 @@ func TestTargetAgentTearsDownWhenPlacedElsewhere(t *testing.T) {
 		"ip -j addr show to 192.168.1.50":                     {out: `[{"ifname":"eth0"}]`},
 		"ip addr del 192.168.1.50/24 dev eth0":                {},
 	}}
-	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
@@ -95,7 +97,7 @@ func TestTargetAgentRemovesOnDeletion(t *testing.T) {
 		"ip -j addr show to 192.168.1.50":                     {out: `[{"ifname":"eth0"}]`},
 		"ip addr del 192.168.1.50/24 dev eth0":                {},
 	}}
-	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
@@ -148,7 +150,7 @@ func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
 		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                                      {},
 		"targetcli saveconfig":                                                             {},
 	}}
-	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
 
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
@@ -163,5 +165,51 @@ func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
 	}
 	if len(f.calls) != converged {
 		t.Fatalf("quiet tick reran the walk: %v", f.calls[converged:])
+	}
+}
+
+// A CR deleted while this node was partitioned reconciles as NotFound
+// after the heal: the export is found in the live tree, but only the
+// host record still knows the VIP. Losing it here is the orphan that
+// keeps two nodes answering ARP for one address.
+func TestTargetAgentReleasesVIPWhenCRGone(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, vipRecordDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := filepath.Join(root, vipRecordDir, "vms")
+	if err := os.WriteFile(rec, []byte("192.168.1.50/24"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi delete iqn.2026-08.io.stornas:vms": {},
+		"targetcli ls /backstores/block 1":                   {out: "o- block\n"},
+		"targetcli saveconfig":                               {},
+		"ip -j addr show to 192.168.1.50":                    {out: `[{"ifname":"eth0"}]`},
+		"ip addr del 192.168.1.50/24 dev eth0":               {},
+	}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: root}}
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	dropped := false
+	for _, call := range f.calls {
+		if call == "ip addr del 192.168.1.50/24 dev eth0" {
+			dropped = true
+		}
+	}
+	if !dropped {
+		t.Fatalf("VIP left on the node with the CR gone: %v", f.calls)
+	}
+	if _, err := os.Stat(rec); !os.IsNotExist(err) {
+		t.Fatalf("vip record not cleaned up: %v", err)
 	}
 }

@@ -5,16 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
+
+// vipRecordDir persists which VIP each target holds on this node: a CR
+// deleted while the node is partitioned arrives later as a bare NotFound,
+// and the record is then the only place the VIP is known.
+const vipRecordDir = "/var/lib/stornas/vips"
 
 // LIOManager converges the host LIO target config through targetcli. The
 // host owns /etc/target/saveconfig.json (targetcli saveconfig), so exports
 // survive reboots without the agent.
 type LIOManager struct {
 	Run Runner
+	// Root prefixes host file paths so tests run against a temp tree.
+	Root string
 }
 
 // ChapCred is one initiator's CHAP credential, resolved from its Secret by
@@ -105,7 +114,7 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 	m.pruneACLs(ctx, t)
 	m.pruneLUNs(ctx, t)
 	if t.Spec.VIP != "" {
-		if err := m.ensureVIP(ctx, t.Spec.VIP); err != nil {
+		if err := m.ensureVIP(ctx, t.Name, t.Spec.VIP); err != nil {
 			return err
 		}
 	}
@@ -175,11 +184,36 @@ func (m *LIOManager) TeardownTarget(ctx context.Context, name, vip string) {
 		m.RemoveTarget(ctx, name)
 	}
 	if vip != "" {
-		for _, dev := range m.vipHolders(ctx, vip) {
-			if _, err := m.Run.Run(ctx, "ip", "addr", "del", vip, "dev", dev); err != nil {
-				fmt.Printf("ip addr del %s dev %s: %v\n", vip, dev, err)
-			}
+		m.dropVIP(ctx, vip)
+	}
+	m.releaseVIP(ctx, name)
+}
+
+// dropVIP removes vip from every interface holding it; absent is converged.
+func (m *LIOManager) dropVIP(ctx context.Context, vip string) {
+	for _, dev := range m.vipHolders(ctx, vip) {
+		if _, err := m.Run.Run(ctx, "ip", "addr", "del", vip, "dev", dev); err != nil {
+			fmt.Printf("ip addr del %s dev %s: %v\n", vip, dev, err)
 		}
+	}
+}
+
+func (m *LIOManager) vipRecord(name string) string {
+	return filepath.Join(m.Root+vipRecordDir, name)
+}
+
+// releaseVIP drops the VIP recorded for name and the record itself; no
+// record means nothing to release. This is the only teardown path that
+// works after the spec is gone.
+func (m *LIOManager) releaseVIP(ctx context.Context, name string) {
+	rec := m.vipRecord(name)
+	b, err := os.ReadFile(rec)
+	if err != nil {
+		return
+	}
+	m.dropVIP(ctx, strings.TrimSpace(string(b)))
+	if err := os.Remove(rec); err != nil {
+		fmt.Printf("remove vip record %s: %v\n", rec, err)
 	}
 }
 
@@ -205,7 +239,8 @@ func (m *LIOManager) vipHolders(ctx context.Context, vip string) []string {
 }
 
 // RemoveTarget tears down the export; backstores are found by prefix from
-// the live tree because the Target object is already gone.
+// the live tree and the VIP from the host record, because the Target
+// object is already gone.
 func (m *LIOManager) RemoveTarget(ctx context.Context, name string) {
 	m.remove(ctx, "/iscsi", "delete", iqnFor(name))
 	out, err := m.Run.Run(ctx, "targetcli", "ls", "/backstores/block", "1")
@@ -218,6 +253,7 @@ func (m *LIOManager) RemoveTarget(ctx context.Context, name string) {
 		}
 	}
 	_, _ = m.Run.Run(ctx, "targetcli", "saveconfig")
+	m.releaseVIP(ctx, name)
 }
 
 func iqnFor(name string) string {
@@ -228,7 +264,7 @@ func iqnFor(name string) string {
 // is idempotent; a fresh claim is announced with gratuitous ARP so
 // switches and initiators repoint without waiting for cache expiry. GARP
 // failure only logs: the export must not fail over a lost announce.
-func (m *LIOManager) ensureVIP(ctx context.Context, vip string) error {
+func (m *LIOManager) ensureVIP(ctx context.Context, name, vip string) error {
 	out, err := m.Run.Run(ctx, "ip", "-j", "route", "show", "default")
 	if err != nil {
 		return err
@@ -241,6 +277,13 @@ func (m *LIOManager) ensureVIP(ctx context.Context, vip string) error {
 	}
 	dev := routes[0].Dev
 	fresh := len(m.vipHolders(ctx, vip)) == 0
+	// Recorded before the address lands: a crash between the two leaves a
+	// record without an address, which releaseVIP treats as converged.
+	if err := os.MkdirAll(m.Root+vipRecordDir, 0o755); err != nil {
+		fmt.Printf("mkdir %s: %v\n", m.Root+vipRecordDir, err)
+	} else if err := os.WriteFile(m.vipRecord(name), []byte(vip), 0o644); err != nil {
+		fmt.Printf("record vip %s for %s: %v\n", vip, name, err)
+	}
 	if _, err := m.Run.Run(ctx, "ip", "addr", "replace", vip, "dev", dev); err != nil {
 		return err
 	}

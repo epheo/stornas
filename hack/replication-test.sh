@@ -1137,6 +1137,38 @@ retry 300 "agent back" agents_running
 retry 120 "share md stayed exported through the restart" share_md_on_node2
 retry 120 "target md stayed exported through the restart" target_md_on_node2
 
+# The orphan edge: target and share md are deleted while their active
+# node is partitioned. Both deletes land before the readiness flip, so
+# the operator takes the deletion path and never re-places (no failover,
+# no stale promotion of a disconnected replica); the finalizers then
+# release on the unready active node and the CRs are gone before node2
+# hears anything. On heal the agent sees only bare NotFounds: the share
+# tears down by name, but no spec is left to name the VIP, so only the
+# host record can release it. Without that the returned node keeps
+# answering ARP for an address that no longer exists anywhere in the API.
+log "delete during a partition: the healed node sheds export, VIP, mount"
+retry 60 "appliance API login" api_login
+partition on
+retry 60 "VM to VM traffic cut again" partition_effective
+api DELETE /targets/md >/dev/null || die "target md delete through the API failed"
+api DELETE /shares/md >/dev/null || die "share md delete through the API failed"
+target_md_gone() { ! kc -n stornas-system get target md >/dev/null 2>&1; }
+share_md_gone() { ! kc -n stornas-system get share md >/dev/null 2>&1; }
+retry 300 "target md CR gone (finalizer released on the unready active)" target_md_gone
+retry 300 "share md CR gone (finalizer released on the unready active)" share_md_gone
+# The accident is real only if node2 still serves what the API deleted.
+v2 sh -c 'targetcli ls /iscsi 1 | grep -q stornas:md' \
+	|| die "node2 already shed the export; the partition was not effective"
+vip2_on_node2 || die "node2 already shed VIP2; the partition was not effective"
+partition off
+retry 600 "both nodes Ready after the delete-heal" both_ready
+node2_shed_md_export() { ! v2 sh -c 'targetcli ls /iscsi 1 2>/dev/null | grep -q stornas:md'; }
+node2_shed_vip2() { ! v2 sh -c "ip -j addr show to $VIP2 | grep -q ifname"; }
+node2_shed_md_mount() { ! v2 findmnt /var/lib/stornas/shares/stornas-system-md; }
+retry 300 "node2 shed the deleted export without a reboot" node2_shed_md_export
+retry 120 "node2 shed VIP2 without a reboot" node2_shed_vip2
+retry 120 "node2 shed the deleted share mount without a reboot" node2_shed_md_mount
+
 # Deletion is a feature: the export, VIP, and mount must leave the host,
 # not just the API. The target path exercises the teardown finalizer
 # (the spec carries the VIP, so it must outlive the agent's teardown).

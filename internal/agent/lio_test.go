@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,7 +44,8 @@ func TestEnsureTargetFullFlow(t *testing.T) {
 		"arping -U -c 2 -I eth0 192.168.1.50":      {},
 		"targetcli saveconfig":                     {},
 	}}
-	m := &LIOManager{Run: f}
+	root := t.TempDir()
+	m := &LIOManager{Run: f, Root: root}
 
 	err := m.EnsureTarget(context.Background(), testTarget(), map[string]ChapCred{
 		"iqn.1994-05.com.redhat:client1": {User: "u1", Password: "p1"},
@@ -52,6 +55,11 @@ func TestEnsureTargetFullFlow(t *testing.T) {
 	}
 	if f.calls[len(f.calls)-1] != "targetcli saveconfig" {
 		t.Fatalf("saveconfig must be last: %v", f.calls)
+	}
+	// The record is the CR-gone teardown's only source of the VIP.
+	b, err := os.ReadFile(filepath.Join(root, vipRecordDir, "vms"))
+	if err != nil || string(b) != "192.168.1.50/24" {
+		t.Fatalf("vip record = %q, %v", b, err)
 	}
 }
 
@@ -71,7 +79,7 @@ func TestEnsureVIPSkipsGarpWhenHeld(t *testing.T) {
 		"ip addr replace 192.168.1.50/24 dev eth0": {},
 		"targetcli saveconfig":                     {},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 
 	if err := m.EnsureTarget(context.Background(), testTarget(), nil); err != nil {
 		t.Fatal(err)
@@ -102,7 +110,7 @@ func TestEnsureTargetToleratesExisting(t *testing.T) {
 		"ip addr replace 192.168.1.50/24 dev eth0": {},
 		"targetcli saveconfig":                     {},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 
 	if err := m.EnsureTarget(context.Background(), testTarget(), nil); err != nil {
 		t.Fatal(err)
@@ -119,7 +127,7 @@ func TestEnsureTargetSurfacesMissingDevice(t *testing.T) {
 			err: errExitWith("/dev/drbd1000 does not exist"),
 		},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 
 	if err := m.EnsureTarget(context.Background(), testTarget(), nil); err == nil {
 		t.Fatal("want error for a missing backing device")
@@ -153,7 +161,7 @@ func TestEnsureTargetPrunesDroppedEntries(t *testing.T) {
 		"ip addr replace 192.168.1.50/24 dev eth0": {},
 		"targetcli saveconfig":                     {},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 
 	if err := m.EnsureTarget(context.Background(), testTarget(), nil); err != nil {
 		t.Fatal(err)
@@ -196,7 +204,7 @@ func TestEnsureTargetAuthFollowsSpec(t *testing.T) {
 		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
 		"targetcli saveconfig":                                                             {},
 	}}
-	if err := (&LIOManager{Run: f}).EnsureTarget(context.Background(), open, nil); err != nil {
+	if err := (&LIOManager{Run: f, Root: t.TempDir()}).EnsureTarget(context.Background(), open, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,7 +220,7 @@ func TestEnsureTargetAuthFollowsSpec(t *testing.T) {
 		"ip addr replace 192.168.1.50/24 dev eth0":                                         {},
 		"targetcli saveconfig":                                                             {},
 	}}
-	if err := (&LIOManager{Run: locked}).EnsureTarget(context.Background(), testTarget(), nil); err != nil {
+	if err := (&LIOManager{Run: locked, Root: t.TempDir()}).EnsureTarget(context.Background(), testTarget(), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -230,7 +238,7 @@ func TestTeardownTargetClearsExportAndVIP(t *testing.T) {
 		"ip -j addr show to 192.168.1.50":                     {out: `[{"ifname":"eth0"}]`},
 		"ip addr del 192.168.1.50/24 dev eth0":                {},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 	m.TeardownTarget(context.Background(), "vms", "192.168.1.50/24")
 
 	got := map[string]bool{}
@@ -250,7 +258,7 @@ func TestTeardownTargetQuietWhenAbsent(t *testing.T) {
 		"targetcli ls /iscsi/" + iqn + " 1": {err: errExitWith("No such path /iscsi/" + iqn)},
 		"ip -j addr show to 192.168.1.50":   {out: `[]`},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 	m.TeardownTarget(context.Background(), "vms", "192.168.1.50/24")
 
 	if len(f.calls) != 2 {
@@ -265,12 +273,48 @@ func TestRemoveTargetDeletesByPrefix(t *testing.T) {
 		"targetcli /backstores/block delete stornas-vms-lun0": {},
 		"targetcli saveconfig":                                {},
 	}}
-	m := &LIOManager{Run: f}
+	m := &LIOManager{Run: f, Root: t.TempDir()}
 	m.RemoveTarget(context.Background(), "vms")
 
 	for _, c := range f.calls {
 		if strings.Contains(c, "delete stornas-other") {
 			t.Fatalf("deleted another target's backstore: %v", f.calls)
 		}
+	}
+}
+
+// A target deleted while this node was partitioned comes back as a bare
+// NotFound: the spec (the only place the VIP lived) is gone, so the host
+// record must name the address or it lingers forever.
+func TestRemoveTargetReleasesRecordedVIP(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, vipRecordDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := filepath.Join(root, vipRecordDir, "vms")
+	if err := os.WriteFile(rec, []byte("192.168.1.50/24"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi delete iqn.2026-08.io.stornas:vms": {},
+		"targetcli ls /backstores/block 1":                   {out: "o- block\n"},
+		"targetcli saveconfig":                               {},
+		"ip -j addr show to 192.168.1.50":                    {out: `[{"ifname":"eth0"}]`},
+		"ip addr del 192.168.1.50/24 dev eth0":               {},
+	}}
+	m := &LIOManager{Run: f, Root: root}
+	m.RemoveTarget(context.Background(), "vms")
+
+	dropped := false
+	for _, c := range f.calls {
+		if c == "ip addr del 192.168.1.50/24 dev eth0" {
+			dropped = true
+		}
+	}
+	if !dropped {
+		t.Fatalf("recorded VIP left on the node: %v", f.calls)
+	}
+	if _, err := os.Stat(rec); !os.IsNotExist(err) {
+		t.Fatalf("vip record not cleaned up: %v", err)
 	}
 }
