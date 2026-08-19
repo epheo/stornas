@@ -19,5 +19,6 @@ The LINSTOR storage pool name is `stornas` by convention: every
 StoragePool CR registers its VG under that name so StorageClasses stay
 node agnostic.
 
-Not yet included: the external snapshot-controller (comes with the
-snapshots milestone; the VolumeSnapshotClass is inert until then).
+The external snapshot-controller ships with MicroShift, not here;
+these manifests add only the VolumeSnapshotClass and the
+csi-snapshotter sidecar the LINSTOR CSI pods run.
