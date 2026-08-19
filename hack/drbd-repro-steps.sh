@@ -66,8 +66,8 @@ dump() { # dump <res> - birth certificate and live state, both nodes
 	echo "--- linstor rd properties"; linstor_cmd resource-definition list-properties "$1" 2>&1 || true
 	echo "--- linstor resource list"; linstor_cmd resource list -r "$1" 2>&1 || true
 	for n in v1 v2; do
-		echo "--- $n drbdsetup show"; $n drbdsetup show "$1" 2>&1 || true
-		echo "--- $n drbdsetup status --verbose"; $n drbdsetup status "$1" --verbose --statistics 2>&1 || true
+		echo "--- $n drbdsetup show"; $n timeout 30 drbdsetup show "$1" 2>&1 || true
+		echo "--- $n drbdsetup status --verbose"; $n timeout 30 drbdsetup status "$1" --verbose --statistics 2>&1 || true
 		echo "--- $n dmesg for $1 (uuid/handshake lines)"
 		$n sh -c "dmesg | grep '$1' | grep -Ei 'uuid|handshake|bitmap|sync|split' | tail -30" 2>&1 || true
 	done
@@ -126,7 +126,7 @@ diverge() { # diverge <res>
 	else
 		echo "VERDICT $res: NO DETECTION after 120s"
 	fi
-	v1 drbdsetup secondary "$res" 2>/dev/null || true
+	v1 timeout 30 drbdsetup secondary "$res" 2>/dev/null || true
 }
 
 # Round 2: fresh resources detect split-brain on both paths (run
@@ -150,7 +150,7 @@ history() { # history <res> <pvc>
 		|| echo "NOTE $res: lone-primary write failed"
 	partition off
 	retry 300 "$res resynced UpToDate" uptodate "$res"
-	v1 drbdsetup secondary "$res" 2>/dev/null || true
+	v1 timeout 30 drbdsetup secondary "$res" 2>/dev/null || true
 	kc -n stornas-system patch pvc "$pvc" --type merge \
 		-p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}' \
 		|| echo "NOTE $res: resize request refused"
