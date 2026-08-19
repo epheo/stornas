@@ -19,6 +19,7 @@ parameters:
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
   csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: Immediate
+allowVolumeExpansion: true
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -151,7 +152,8 @@ history() { # history <res> <pvc>
 	retry 300 "$res resynced UpToDate" uptodate "$res"
 	v1 drbdsetup secondary "$res" 2>/dev/null || true
 	kc -n stornas-system patch pvc "$pvc" --type merge \
-		-p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}'
+		-p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}' \
+		|| echo "NOTE $res: resize request refused"
 	# sysfs works on a Secondary; opening the device would not.
 	local t=0
 	while [ "$t" -lt 300 ]; do
