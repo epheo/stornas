@@ -329,7 +329,7 @@ pools_have_capacity() {
 	out=$(linstor_cmd -m storage-pool list -s stornas 2>/dev/null) || return 1
 	[ "$(grep -oE '"free_capacity": *[1-9][0-9]*' <<<"$out" | wc -l)" -ge 2 ]
 }
-retry 120 "LINSTOR reports free capacity on both pools" pools_have_capacity
+retry 600 "LINSTOR reports free capacity on both pools" pools_have_capacity
 
 # A repro harness reuses the two-node bring-up: with REPRO_SCRIPT set
 # the gate stops here and the sourced steps own the cluster.
