@@ -132,6 +132,28 @@ diagnostics() {
 		kc -n stornas-system exec "${agent2:-none}" -- curl -s -m5 -o /dev/null -w '%{http_code}\n' "$u" 2>&1 | tail -2 || true
 	done
 	v2 sh -c "curl -s -m5 -o /dev/null -w 'host->pod %{http_code}\n' http://${lc_pod:-127.0.0.1}:3370/health; curl -s -m5 -o /dev/null -w 'host->svc %{http_code}\n' http://${lc_svc:-127.0.0.1}:3370/health; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
+	log "DIAGNOSTICS: tunnels, routes, firewall on both nodes"
+	for fn in v1 v2; do
+		$fn sh -c 'hostname; ovs-vsctl --columns=name,options find interface type=geneve 2>/dev/null; ip route show 2>/dev/null; firewall-cmd --list-all 2>/dev/null | grep -E "interfaces|services|ports|target"; ss -unl 2>/dev/null | grep 6081' 2>&1 || true
+	done
+	log "DIAGNOSTICS: chassis view, cluster router routes, zone errors per node"
+	p1=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node1" {print $1}') || true
+	for pn in "node1 ${p1:-}" "node2 ${p2:-}"; do
+		set -- $pn
+		[ -n "${2:-}" ] || continue
+		echo "--- $1 sbdb"
+		kc -n openshift-ovn-kubernetes exec "$2" -c sbdb -- ovn-sbctl --no-leader-only show 2>&1 | grep -E 'Chassis|hostname|ip:|tstor|cr-rtos|GR_' | head -16 || true
+		echo "--- $1 ovn_cluster_router routes"
+		kc -n openshift-ovn-kubernetes exec "$2" -c nbdb -- ovn-nbctl --no-leader-only lr-route-list ovn_cluster_router 2>&1 | head -12 || true
+		echo "--- $1 transit switch ports"
+		kc -n openshift-ovn-kubernetes exec "$2" -c nbdb -- ovn-nbctl --no-leader-only --columns=name,type,addresses,options find logical_switch_port 'name~=tstor' 2>&1 | head -16 || true
+		echo "--- $1 ovnkube-controller zone/transit/tunnel problems"
+		kc -n openshift-ovn-kubernetes logs "$2" -c ovnkube-controller 2>&1 | grep -iE 'transit|remote|zone|chassis|tunnel|encap|interconnect' | grep -iE 'error|fail|warn|missing|unable|not ' | tail -12 || true
+	done
+	log "DIAGNOSTICS: geneve counters around a ping burst (node2 -> node1 pod ${lc_pod:-?})"
+	v1 sh -c 'hostname; ip -s link show genev_sys_6081 2>/dev/null | tail -4' 2>&1 || true
+	v2 sh -c "hostname; ip -s link show genev_sys_6081 2>/dev/null | tail -4; ping -c3 -W1 ${lc_pod:-127.0.0.1} >/dev/null 2>&1; echo after; ip -s link show genev_sys_6081 2>/dev/null | tail -4" 2>&1 || true
+	v1 sh -c 'hostname; echo after; ip -s link show genev_sys_6081 2>/dev/null | tail -4' 2>&1 || true
 	log "DIAGNOSTICS: node2 apiserver reachability (advertise address)"
 	v2 sh -c 'ss -ltn | grep 6443 || echo "nothing listening on 6443"; curl -ks -m3 https://10.44.0.0:6443/healthz || echo " (advertise address unreachable)"; systemctl is-active microshift' 2>&1 || true
 	log "DIAGNOSTICS: node2 ovnkube-controller log"
@@ -196,7 +218,8 @@ cleanup() {
 		log "FAILED (rc=$rc)"
 		# CI uploads from the workspace; WORKDIR is gone before that step.
 		# Copy first: a diagnostics command that trips errexit ends the trap.
-		cp "$WORKDIR"/console*.log . 2>/dev/null || true
+		# qemu runs under sudo, so the consoles are root's.
+		sudo cp "$WORKDIR"/console*.log . && sudo chown "$(id -u)" console*.log || true
 		diagnostics
 	fi
 	if [ "$KEEP" = 1 ]; then
@@ -329,6 +352,17 @@ both_ready() { [ "$(kc get nodes --no-headers 2>/dev/null | grep -c ' Ready')" -
 retry 900 "both nodes Ready" both_ready
 kc get node node2 -o jsonpath='{.metadata.labels}' | grep -q 'node-role.kubernetes.io/worker' \
 	|| die "node2 is missing the worker role label"
+
+# Zones exchange pod traffic over the geneve transit switch; a broken
+# overlay otherwise surfaces twenty minutes later as a CSI pod stuck in
+# init. Probe host to remote management port both ways first.
+mp_ip() { $1 sh -c 'ip -4 -o addr show ovn-k8s-mp0 | awk "{print \$4}" | cut -d/ -f1'; }
+MP1=$(mp_ip v1) || die "no ovn-k8s-mp0 on node1"
+MP2=$(mp_ip v2) || die "no ovn-k8s-mp0 on node2"
+n2_to_n1() { v2 ping -c1 -W2 "$MP1"; }
+n1_to_n2() { v1 ping -c1 -W2 "$MP2"; }
+retry 120 "overlay: node2 reaches node1 management port $MP1" n2_to_n1
+retry 120 "overlay: node1 reaches node2 management port $MP2" n1_to_n2
 
 satellites_up() { [ "$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers 2>/dev/null | grep -c Running)" -eq 2 ]; }
 retry 900 "two linstor satellites Running" satellites_up
