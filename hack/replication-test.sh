@@ -146,7 +146,7 @@ diagnostics() {
 		echo "--- $1 ovn_cluster_router routes"
 		kc -n openshift-ovn-kubernetes exec "$2" -c nbdb -- ovn-nbctl --no-leader-only lr-route-list ovn_cluster_router 2>&1 | head -12 || true
 		echo "--- $1 transit switch ports"
-		kc -n openshift-ovn-kubernetes exec "$2" -c nbdb -- ovn-nbctl --no-leader-only --columns=name,type,addresses,options find logical_switch_port 'name~=tstor' 2>&1 | head -16 || true
+		kc -n openshift-ovn-kubernetes exec "$2" -c nbdb -- ovn-nbctl --no-leader-only lsp-list transit_switch 2>&1 | head -8 || true
 		echo "--- $1 ovnkube-controller zone/transit/tunnel problems"
 		kc -n openshift-ovn-kubernetes logs "$2" -c ovnkube-controller 2>&1 | grep -iE 'transit|remote|zone|chassis|tunnel|encap|interconnect' | grep -iE 'error|fail|warn|missing|unable|not ' | tail -12 || true
 	done
