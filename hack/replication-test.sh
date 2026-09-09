@@ -115,7 +115,7 @@ diagnostics() {
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ovs-vsctl get Open_vSwitch . external_ids 2>/dev/null; ovs-vsctl list-ports br-ex 2>/dev/null; ovs-vsctl br-get-external-id br-ex 2>/dev/null; ip -br addr show ovn-k8s-mp0 2>/dev/null' 2>&1 || true
 	done
-	p2=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node2" {print $1}')
+	p2=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node2" {print $1}') || true
 	if [ -n "${p2:-}" ]; then
 		kc -n openshift-ovn-kubernetes get pod "$p2" -o jsonpath='{.spec.containers[*].name}{"\n"}' 2>&1 || true
 		kc -n openshift-ovn-kubernetes exec "$p2" -c sbdb -- ovn-sbctl --no-leader-only show 2>&1 | head -30 || true
@@ -123,9 +123,9 @@ diagnostics() {
 	fi
 	# Each hop separately: pod IP (overlay), ClusterIP (OVN load balancer),
 	# then DNS; the first one that fails names the broken layer.
-	agent2=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --field-selector spec.nodeName=node2 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-	lc_pod=$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
-	lc_svc=$(kc -n piraeus-datastore get svc linstor-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+	agent2=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --field-selector spec.nodeName=node2 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
+	lc_pod=$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller -o jsonpath='{.items[0].status.podIP}' 2>/dev/null) || true
+	lc_svc=$(kc -n piraeus-datastore get svc linstor-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
 	echo "linstor-controller pod ${lc_pod:-?} service ${lc_svc:-?}; probes from node2 pod ${agent2:-?} then node2 host"
 	for u in "http://${lc_pod:-127.0.0.1}:3370/health" "http://${lc_svc:-127.0.0.1}:3370/health" "http://linstor-controller.piraeus-datastore.svc:3370/health"; do
 		echo "--- pod: $u"
@@ -135,7 +135,7 @@ diagnostics() {
 	log "DIAGNOSTICS: node2 apiserver reachability (advertise address)"
 	v2 sh -c 'ss -ltn | grep 6443 || echo "nothing listening on 6443"; curl -ks -m3 https://10.44.0.0:6443/healthz || echo " (advertise address unreachable)"; systemctl is-active microshift' 2>&1 || true
 	log "DIAGNOSTICS: node2 ovnkube-controller log"
-	p2=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node2" {print $1}')
+	p2=$(kc -n openshift-ovn-kubernetes get pods -l app=ovnkube-node -o wide --no-headers 2>/dev/null | awk '$7=="node2" {print $1}') || true
 	[ -n "${p2:-}" ] && kc -n openshift-ovn-kubernetes logs "$p2" -c ovnkube-controller --tail=60 2>&1 \
 		| grep -iE 'error|fail|wait|timed|zone|transit|gateway|encap' | tail -25 || true
 	log "DIAGNOSTICS: node2 microshift journal errors"
@@ -194,9 +194,10 @@ cleanup() {
 	rc=$?
 	if [ $rc -ne 0 ]; then
 		log "FAILED (rc=$rc)"
-		diagnostics
 		# CI uploads from the workspace; WORKDIR is gone before that step.
+		# Copy first: a diagnostics command that trips errexit ends the trap.
 		cp "$WORKDIR"/console*.log . 2>/dev/null || true
+		diagnostics
 	fi
 	if [ "$KEEP" = 1 ]; then
 		log "keeping VMs and $WORKDIR"

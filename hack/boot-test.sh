@@ -70,12 +70,13 @@ cleanup() {
 	rc=$?
 	if [ $rc -ne 0 ]; then
 		log "FAILED (rc=$rc)"
+		# CI uploads from the workspace; WORKDIR is gone before that step.
+		# Copy first: a diagnostics command that trips errexit ends the trap.
+		cp "$WORKDIR/console.log" ./console.log 2>/dev/null || true
 		# ssh may itself be the failure; diagnostics degrade to noise then.
 		diagnostics
 		log "last 40 lines of VM console:"
 		tail -40 "$WORKDIR/console.log" 2>/dev/null || true
-		# CI uploads from the workspace; WORKDIR is gone before that step.
-		cp "$WORKDIR/console.log" ./console.log 2>/dev/null || true
 	fi
 	if [ "$KEEP" = 1 ]; then
 		log "keeping VM (pid $(cat "$WORKDIR/qemu.pid" 2>/dev/null || echo '?')) and $WORKDIR"
