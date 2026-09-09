@@ -7,6 +7,12 @@ FROM ghcr.io/epheo/microshift:latest
 # Utils land as a file tree (no rpm target upstream); the kmod as RPMs.
 COPY --from=kmod /out/rpms /tmp/drbd-rpms
 COPY --from=kmod /out/utils/ /
+# A tree copied onto / can replace a usr-merge symlink with a directory;
+# nss-altfiles and kmod then read an empty /lib and the host boots with
+# neither system users nor modules. Fail the build, not the boot.
+RUN for l in /bin /sbin /lib /lib64 /var/run; do \
+		[ -L "$l" ] || { echo "$l is not a symlink" >&2; exit 1; }; \
+	done
 
 # iputils: arping sends the gratuitous ARP on VIP failover.
 # iscsi-initiator-utils: admin debugging of exports, and the e2e client.

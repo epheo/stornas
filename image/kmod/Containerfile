@@ -27,12 +27,27 @@ RUN tar xf drbd-${DRBD_VERSION}.tar.gz \
 # make target, and a bootc layer composes file trees anyway. drbdmon is
 # the lone C++ piece; no manual keeps po4a, xsltproc, and the docbook
 # network fetch out of the build.
+# configure asks pkg-config for the systemd and udev directories and
+# silently falls back to no unit dir and /lib/udev when the build image
+# lacks systemd.pc and udev.pc, which it holds only by accident of
+# dependency resolution. Every directory is pinned instead, and the tree
+# is asserted to stay under etc/ and usr/: any other top-level entry is
+# copied over a usr-merge symlink in the OS image and turns it into a
+# directory, after which nss-altfiles (/lib/group) and the kmod tree
+# (/lib/modules) are gone from the booted host.
 RUN tar xf drbd-utils-${DRBD_UTILS_VERSION}.tar.gz \
 	&& cd drbd-utils-${DRBD_UTILS_VERSION} \
 	&& ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc \
+		--with-initscripttype=systemd \
+		--with-systemdunitdir=/usr/lib/systemd/system \
+		--with-systemdpresetdir=/usr/lib/systemd/system-preset \
+		--with-systemd-exec-condition \
+		--with-tmpfilesdir=/usr/lib/tmpfiles.d \
 		--without-drbdmon --without-manual \
-	&& make && make install DESTDIR=/out/utils \
-	&& rm -rf /out/utils/var
+	&& make \
+	&& make install DESTDIR=/out/utils udevrulesdir=/usr/lib/udev/rules.d \
+	&& rm -rf /out/utils/var \
+	&& [ "$(ls /out/utils | tr '\n' ' ')" = "etc usr " ]
 # /out/utils/var holds only empty runtime dirs, and copying it into the OS
 # image replaces the /var/run -> /run symlink with a real directory, which
 # strands every pidfile written via the legacy path (ovsdb-server first).
