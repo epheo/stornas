@@ -150,6 +150,23 @@ diagnostics() {
 		echo "--- $1 ovnkube-controller zone/transit/tunnel problems"
 		kc -n openshift-ovn-kubernetes logs "$2" -c ovnkube-controller 2>&1 | grep -iE 'transit|remote|zone|chassis|tunnel|encap|interconnect' | grep -iE 'error|fail|warn|missing|unable|not ' | tail -12 || true
 	done
+	log "DIAGNOSTICS: OVN node annotations, chassis ids, transit tunnel keys"
+	for n in node1 node2; do
+		echo "--- $n annotations"
+		kc get node "$n" -o json 2>/dev/null | python3 -c 'import json,sys; a=json.load(sys.stdin)["metadata"]["annotations"]; [print(" ", k, "=", v[:160]) for k,v in sorted(a.items()) if k.startswith("k8s.ovn.org/")]' 2>&1 || true
+	done
+	for fn in v1 v2; do
+		$fn sh -c 'echo "$(hostname) ovs system-id: $(ovs-vsctl get open . external_ids:system-id 2>/dev/null)"' 2>&1 || true
+	done
+	for pn in "node1 ${p1:-}" "node2 ${p2:-}"; do
+		set -- $pn
+		[ -n "${2:-}" ] || continue
+		echo "--- $1 transit datapath and port tunnel keys"
+		kc -n openshift-ovn-kubernetes exec "$2" -c sbdb -- ovn-sbctl --no-leader-only --columns=tunnel_key,external_ids find datapath_binding 'external_ids:name=transit_switch' 2>&1 | head -6 || true
+		kc -n openshift-ovn-kubernetes exec "$2" -c sbdb -- ovn-sbctl --no-leader-only --columns=logical_port,tunnel_key,chassis,requested_chassis,options find port_binding 'logical_port~=tstor' 2>&1 | head -12 || true
+		echo "--- $1 chassis records"
+		kc -n openshift-ovn-kubernetes exec "$2" -c sbdb -- ovn-sbctl --no-leader-only --columns=name,hostname,encaps,other_config list chassis 2>&1 | head -16 || true
+	done
 	log "DIAGNOSTICS: geneve counters around a ping burst (node2 -> node1 pod ${lc_pod:-?})"
 	v1 sh -c 'hostname; ip -s link show genev_sys_6081 2>/dev/null | tail -4' 2>&1 || true
 	v2 sh -c "hostname; ip -s link show genev_sys_6081 2>/dev/null | tail -4; ping -c3 -W1 ${lc_pod:-127.0.0.1} >/dev/null 2>&1; echo after; ip -s link show genev_sys_6081 2>/dev/null | tail -4" 2>&1 || true
