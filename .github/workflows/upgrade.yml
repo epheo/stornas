@@ -56,5 +56,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: upgrade-console
-          path: /tmp/stornas-upg*/console.log
+          path: console.log
           if-no-files-found: ignore

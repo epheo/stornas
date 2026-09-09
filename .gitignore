@@ -6,3 +6,5 @@ web/.svelte-kit/
 operator/bin/
 image/build/
 *.out
+/console*.log
+/ui-*-failed.png

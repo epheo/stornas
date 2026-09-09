@@ -64,6 +64,6 @@ jobs:
         with:
           name: vm-console
           path: |
-            /tmp/stornas-vm*/console.log
+            console.log
             ui-*-failed.png
           if-no-files-found: ignore

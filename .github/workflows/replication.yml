@@ -63,6 +63,6 @@ jobs:
         with:
           name: repl-consoles
           path: |
-            /tmp/stornas-repl*/console*.log
+            console*.log
             ui-*-failed.png
           if-no-files-found: ignore
