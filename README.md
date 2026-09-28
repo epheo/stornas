@@ -167,6 +167,9 @@ make replication-test  # two nodes: replication, failover, clients, split brain
 make upgrade-test      # air-gapped upgrade and poisoned-image rollback
 ```
 
+`make image` replaces the base image's kernel with the newest CentOS
+Stream 10 kernel and builds the DRBD kmod against it, so every gate runs
+on the current kernel.
 The gates boot real VMs with qemu and drive the UI with playwright.
 The rule they enforce: a feature exists once its UI/UX flow passes e2e;
 kernel, mdadm, and DRBD internals are never the test subject, only
