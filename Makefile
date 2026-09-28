@@ -72,10 +72,7 @@ embed: images
 	done
 
 kmod:
-	podman build --retry 5 --retry-delay 10s --target kmod -t stornas-kmod -f image/kmod/Containerfile \
-		--build-arg KERNEL_VERSION=$$(podman run --rm $(BASE_IMAGE) \
-			rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core) \
-		image/kmod
+	podman build --retry 5 --retry-delay 10s --target kmod -t stornas-kmod -f image/kmod/Containerfile image/kmod
 
 image: sync-manifests embed kmod
 	podman build --retry 5 --retry-delay 10s --build-context kmod=docker-image://localhost/stornas-kmod \

@@ -2,6 +2,17 @@
 # Pin by digest before release; :latest only while bootstrapping.
 FROM ghcr.io/epheo/microshift:latest
 
+# The appliance runs the newest CentOS Stream 10 kernel, chosen by the
+# kmod stage together with its headers. installonlypkgs is empty in the
+# bootc base, so dnf replaces the kernel in place and rpm-ostree's
+# kernel-install hook rebuilds the initramfs. A repo behind the base
+# would refuse the downgrade and leave the kmod orphaned: fail here.
+COPY --from=kmod /out/kernel /tmp/kernel
+RUN dnf install -y /tmp/kernel/*.rpm && dnf clean all \
+	&& [ "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)" \
+		= "$(rpm -qp --qf '%{VERSION}-%{RELEASE}.%{ARCH}' /tmp/kernel/kernel-core-*.rpm)" ] \
+	&& rm -rf /tmp/kernel
+
 # drbd-utils and the drbd9 kmod are not in CentOS repos; they come from
 # the kmod build stage (image/kmod) matched to this image's kernel.
 # Utils land as a file tree (no rpm target upstream); the kmod as RPMs.
@@ -30,6 +41,12 @@ RUN dnf install -y \
 	/tmp/drbd-rpms/*/kmod-drbd-[0-9]*.rpm \
 	&& dnf clean all \
 	&& rm -rf /tmp/drbd-rpms
+# A second tree under /usr/lib/modules makes bootc install refuse the
+# image at deploy time; a drbd module built for another kernel would
+# only fail at boot.
+RUN kver=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core) \
+	&& [ "$(ls /usr/lib/modules)" = "$kver" ] \
+	&& modinfo -k "$kver" -F vermagic drbd | grep -q "^$kver "
 
 # Everything the appliance runs ships in the image: workload images as OCI
 # archives (imported into cri-o at boot by the distro's import service)

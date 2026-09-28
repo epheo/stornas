@@ -47,7 +47,7 @@ jobs:
         working-directory: web
       - run: make web
 
-  # Builds the DRBD 9 kmod against the base image kernel, then the full
+  # Builds the DRBD 9 kmod against the newest CentOS Stream kernel, then the full
   # bootc layer. A kernel/kmod mismatch must never publish; this is the gate.
   image:
     runs-on: ubuntu-latest

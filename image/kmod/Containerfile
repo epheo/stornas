@@ -1,27 +1,35 @@
-# Builds the out-of-tree DRBD 9 kmod and drbd-utils as RPMs against the
-# exact kernel of the microshift base image. The image build fails if the
-# kernel headers and base kernel diverge; greenboot is the last resort,
-# this stage is the first line.
+# Builds the out-of-tree DRBD 9 kmod and drbd-utils against the newest
+# CentOS Stream 10 kernel and hands the matching kernel RPMs to the OS
+# image. The appliance follows the latest kernel, not the base image's,
+# and headers and kernel come out of one dnf resolution so they cannot
+# diverge, nor depend on an older kernel still being in the repo.
 FROM quay.io/centos/centos:stream10 AS build
 
 # 9.3.x tracks current kernels; 9.2.x lacks the timer API of 6.16+.
 # Piraeus's own module loaders ship the same line (drbd9 v9.3.3).
 ARG DRBD_VERSION=9.3.3
 ARG DRBD_UTILS_VERSION=9.34.0
-# Must match the kernel in ghcr.io/epheo/microshift; CI extracts it from
-# the base image and passes it in.
-ARG KERNEL_VERSION
 
+# dnf download skips signature checks; rpmkeys verifies the kernel RPMs
+# against the CentOS key before they can reach the OS image.
 RUN dnf install -y gcc make rpm-build elfutils-libelf-devel \
-	kernel-devel-${KERNEL_VERSION} kernel-rpm-macros \
-	flex keyutils-libs-devel && dnf clean all
+	kernel-devel kernel-rpm-macros dnf-plugins-core \
+	flex keyutils-libs-devel \
+	&& kver=$(rpm -q --qf '%{VERSION}-%{RELEASE}' kernel-devel) \
+	&& dnf download --destdir /out/kernel \
+		kernel-$kver kernel-core-$kver kernel-modules-$kver \
+		kernel-modules-core-$kver kernel-modules-extra-$kver \
+	&& rpmkeys --import /etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial* \
+	&& rpmkeys -K /out/kernel/*.rpm \
+	&& dnf clean all
 
 WORKDIR /build
 RUN curl -fsSLO https://pkg.linbit.com/downloads/drbd/9/drbd-${DRBD_VERSION}.tar.gz \
 	&& curl -fsSLO https://pkg.linbit.com/downloads/drbd/utils/drbd-utils-${DRBD_UTILS_VERSION}.tar.gz
 
 RUN tar xf drbd-${DRBD_VERSION}.tar.gz \
-	&& make -C drbd-${DRBD_VERSION} kmp-rpm KDIR=/usr/src/kernels/${KERNEL_VERSION}
+	&& make -C drbd-${DRBD_VERSION} kmp-rpm \
+		KDIR=/usr/src/kernels/$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-devel)
 
 # Utils ship as a plain DESTDIR tree, not an RPM: 9.31 dropped the rpm
 # make target, and a bootc layer composes file trees anyway. drbdmon is
@@ -54,5 +62,6 @@ RUN tar xf drbd-utils-${DRBD_UTILS_VERSION}.tar.gz \
 # tmpfiles.d in the OS image recreates what drbd needs.
 
 FROM scratch AS kmod
+COPY --from=build /out/kernel /out/kernel
 COPY --from=build /root/rpmbuild/RPMS /out/rpms
 COPY --from=build /out/utils /out/utils
