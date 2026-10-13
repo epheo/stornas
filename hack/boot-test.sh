@@ -51,6 +51,22 @@ diagnostics() {
 	kc get linstorcluster -o yaml 2>&1 | sed -n '/status:/,$p' | tail -25 || true
 	log "DIAGNOSTICS: piraeus operator log tail"
 	kc -n piraeus-datastore logs deploy/piraeus-operator-controller-manager --tail=25 2>&1 || true
+	# Binding has two owners: the stornas binder sets selected-node, then
+	# the CSI provisioner asks LINSTOR. These name which one stalled.
+	log "DIAGNOSTICS: claims and their events"
+	kc get pvc -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,CLASS:.spec.storageClassName,NODE:.metadata.annotations.volume\.kubernetes\.io/selected-node,CONSUMER:.metadata.annotations.storage\.stornas\.io/consumer' 2>&1 || true
+	kc -n stornas-system get events --field-selector involvedObject.kind=PersistentVolumeClaim --sort-by=.lastTimestamp 2>&1 | tail -20 || true
+	log "DIAGNOSTICS: stornas operator log tail"
+	kc -n stornas-system logs deploy/stornas-operator --tail=60 2>&1 || true
+	log "DIAGNOSTICS: csi-provisioner log tail"
+	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=40 2>&1 || true
+	log "DIAGNOSTICS: linstor pools, resources, errors"
+	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list 2>&1 || true
+	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor resource list 2>&1 || true
+	for id in $(kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err list 2>/dev/null \
+			| grep -oE '[0-9A-F]{8}-[0-9]{5}-[0-9]{6}'); do
+		kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err show "$id" 2>&1 | head -40 || true
+	done
 	log "DIAGNOSTICS: snapshot path"
 	kc get volumesnapshot,volumesnapshotcontent -A 2>&1 || true
 	kc -n stornas-system describe volumesnapshot boot-snap 2>&1 | sed -n '/Status:/,$p' | tail -12 || true
