@@ -77,8 +77,14 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          podman push --retry 5 "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
-          podman push --retry 5 "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
+          # The runner's podman push has no --retry.
+          for tag in "$VERSION" latest; do
+            for i in 1 2 3 4 5; do
+              podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$tag" && break
+              [ "$i" = 5 ] && exit 1
+              sleep 10
+            done
+          done
       - name: collect console log on failure
         if: failure()
         uses: actions/upload-artifact@v4
