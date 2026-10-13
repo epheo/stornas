@@ -98,8 +98,7 @@ mountpoint = "/"
 minsize = "40 GiB"
 EOF
 sync_rootful_image "$IMAGE" "$PODMAN"
-bib_pull() { $PODMAN pull "$BIB_IMAGE"; }
-retry 300 "bootc-image-builder image pulled" bib_pull
+$PODMAN pull "$BIB_IMAGE"
 $PODMAN run --rm --privileged \
 	--security-opt label=type:unconfined_t \
 	-v "$WORKDIR/config.toml:/config.toml:ro" \
