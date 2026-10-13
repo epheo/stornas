@@ -39,11 +39,7 @@ jobs:
           # step fast instead of eating the whole job timeout.
           sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.sources || true
-          for i in 1 2 3; do
-            sudo timeout 120 apt-get update && break
-            [ "$i" = 3 ] && exit 1
-            sleep 10
-          done
+          sudo timeout 120 apt-get update
           sudo timeout 600 apt-get install -y qemu-system-x86 ovmf
       - uses: actions/setup-go@v5
         with:
@@ -64,7 +60,7 @@ jobs:
       - name: resolve version and base digest
         run: |
           echo "VERSION=$(date -u +%Y%m%d).${{ github.run_number }}.g${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-          digest=$(skopeo inspect --retry-times 3 --format '{{.Digest}}' docker://ghcr.io/epheo/microshift:latest)
+          digest=$(skopeo inspect --format '{{.Digest}}' docker://ghcr.io/epheo/microshift:latest)
           echo "BASE_IMAGE=ghcr.io/epheo/microshift@${digest}" >> "$GITHUB_ENV"
       - name: build the appliance image
         run: make image PODMAN=podman VERSION="$VERSION" BASE_IMAGE="$BASE_IMAGE"
@@ -77,14 +73,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          # The runner's podman push has no --retry.
-          for tag in "$VERSION" latest; do
-            for i in 1 2 3 4 5; do
-              podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$tag" && break
-              [ "$i" = 5 ] && exit 1
-              sleep 10
-            done
-          done
+          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
+          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
       - name: collect console log on failure
         if: failure()
         uses: actions/upload-artifact@v4

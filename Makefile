@@ -40,9 +40,9 @@ web:
 
 # App images, built into local podman storage under their runtime names.
 images: web
-	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
-	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
-	podman build --retry 5 --retry-delay 10s -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
+	podman build -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
+	podman build -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
+	podman build -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
 
 sync-manifests: generate
 	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
@@ -65,17 +65,17 @@ embed: images
 	grep -v '^#' image/embedded-images.txt | while read -r img; do \
 		[ -z "$$img" ] && continue; \
 		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
-		skopeo copy --retry-times 3 docker://$$img \
+		skopeo copy docker://$$img \
 			oci-archive:image/build/embedded-images/$$out:$$img || exit 1; \
 		echo "/usr/lib/embedded-images/$$out $$img" \
 			>> image/build/embedded-images/manifest.stornas; \
 	done
 
 kmod:
-	podman build --retry 5 --retry-delay 10s --target kmod -t stornas-kmod -f image/kmod/Containerfile image/kmod
+	podman build --target kmod -t stornas-kmod -f image/kmod/Containerfile image/kmod
 
 image: sync-manifests embed kmod
-	podman build --retry 5 --retry-delay 10s --build-context kmod=docker-image://localhost/stornas-kmod \
+	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
 		--from $(BASE_IMAGE) --label org.opencontainers.image.base.name=$(BASE_IMAGE) \
 		--label org.opencontainers.image.source=https://github.com/epheo/stornas \
 		--label org.opencontainers.image.version=$(VERSION) \
