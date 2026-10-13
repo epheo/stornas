@@ -76,7 +76,10 @@ kmod:
 
 image: sync-manifests embed kmod
 	podman build --retry 5 --retry-delay 10s --build-context kmod=docker-image://localhost/stornas-kmod \
-		--from $(BASE_IMAGE) -f image/Containerfile -t stornas-os:$(VERSION) image
+		--from $(BASE_IMAGE) --label org.opencontainers.image.base.name=$(BASE_IMAGE) \
+		--label org.opencontainers.image.source=https://github.com/epheo/stornas \
+		--label org.opencontainers.image.version=$(VERSION) \
+		-f image/Containerfile -t stornas-os:$(VERSION) image
 
 # Runtime gates, same harness shapes as the distro's smoke-test and
 # vm-test. Both need a root-capable podman (PODMAN='sudo podman');
