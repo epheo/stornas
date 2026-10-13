@@ -2,6 +2,8 @@
 # qcow2, boot under qemu (KVM on the runner), and validate the whole stack
 # via hack/boot-test.sh - the same harness shape as the microshift
 # distro's own vm-test. Heavy on disk and time, so it never gates PRs.
+# A green boot on main publishes ghcr.io/epheo/stornas-os: only images
+# that booted ever reach consumers such as derived site images.
 name: boot-test
 
 on:
@@ -13,6 +15,11 @@ jobs:
   boot:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH_REPO: ghcr.io/epheo/stornas-os
     steps:
       - uses: actions/checkout@v4
       - name: free runner disk
@@ -51,13 +58,27 @@ jobs:
       - name: install playwright chromium for the UI phases
         run: npx playwright install --with-deps chromium
         working-directory: web
+      # Nightly rebuilds of one commit differ (new kernel, new distro), so
+      # the tag carries the date and run, not just the sha. The base is
+      # resolved to a digest so the image records exactly what it sits on.
+      - name: resolve version and base digest
+        run: |
+          echo "VERSION=$(date -u +%Y%m%d).${{ github.run_number }}.g${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          digest=$(skopeo inspect --retry-times 3 --format '{{.Digest}}' docker://ghcr.io/epheo/microshift:latest)
+          echo "BASE_IMAGE=ghcr.io/epheo/microshift@${digest}" >> "$GITHUB_ENV"
       - name: build the appliance image
-        run: make image PODMAN=podman
+        run: make image PODMAN=podman VERSION="$VERSION" BASE_IMAGE="$BASE_IMAGE"
       # No smoke step: microshift-in-container crash-loops on GH runners
       # (etcd/localhost churn); the distro's CI also runs only vm-test.
       # smoke stays a host-side dev tool.
       - name: boot and validate
-        run: make vm-test PODMAN='sudo podman'
+        run: make vm-test PODMAN='sudo podman' VERSION="$VERSION"
+      - name: publish
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman push --retry 5 "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
+          podman push --retry 5 "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
       - name: collect console log on failure
         if: failure()
         uses: actions/upload-artifact@v4
