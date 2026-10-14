@@ -78,6 +78,16 @@ func NewRegistrar(controllerURL string) (*Registrar, error) {
 // Existing pools keep their props: satellites own them after
 // registration and rewriting them behind LINSTOR's back invites drift.
 func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
+	// A pool created while its satellite is disconnected lands in the
+	// catalog with no error and no capacity, and LINSTOR never fetches
+	// the capacity later (boot-test run 38546789566).
+	n, err := r.client.Nodes.Get(ctx, node)
+	if err != nil {
+		return fmt.Errorf("get node %s: %w", node, err)
+	}
+	if n.ConnectionStatus != "ONLINE" {
+		return fmt.Errorf("satellite %s is %s, registration waits for it", node, n.ConnectionStatus)
+	}
 	sp, err := r.client.Nodes.GetStoragePool(ctx, node, storagev1alpha1.LinstorPool)
 	if errors.Is(err, lapi.NotFoundError) {
 		return r.createPool(ctx, node, vg)
@@ -86,22 +96,24 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
 		return fmt.Errorf("get storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
 	}
 	if rc := firstError(sp.Reports); rc != nil {
-		// A pool whose satellite apply failed stays in the catalog and
-		// LINSTOR never retries it, so every volume on it would stall.
-		// Recreating is safe: LINSTOR refuses to drop a pool backing
-		// resources, and then the error stands for a human.
-		if derr := r.DeletePool(ctx, node); derr != nil {
-			return fmt.Errorf("storage pool %s on %s reports %s; recreate: %w",
-				storagev1alpha1.LinstorPool, node, rc.String(), derr)
-		}
-		return fmt.Errorf("storage pool %s on %s reported %s; recreating",
-			storagev1alpha1.LinstorPool, node, rc.String())
+		return r.recreatePool(ctx, node, "reports "+rc.String())
 	}
 	if sp.TotalCapacity <= 0 {
-		return fmt.Errorf("storage pool %s on %s has no capacity reported yet",
-			storagev1alpha1.LinstorPool, node)
+		return r.recreatePool(ctx, node, "has no capacity on an online satellite")
 	}
 	return nil
+}
+
+// recreatePool drops a pool LINSTOR will never make usable on its own, so
+// the next pass creates it again. LINSTOR refuses the drop while the pool
+// backs resources, and then the reason stands for a human.
+func (r *Registrar) recreatePool(ctx context.Context, node, reason string) error {
+	if err := r.DeletePool(ctx, node); err != nil {
+		return fmt.Errorf("storage pool %s on %s %s; recreate: %w",
+			storagev1alpha1.LinstorPool, node, reason, err)
+	}
+	return fmt.Errorf("storage pool %s on %s %s; recreating",
+		storagev1alpha1.LinstorPool, node, reason)
 }
 
 // createPool always returns an error so the caller re-checks health on the

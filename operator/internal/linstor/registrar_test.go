@@ -33,7 +33,15 @@ const (
 
 func newServer(t *testing.T, getStatus int, pool string, created *map[string]any) *httptest.Server {
 	t.Helper()
+	return newServerConn(t, "ONLINE", getStatus, pool, created)
+}
+
+func newServerConn(t *testing.T, conn string, getStatus int, pool string, created *map[string]any) *httptest.Server {
+	t.Helper()
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/nodes/node-a", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"node-a","type":"SATELLITE","connection_status":"` + conn + `"}`))
+	})
 	mux.HandleFunc("GET /v1/nodes/node-a/storage-pools/stornas", func(w http.ResponseWriter, _ *http.Request) {
 		if getStatus == http.StatusOK {
 			_, _ = w.Write([]byte(pool))
@@ -105,8 +113,8 @@ func TestEnsurePoolSurfacesControllerErrors(t *testing.T) {
 	}
 }
 
-func TestEnsurePoolHoldsUntilCapacity(t *testing.T) {
-	srv := newServer(t, http.StatusOK, poolNoCap, nil)
+func TestEnsurePoolWaitsForSatellite(t *testing.T) {
+	srv := newServerConn(t, "OFFLINE", http.StatusNotFound, "", nil)
 	defer srv.Close()
 
 	r, err := NewRegistrar(srv.URL)
@@ -114,28 +122,35 @@ func TestEnsurePoolHoldsUntilCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
-		t.Fatal("want error while LINSTOR reports no capacity")
+		t.Fatal("want error while the satellite is disconnected")
 	}
 }
 
-func TestEnsurePoolRecreatesFailedPool(t *testing.T) {
-	srv := newServer(t, http.StatusOK, poolSatError, nil)
-	defer srv.Close()
-	deleted := false
-	srv.Config.Handler.(*http.ServeMux).HandleFunc("DELETE /v1/nodes/node-a/storage-pools/stornas",
-		func(w http.ResponseWriter, _ *http.Request) {
-			deleted = true
-			_, _ = w.Write([]byte(`[]`))
-		})
+func TestEnsurePoolRecreatesUnusablePools(t *testing.T) {
+	for name, pool := range map[string]string{
+		"error report":                       poolSatError,
+		"no capacity on an online satellite": poolNoCap,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := newServer(t, http.StatusOK, pool, nil)
+			defer srv.Close()
+			deleted := false
+			srv.Config.Handler.(*http.ServeMux).HandleFunc("DELETE /v1/nodes/node-a/storage-pools/stornas",
+				func(w http.ResponseWriter, _ *http.Request) {
+					deleted = true
+					_, _ = w.Write([]byte(`[]`))
+				})
 
-	r, err := NewRegistrar(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
-		t.Fatal("want error for a pool the satellite failed to apply")
-	}
-	if !deleted {
-		t.Fatal("failed pool was not dropped for recreation")
+			r, err := NewRegistrar(srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+				t.Fatal("want error for an unusable pool")
+			}
+			if !deleted {
+				t.Fatal("unusable pool was not dropped for recreation")
+			}
+		})
 	}
 }
