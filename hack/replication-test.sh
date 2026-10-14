@@ -35,7 +35,9 @@
 # the controller-down row (IO continues, provisioning blocks and recovers).
 #
 # Needs a root-capable podman, qemu-system-x86_64, dnsmasq, nft, and sudo
-# for the bridge/taps. CI-sized: 5GB + 4GB + 3GB VMs on a 16GB runner.
+# for the bridge/taps. CI-sized: 5GB + 3.5GB + 2.5GB VMs on a 16GB runner;
+# free-page reporting hands guest-freed memory back to the host (run
+# 38586927617 lost node3 with the runner in swap).
 set -euo pipefail
 # shellcheck source=hack/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -46,8 +48,8 @@ BIB_IMAGE=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
 WORKDIR=${WORKDIR:-$(mktemp -d /tmp/stornas-repl.XXXXXX)}
 # The master runs the control plane; node3 runs only the worker stack.
 VM_MEM1=${VM_MEM1:-5120}
-VM_MEM2=${VM_MEM2:-4096}
-VM_MEM3=${VM_MEM3:-3072}
+VM_MEM2=${VM_MEM2:-3584}
+VM_MEM3=${VM_MEM3:-2560}
 BR=stornas-br0
 NET=192.168.100
 IP1=$NET.11
@@ -327,6 +329,7 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
 		-netdev "tap,id=n0,ifname=$tap,script=no,downscript=no" \
 		-device "virtio-net-pci,netdev=n0,mac=$mac" \
 		-device virtio-rng-pci \
+		-device virtio-balloon-pci,free-page-reporting=on \
 		-serial "file:$WORKDIR/console$n.log" \
 		-display none -daemonize -pidfile "$WORKDIR/qemu$n.pid"
 	PIDS+=("$(sudo cat "$WORKDIR/qemu$n.pid")")
