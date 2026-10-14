@@ -38,6 +38,10 @@ func newAPI() *API {
 	}
 }
 
+// sys is the path values of a volume or snapshot route in the system
+// namespace.
+var sys = map[string]string{"namespace": "stornas-system"}
+
 func doReq(t *testing.T, fn func(w http.ResponseWriter, r *http.Request), method, path, body string, pathValues map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -98,14 +102,14 @@ func TestCreateVolumeRejectsBadSize(t *testing.T) {
 
 func TestDeleteVolumeRefusedWhileShared(t *testing.T) {
 	a := newAPI()
-	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi"}`, nil)
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi"}`, sys)
 	doReq(t, a.CreateShare, "POST", "/api/v1/shares", `{"name":"media","claim":"media","smb":true}`, nil)
-	w := doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/media", "", map[string]string{"name": "media"})
+	w := doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/media", "", map[string]string{"namespace": "stornas-system", "name": "media"})
 	if w.Code != 409 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
 	doReq(t, a.DeleteShare, "DELETE", "/api/v1/shares/media", "", map[string]string{"name": "media"})
-	w = doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/media", "", map[string]string{"name": "media"})
+	w = doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/media", "", map[string]string{"namespace": "stornas-system", "name": "media"})
 	if w.Code != 200 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -116,9 +120,9 @@ func TestDeleteVolumeRefusedWhileShared(t *testing.T) {
 
 func TestDeleteVolumeRefusedWhileLUN(t *testing.T) {
 	a := newAPI()
-	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"disk0","size":"1Gi","block":true}`, nil)
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"disk0","size":"1Gi","block":true}`, sys)
 	doReq(t, a.CreateTarget, "POST", "/api/v1/targets", `{"name":"vmstore","luns":[{"id":0,"claim":"disk0"}]}`, nil)
-	w := doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/disk0", "", map[string]string{"name": "disk0"})
+	w := doReq(t, a.DeleteVolume, "DELETE", "/api/v1/volumes/disk0", "", map[string]string{"namespace": "stornas-system", "name": "disk0"})
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "target vmstore") {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -126,12 +130,12 @@ func TestDeleteVolumeRefusedWhileLUN(t *testing.T) {
 
 func TestResizeVolume(t *testing.T) {
 	a := newAPI()
-	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"v","size":"1Gi"}`, nil)
-	w := doReq(t, a.ResizeVolume, "POST", "/api/v1/volumes/v/resize", `{"size":"2Gi"}`, map[string]string{"name": "v"})
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"v","size":"1Gi"}`, sys)
+	w := doReq(t, a.ResizeVolume, "POST", "/api/v1/volumes/v/resize", `{"size":"2Gi"}`, map[string]string{"namespace": "stornas-system", "name": "v"})
 	if w.Code != 200 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
-	w = doReq(t, a.ResizeVolume, "POST", "/api/v1/volumes/v/resize", `{"size":"nope"}`, map[string]string{"name": "v"})
+	w = doReq(t, a.ResizeVolume, "POST", "/api/v1/volumes/v/resize", `{"size":"nope"}`, map[string]string{"namespace": "stornas-system", "name": "v"})
 	if w.Code != 400 {
 		t.Fatalf("bad size accepted: code=%d", w.Code)
 	}
@@ -158,8 +162,8 @@ func TestCreateTargetShapesSpec(t *testing.T) {
 
 func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	a := newAPI()
-	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
-	w := doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, nil)
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, sys)
+	w := doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -174,7 +178,7 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	}
 
 	// Restore without a size fails until restoreSize exists, then defaults.
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, sys)
 	if w.Code != 400 {
 		t.Fatalf("expected 400 before restoreSize, got %d", w.Code)
 	}
@@ -182,7 +186,7 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 	if _, err := a.Dyn.Resource(snapGVR).Namespace("stornas-system").Update(context.Background(), got, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -201,7 +205,7 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 		t.Fatalf("storageClass = %v", pvc.Spec.StorageClassName)
 	}
 
-	w = doReq(t, a.DeleteSnapshot, "DELETE", "/api/v1/snapshots/s1", "", map[string]string{"name": "s1"})
+	w = doReq(t, a.DeleteSnapshot, "DELETE", "/api/v1/snapshots/s1", "", map[string]string{"namespace": "stornas-system", "name": "s1"})
 	if w.Code != 200 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -212,8 +216,8 @@ func TestSnapshotLifecycleAndRestore(t *testing.T) {
 // inheritance exists to prevent. An explicit class opts out.
 func TestRestoreFailsClosedWithoutSourcePVC(t *testing.T) {
 	a := newAPI()
-	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
-	doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, nil)
+	doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, sys)
+	doReq(t, a.CreateSnapshot, "POST", "/api/v1/snapshots", `{"name":"s1","volume":"media"}`, sys)
 	got, err := a.Dyn.Resource(snapGVR).Namespace("stornas-system").Get(context.Background(), "s1", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -226,11 +230,11 @@ func TestRestoreFailsClosedWithoutSourcePVC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, nil)
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1"}`, sys)
 	if w.Code != 409 {
 		t.Fatalf("expected 409 without source PVC, got %d: %s", w.Code, w.Body.String())
 	}
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1","storageClass":"stornas-replicated"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r1","fromSnapshot":"s1","storageClass":"stornas-replicated"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("explicit class must pass, got %d: %s", w.Code, w.Body.String())
 	}
@@ -279,8 +283,7 @@ func TestUserLifecycle(t *testing.T) {
 func TestCreateVolumeBlockMode(t *testing.T) {
 	a := newAPI()
 	body := `{"name":"disk0","size":"10Gi","storageClass":"stornas-replicated","block":true}`
-	w := httptest.NewRecorder()
-	a.CreateVolume(w, httptest.NewRequest("POST", "/api/v1/volumes", strings.NewReader(body)))
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/namespaces/stornas-system/volumes", body, sys)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -300,11 +303,11 @@ func TestReplicatedNeedsThreeNodes(t *testing.T) {
 	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, sys)
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "three nodes") {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-local"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-local"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("local refused: code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -341,7 +344,7 @@ func TestCreatePoolRefusesTierAndDeviceReuse(t *testing.T) {
 func TestCreateVolumeOnPool(t *testing.T) {
 	a := newAPI()
 	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`, nil)
-	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","pool":"bulk"}`, nil)
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","pool":"bulk"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -352,14 +355,14 @@ func TestCreateVolumeOnPool(t *testing.T) {
 	if *pvc.Spec.StorageClassName != "stornas-local-hdd" || pvc.Annotations["storage.stornas.io/pool"] != "bulk" {
 		t.Fatalf("class=%s annotations=%v", *pvc.Spec.StorageClassName, pvc.Annotations)
 	}
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"m2","size":"1Gi","pool":"bulk","storageClass":"stornas-local"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"m2","size":"1Gi","pool":"bulk","storageClass":"stornas-local"}`, sys)
 	if w.Code != 400 {
 		t.Fatalf("mismatched class accepted: code=%d", w.Code)
 	}
 	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r","size":"1Gi","storageClass":"stornas-replicated-hdd"}`, nil)
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r","size":"1Gi","storageClass":"stornas-replicated-hdd"}`, sys)
 	if w.Code != 409 {
 		t.Fatalf("replicated tier on two nodes: code=%d", w.Code)
 	}
@@ -386,5 +389,44 @@ func TestDeletePoolGuardIsPerTier(t *testing.T) {
 	}
 	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/bulk", "", map[string]string{"name": "bulk"}); w.Code != 200 {
 		t.Fatalf("idle pool refused: code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// Issue 17: a volume outside the system namespace keeps every action in
+// its own namespace, and a same-named system volume is never touched.
+func TestVolumeActionsStayInTheClaimNamespace(t *testing.T) {
+	a := newAPI()
+	foreign := map[string]string{"namespace": "dotvirt"}
+	for _, pv := range []map[string]string{sys, foreign} {
+		w := doReq(t, a.CreateVolume, "POST", "/", `{"name":"drafts","size":"1Gi","storageClass":"stornas-local"}`, pv)
+		if w.Code != 201 {
+			t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+	w := doReq(t, a.CreateSnapshot, "POST", "/", `{"name":"s1","volume":"drafts"}`, foreign)
+	if w.Code != 201 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := a.Dyn.Resource(snapGVR).Namespace("dotvirt").Get(context.Background(), "s1", metav1.GetOptions{}); err != nil {
+		t.Fatalf("snapshot not beside its claim: %v", err)
+	}
+	w = doReq(t, a.ResizeVolume, "POST", "/", `{"size":"2Gi"}`, map[string]string{"namespace": "dotvirt", "name": "drafts"})
+	if w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doReq(t, a.DeleteVolume, "DELETE", "/", "", map[string]string{"namespace": "dotvirt", "name": "drafts"})
+	if w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	pvcs := a.CS.CoreV1().PersistentVolumeClaims
+	if _, err := pvcs("dotvirt").Get(context.Background(), "drafts", metav1.GetOptions{}); err == nil {
+		t.Fatal("foreign volume survived its delete")
+	}
+	kept, err := pvcs("stornas-system").Get(context.Background(), "drafts", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("same-named system volume was deleted: %v", err)
+	}
+	if q := kept.Spec.Resources.Requests["storage"]; q.String() != "1Gi" {
+		t.Fatalf("same-named system volume was resized to %s", q.String())
 	}
 }

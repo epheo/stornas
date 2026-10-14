@@ -22,8 +22,17 @@ page.on('pageerror', (err) => {
 const nav = (name) => page.locator('aside').getByRole('link', { name });
 // The volumes page stacks two tables; snapshot rows alias volume names
 // in their volume column, so row lookups must pick the right table.
-const volRow = (name) => page.locator('table').first().locator('tr', { hasText: name });
-const snapRow = (name) => page.locator('table').nth(1).locator('tr', { hasText: name });
+// Rows match on exact name and namespace cells: names repeat across
+// namespaces. TARGET_NS selects a foreign one.
+const rowIn = (table, name) => {
+	const cell = (text) => page.getByRole('cell', { name: text, exact: true });
+	return table
+		.locator('tr')
+		.filter({ has: cell(name) })
+		.filter({ has: cell(process.env.TARGET_NS || 'stornas-system') });
+};
+const volRow = (name) => rowIn(page.locator('table').first(), name);
+const snapRow = (name) => rowIn(page.locator('table').nth(1), name);
 const dialog = () => page.getByRole('dialog');
 const poolCard = (name) =>
 	page

@@ -292,7 +292,7 @@ log "replication refused below three nodes, in the form and the API"
 ui_phase replication-refused
 code=$(http_code -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-replicated"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
+	"http://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
 [ "$code" = 409 ] || die "replicated volume on one node got $code, want 409"
 kc -n stornas-system get pvc nope >/dev/null 2>&1 && die "refused volume was created anyway"
 
@@ -325,6 +325,51 @@ hdd_classes_gone() { ! kc get storageclass stornas-local-hdd >/dev/null 2>&1 \
 	&& ! kc get storageclass stornas-replicated-hdd >/dev/null 2>&1; }
 retry 120 "tier hdd StorageClasses gone with its last pool" hdd_classes_gone
 
+# Issue 17: the UI lists claims from every namespace, so every action
+# must land in the claim's own namespace. A same-named claim elsewhere
+# (here, a dotvirt-style app claim named like the appliance volume) is
+# the case where a defaulted namespace hits the wrong volume.
+log "volume actions on a foreign claim stay in its namespace"
+kc create namespace e2e-foreign
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: boot-test
+  namespace: e2e-foreign
+  annotations:
+    storage.stornas.io/consumer: host
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: stornas-local
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+foreign_bound() { kc -n e2e-foreign get pvc "$1" -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 600 "foreign claim Bound" foreign_bound boot-test
+export TARGET_NS=e2e-foreign
+TARGET_VOL=boot-test TARGET_SNAP=foreign-snap ui_phase snapshot-volume
+foreign_snap_ready() { kc -n e2e-foreign get volumesnapshot foreign-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
+retry 300 "snapshot ready beside its foreign claim" foreign_snap_ready
+kc -n stornas-system get volumesnapshot foreign-snap >/dev/null 2>&1 \
+	&& die "foreign snapshot landed in stornas-system"
+TARGET_SNAP=foreign-snap TARGET_VOL=foreign-restore ui_phase restore-snapshot
+retry 600 "restore Bound in the snapshot's namespace" foreign_bound foreign-restore
+TARGET_VOL=boot-test TARGET_SIZE=2Gi ui_phase resize-volume
+requested() { kc -n "$1" get pvc boot-test -o jsonpath='{.spec.resources.requests.storage}'; }
+foreign_resized() { [ "$(requested e2e-foreign)" = 2Gi ]; }
+retry 60 "resize landed on the foreign claim" foreign_resized
+[ "$(requested stornas-system)" = 1Gi ] || die "resize hit the same-named system volume"
+TARGET_SNAP=foreign-snap ui_phase delete-snapshot
+TARGET_VOL=foreign-restore ui_phase delete-volume
+TARGET_VOL=boot-test ui_phase delete-volume
+foreign_gone() { ! kc -n e2e-foreign get pvc boot-test >/dev/null 2>&1; }
+retry 120 "foreign claim deleted" foreign_gone
+unset TARGET_NS
+pvc_bound || die "deleting the foreign claim touched stornas-system/boot-test"
+kc delete namespace e2e-foreign --wait
+
 log "viewer role: created in the UI, read allowed, mutations refused"
 TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user
 viewer_login() {
@@ -337,7 +382,7 @@ curl -fsS -m 15 -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state" 
 	|| die "viewer cannot read state"
 code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-local"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
+	"http://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
 curl -fsS -m 15 -b "$WORKDIR/vcookies" -X POST "http://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
 	|| die "logout failed"

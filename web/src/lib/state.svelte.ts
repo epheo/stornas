@@ -5,6 +5,7 @@ import { connectState } from './stream';
 
 export const app = $state({
 	snap: {
+		systemNamespace: '',
 		pools: [],
 		nodes: [],
 		volumes: [],
@@ -25,6 +26,7 @@ export const app = $state({
 export function startStream(): () => void {
 	return connectState((s) => {
 		app.snap = {
+			systemNamespace: s.systemNamespace,
 			pools: s.pools ?? [],
 			nodes: s.nodes ?? [],
 			volumes: s.volumes ?? [],
