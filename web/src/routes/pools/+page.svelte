@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { app } from '$lib/state.svelte';
-	import { formatBytes } from '$lib/stream';
-	import { post, del } from '$lib/api';
-	import { toasts } from '$lib/toast.svelte';
-	import Meter from '$lib/ui/Meter.svelte';
-	import StatusBadge from '$lib/ui/StatusBadge.svelte';
-	import Modal from '$lib/ui/Modal.svelte';
-	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
-	import ProgressBar from '$lib/ui/ProgressBar.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import { formatBytes } from '#lib/stream.js';
+	import { post, del } from '#lib/api.js';
+	import { toasts } from '#lib/toast.svelte.js';
+	import Meter from '#lib/ui/Meter.svelte';
+	import StatusBadge from '#lib/ui/StatusBadge.svelte';
+	import Modal from '#lib/ui/Modal.svelte';
+	import ConfirmDelete from '#lib/ui/ConfirmDelete.svelte';
+	import ProgressBar from '#lib/ui/ProgressBar.svelte';
 
 	const snap = $derived(app.snap);
 

@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { app } from '$lib/state.svelte';
-	import { formatBytes } from '$lib/stream';
-	import { post, del } from '$lib/api';
-	import { toasts } from '$lib/toast.svelte';
-	import { validName, NAME_HINT, sizeBytes, SIZE_HINT } from '$lib/validate';
-	import StatusBadge from '$lib/ui/StatusBadge.svelte';
-	import Modal from '$lib/ui/Modal.svelte';
-	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
-	import ConfirmDelete from '$lib/ui/ConfirmDelete.svelte';
-	import ProgressBar from '$lib/ui/ProgressBar.svelte';
-	import type { Replica } from '$lib/model.gen';
+	import { app } from '#lib/state.svelte.js';
+	import { formatBytes } from '#lib/stream.js';
+	import { post, del } from '#lib/api.js';
+	import { toasts } from '#lib/toast.svelte.js';
+	import { validName, NAME_HINT, sizeBytes, SIZE_HINT } from '#lib/validate.js';
+	import StatusBadge from '#lib/ui/StatusBadge.svelte';
+	import Modal from '#lib/ui/Modal.svelte';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
+	import ConfirmDelete from '#lib/ui/ConfirmDelete.svelte';
+	import ProgressBar from '#lib/ui/ProgressBar.svelte';
+	import type { Replica } from '#lib/model.gen.js';
 
 	const snap = $derived(app.snap);
 	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));

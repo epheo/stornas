@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
-	import { app } from '$lib/state.svelte';
-	import { post } from '$lib/api';
-	import { toasts } from '$lib/toast.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import { post } from '#lib/api.js';
+	import { toasts } from '#lib/toast.svelte.js';
 
 	let { onclose }: { onclose: () => void } = $props();
 

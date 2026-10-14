@@ -10,10 +10,10 @@
 		Circle,
 		TriangleAlert,
 	} from 'lucide-svelte';
-	import { app } from '$lib/state.svelte';
-	import { formatBytes } from '$lib/stream';
-	import StatTile from '$lib/ui/StatTile.svelte';
-	import Meter from '$lib/ui/Meter.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import { formatBytes } from '#lib/stream.js';
+	import StatTile from '#lib/ui/StatTile.svelte';
+	import Meter from '#lib/ui/Meter.svelte';
 
 	const snap = $derived(app.snap);
 	const readyNodes = $derived(snap.nodes.filter((n) => n.ready).length);
