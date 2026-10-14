@@ -6,6 +6,11 @@ export function validName(n: string): boolean {
 	return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(n);
 }
 
+export const TIER_HINT = 'lowercase letters, digits, dashes; starts with a letter; max 24 chars';
+export function validTier(t: string): boolean {
+	return /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/.test(t);
+}
+
 export const SIZE_HINT = 'number plus binary unit, e.g. 100Gi';
 const UNITS: Record<string, number> = {
 	Ki: 2 ** 10,

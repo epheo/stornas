@@ -70,8 +70,8 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		pvc.Annotations[selectedNodeAnnotation] != "" {
 		return ctrl.Result{}, nil
 	}
-	eligible, err := r.eligibleClass(ctx, &pvc)
-	if err != nil || !eligible {
+	sc, err := r.eligibleClass(ctx, &pvc)
+	if err != nil || sc == nil {
 		return ctrl.Result{}, err
 	}
 	consumed, err := r.hostConsumed(ctx, &pvc)
@@ -83,7 +83,7 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		// A Share or Target arriving later re-enqueues via its watch.
 		return ctrl.Result{}, nil
 	}
-	node, err := r.pickNode(ctx, &pvc)
+	node, err := r.pickNode(ctx, &pvc, sc.Parameters[storagePoolParam])
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -140,21 +140,25 @@ func (r *ClaimBinder) hostConsumed(ctx context.Context, pvc *corev1.PersistentVo
 
 // eligibleClass limits the binder to our own WFFC classes; Immediate
 // classes bind themselves and foreign provisioners are not ours to place.
-func (r *ClaimBinder) eligibleClass(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (bool, error) {
+// nil means not ours.
+func (r *ClaimBinder) eligibleClass(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (*storagev1.StorageClass, error) {
 	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
-		return false, nil
+		return nil, nil
 	}
 	var sc storagev1.StorageClass
 	if err := r.Get(ctx, types.NamespacedName{Name: *pvc.Spec.StorageClassName}, &sc); err != nil {
-		return false, client.IgnoreNotFound(err)
+		return nil, client.IgnoreNotFound(err)
 	}
-	return sc.Provisioner == linstorProvisioner &&
-		sc.VolumeBindingMode != nil &&
-		*sc.VolumeBindingMode == storagev1.VolumeBindingWaitForFirstConsumer, nil
+	if sc.Provisioner != linstorProvisioner || sc.VolumeBindingMode == nil ||
+		*sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer {
+		return nil, nil
+	}
+	return &sc, nil
 }
 
 // pickNode returns "" when no safe choice exists; the caller polls.
-func (r *ClaimBinder) pickNode(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (string, error) {
+// linstorPool is the class's pool: a node without it cannot hold a replica.
+func (r *ClaimBinder) pickNode(ctx context.Context, pvc *corev1.PersistentVolumeClaim, linstorPool string) (string, error) {
 	avoid, err := unreadyNodes(ctx, r.Client)
 	if err != nil {
 		return "", err
@@ -175,9 +179,14 @@ func (r *ClaimBinder) pickNode(ctx context.Context, pvc *corev1.PersistentVolume
 	if err := r.List(ctx, &pools); err != nil {
 		return "", err
 	}
+	// A claim pinned to one pool binds there or waits for it.
+	pinned := pvc.Annotations[storagev1alpha1.PoolAnnotation]
 	eligible := pools.Items[:0]
 	for _, p := range pools.Items {
 		if !meta.IsStatusConditionTrue(p.Status.Conditions, storagev1alpha1.ConditionAvailable) {
+			continue
+		}
+		if (pinned != "" && p.Name != pinned) || (linstorPool != "" && p.LinstorPoolName() != linstorPool) {
 			continue
 		}
 		if avoid[p.Spec.Node] || p.Status.Health == "Failed" || p.Status.Free == nil {

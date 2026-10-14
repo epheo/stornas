@@ -45,6 +45,8 @@ rules:
   resources:
   - storageclasses
   verbs:
+  - create
+  - delete
   - get
   - list
   - watch

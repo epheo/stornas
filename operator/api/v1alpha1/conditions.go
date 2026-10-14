@@ -42,11 +42,46 @@ const (
 	ReasonHostError        = "HostError"
 	ReasonNotConfigured    = "NotConfigured"
 	ReasonLinstorError     = "LinstorError"
+	ReasonTierConflict     = "TierConflict"
 )
 
-// LinstorPool is the single LINSTOR storage pool name every StoragePool
-// registers under, so StorageClasses stay node agnostic (image/manifests).
-const LinstorPool = "stornas"
+// DefaultTier keeps the shipped StorageClasses (image/manifests) and the
+// LINSTOR pool name they reference; other tiers get operator-made classes
+// labelled with TierClassLabel.
+const (
+	DefaultTier        = "default"
+	DefaultLinstorPool = "stornas"
+	LocalClass         = "stornas-local"
+	ReplicatedClass    = "stornas-replicated"
+	TierClassLabel     = "storage.stornas.io/tier"
+)
+
+// PoolAnnotation pins a claim to one StoragePool: the API stamps it from
+// the volume form and the ClaimBinder binds the claim to that pool's node.
+const PoolAnnotation = "storage.stornas.io/pool"
+
+// LinstorPoolName is per tier, not per pool: LINSTOR pool names are per
+// node, so one name spans every node holding the tier and a replicated
+// class can place on any two of them.
+func LinstorPoolName(tier string) string {
+	if tier == "" || tier == DefaultTier {
+		return DefaultLinstorPool
+	}
+	return DefaultLinstorPool + "-" + tier
+}
+
+// TierClasses names the local and replicated StorageClasses of a tier.
+func TierClasses(tier string) (local, replicated string) {
+	if tier == "" || tier == DefaultTier {
+		return LocalClass, ReplicatedClass
+	}
+	return LocalClass + "-" + tier, ReplicatedClass + "-" + tier
+}
+
+// LinstorPoolName is the LINSTOR storage pool this pool registers as.
+func (p *StoragePool) LinstorPoolName() string {
+	return LinstorPoolName(p.Spec.Tier)
+}
 
 // ThinLV is the thin pool LV inside every pool's VG.
 const ThinLV = "thin"

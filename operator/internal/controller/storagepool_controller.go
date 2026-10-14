@@ -29,16 +29,18 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// LinstorRegistrar registers a node's VG under the shared LINSTOR pool
+// LinstorRegistrar registers a node's VG under its tier's LINSTOR pool
 // name. nil means no controller is configured; registration is skipped
 // and reported as such rather than failed.
 type LinstorRegistrar interface {
-	EnsurePool(ctx context.Context, node, vg string) error
-	DeletePool(ctx context.Context, node string) error
+	EnsurePool(ctx context.Context, node, name, vg string) error
+	DeletePool(ctx context.Context, node, name, vg string) error
 }
 
 // poolFinalizer holds deletion until the LINSTOR catalog entry is gone;
@@ -73,7 +75,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if r.Linstor != nil {
 			// LINSTOR refuses to drop a pool that still backs resources:
 			// the deletion guard, retried flat while volumes remain.
-			if err := r.Linstor.DeletePool(ctx, pool.Spec.Node); err != nil {
+			if err := r.Linstor.DeletePool(ctx, pool.Spec.Node, pool.LinstorPoolName(), pool.VGName()); err != nil {
 				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
 			}
 		}
@@ -139,12 +141,22 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		ObservedGeneration: pool.Generation,
 	}
 	res := ctrl.Result{}
+	holder, err := r.tierHolder(ctx, &pool)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	switch {
 	case len(pool.Spec.Devices) < storagev1alpha1.MinDevices(pool.Spec.Raid):
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = fmt.Sprintf("%s needs at least %d devices, got %d",
 			pool.Spec.Raid, storagev1alpha1.MinDevices(pool.Spec.Raid), len(pool.Spec.Devices))
+
+	case holder != "":
+		// No requeue: the holder's deletion re-enqueues this pool.
+		available.Reason = storagev1alpha1.ReasonTierConflict
+		available.Message = fmt.Sprintf("pool %s already holds tier %s on %s",
+			holder, pool.Spec.Tier, pool.Spec.Node)
 
 	case !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionHostReady):
 		// No requeue: the agent's status write triggers the next pass.
@@ -163,7 +175,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		available.Reason = storagev1alpha1.ReasonReady
 
 	default:
-		if err := r.Linstor.EnsurePool(ctx, pool.Spec.Node, pool.Status.VG); err != nil {
+		if err := r.Linstor.EnsurePool(ctx, pool.Spec.Node, pool.LinstorPoolName(), pool.Status.VG); err != nil {
 			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
 				Type:               storagev1alpha1.ConditionLinstorRegistered,
 				Status:             metav1.ConditionFalse,
@@ -178,7 +190,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// registration for minutes after they recover.
 			res.RequeueAfter = volumeSettleInterval
 		} else {
-			pool.Status.LinstorPool = storagev1alpha1.LinstorPool
+			pool.Status.LinstorPool = pool.LinstorPoolName()
 			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
 				Type:               storagev1alpha1.ConditionLinstorRegistered,
 				Status:             metav1.ConditionTrue,
@@ -201,12 +213,55 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return res, nil
 }
 
+// tierHolder names the older pool already holding this pool's tier on its
+// node, or "". The LINSTOR pool name is per tier and node, so only one
+// of them can register; the oldest wins and the rest wait for it to go.
+func (r *StoragePoolReconciler) tierHolder(ctx context.Context, pool *storagev1alpha1.StoragePool) (string, error) {
+	var pools storagev1alpha1.StoragePoolList
+	if err := r.List(ctx, &pools); err != nil {
+		return "", err
+	}
+	for _, p := range pools.Items {
+		if p.Name == pool.Name || p.Spec.Node != pool.Spec.Node ||
+			p.LinstorPoolName() != pool.LinstorPoolName() {
+			continue
+		}
+		older := p.CreationTimestamp.Before(&pool.CreationTimestamp) ||
+			(p.CreationTimestamp.Equal(&pool.CreationTimestamp) && p.Name < pool.Name)
+		if older {
+			return p.Name, nil
+		}
+	}
+	return "", nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *StoragePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Unfiltered on purpose: an update conflict returns without requeue
 		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.StoragePool{}).
+		// A tier's holder going away frees the pools waiting on it.
+		Watches(&storagev1alpha1.StoragePool{}, handler.EnqueueRequestsFromMapFunc(r.sameTier)).
 		Named("storagepool").
 		Complete(r)
+}
+
+func (r *StoragePoolReconciler) sameTier(ctx context.Context, obj client.Object) []reconcile.Request {
+	changed, ok := obj.(*storagev1alpha1.StoragePool)
+	if !ok {
+		return nil
+	}
+	var pools storagev1alpha1.StoragePoolList
+	if err := r.List(ctx, &pools); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, p := range pools.Items {
+		if p.Name != changed.Name && p.Spec.Node == changed.Spec.Node &&
+			p.LinstorPoolName() == changed.LinstorPoolName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
+		}
+	}
+	return reqs
 }

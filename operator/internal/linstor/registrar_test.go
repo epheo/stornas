@@ -25,10 +25,13 @@ import (
 )
 
 const (
-	poolHealthy  = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576}`
-	poolNoCap    = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN"}`
-	poolSatError = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` +
+	tankProps    = `"props":{"StorDriver/LvmVg":"stornas-tank"}`
+	poolHealthy  = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576,` + tankProps + `}`
+	poolNoCap    = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` + tankProps + `}`
+	poolSatError = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` + tankProps + `,` +
 		`"reports":[{"ret_code":-4611686018427387904,"message":"thin pool not found"}]}`
+	poolOtherVG = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576,` +
+		`"props":{"StorDriver/LvmVg":"stornas-other"}}`
 )
 
 func newServer(t *testing.T, getStatus int, pool string, created *map[string]any) *httptest.Server {
@@ -74,7 +77,7 @@ func TestEnsurePoolCreatesWhenAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A fresh create is not usable until a later pass sees capacity.
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err == nil {
 		t.Fatal("want not-ready error after create")
 	}
 
@@ -95,7 +98,7 @@ func TestEnsurePoolIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err != nil {
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,7 +111,7 @@ func TestEnsurePoolSurfacesControllerErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -121,7 +124,7 @@ func TestEnsurePoolWaitsForSatellite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err == nil {
 		t.Fatal("want error while the satellite is disconnected")
 	}
 }
@@ -145,12 +148,35 @@ func TestEnsurePoolRecreatesUnusablePools(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+			if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err == nil {
 				t.Fatal("want error for an unusable pool")
 			}
 			if !deleted {
 				t.Fatal("unusable pool was not dropped for recreation")
 			}
 		})
+	}
+}
+
+// Two pools of one tier on a node would share the LINSTOR name; the one
+// that does not own the registration must neither claim nor drop it.
+func TestForeignRegistrationIsLeftAlone(t *testing.T) {
+	srv := newServer(t, http.StatusOK, poolOtherVG, nil)
+	defer srv.Close()
+	srv.Config.Handler.(*http.ServeMux).HandleFunc("DELETE /v1/nodes/node-a/storage-pools/stornas",
+		func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("foreign registration deleted")
+			_, _ = w.Write([]byte(`[]`))
+		})
+
+	r, err := NewRegistrar(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas", "stornas-tank"); err == nil {
+		t.Fatal("want error for a registration held by another VG")
+	}
+	if err := r.DeletePool(context.Background(), "node-a", "stornas", "stornas-tank"); err != nil {
+		t.Fatal(err)
 	}
 }

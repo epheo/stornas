@@ -171,8 +171,8 @@ DISK="$WORKDIR/output/qcow2/disk.qcow2"
 [ -f "$DISK" ] || DISK=$(find "$WORKDIR/output" -name '*.qcow2' | head -1)
 [ -n "$DISK" ] || die "bootc-image-builder produced no qcow2"
 
-log "booting the appliance with raid members and a spare"
-for d in scratch raidb spare; do
+log "booting the appliance with raid members, a spare, and a second-tier disk"
+for d in scratch raidb spare bulk; do
 	truncate -s 10G "$WORKDIR/$d.raw"
 done
 ACCEL=tcg
@@ -198,6 +198,8 @@ qemu-system-x86_64 \
 	-device virtio-blk-pci,drive=raidb,serial=STORNASB,id=disk-b,bus=hotplug-port \
 	-drive "file=$WORKDIR/spare.raw,if=none,format=raw,id=spare" \
 	-device virtio-blk-pci,drive=spare,serial=STORNASC,id=disk-c \
+	-drive "file=$WORKDIR/bulk.raw,if=none,format=raw,id=bulk" \
+	-device virtio-blk-pci,drive=bulk,serial=STORNASD,id=disk-d \
 	-qmp "unix:$WORKDIR/qmp.sock,server=on,wait=off" \
 	-netdev "user,id=n0,ipv6=off$([ "$AIRGAP" = 1 ] && echo ,restrict=on),hostfwd=tcp::${SSH_PORT}-:22,hostfwd=tcp::${UI_PORT}-:30080" \
 	-device virtio-net-pci,netdev=n0 \
@@ -293,6 +295,35 @@ code=$(http_code -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
 [ "$code" = 409 ] || die "replicated volume on one node got $code, want 409"
 kc -n stornas-system get pvc nope >/dev/null 2>&1 && die "refused volume was created anyway"
+
+# Several pools per node: a second pool in its own tier registers as its
+# own LINSTOR pool, takes volumes pinned to it, and deletes on its own
+# while the default pool still backs a volume.
+log "a second pool on the node, in tier hdd, through the UI"
+TARGET_POOL=bulk TARGET_TIER=hdd TARGET_DISK=virtio-STORNASD ui_phase create-tier-pool
+bulk_registered() { kc get storagepool bulk -o jsonpath='{.status.linstorPool}' | grep -qx stornas-hdd; }
+retry 600 "pool bulk registered as LINSTOR pool stornas-hdd" bulk_registered
+hdd_classes() { kc get storageclass stornas-local-hdd stornas-replicated-hdd >/dev/null 2>&1; }
+retry 120 "tier hdd StorageClasses created" hdd_classes
+TARGET_PLACEMENT=pool:bulk TARGET_VOL=bulk-vol ui_phase create-volume-placed
+bulk_vol_bound() { kc -n stornas-system get pvc bulk-vol -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 600 "volume pinned to bulk Bound" bulk_vol_bound
+BULK_PV=$(kc -n stornas-system get pvc bulk-vol -o jsonpath='{.spec.volumeName}')
+vssh sh -c "lvs --noheadings -o lv_name stornas-bulk | grep -q $BULK_PV" \
+	|| die "bulk-vol is not in pool bulk's VG"
+code=$(http_code -b "$WORKDIR/cookies" -X DELETE "http://127.0.0.1:$UI_PORT/api/v1/pools/bulk")
+[ "$code" = 409 ] || die "delete of a pool backing a volume got $code, want 409"
+TARGET_VOL=bulk-vol ui_phase delete-volume
+bulk_pv_gone() { ! kc get pv "$BULK_PV" >/dev/null 2>&1; }
+retry 300 "bulk-vol PV gone" bulk_pv_gone
+TARGET_POOL=bulk ui_phase delete-pool
+bulk_gone() { ! kc get storagepool bulk >/dev/null 2>&1; }
+retry 300 "pool bulk gone while pool test still backs a volume" bulk_gone
+vssh sh -c 'vgs stornas-bulk 2>/dev/null' && die "VG stornas-bulk survived its pool delete"
+vssh sh -c 'vgs stornas-test >/dev/null' || die "deleting bulk took pool test's VG"
+hdd_classes_gone() { ! kc get storageclass stornas-local-hdd >/dev/null 2>&1 \
+	&& ! kc get storageclass stornas-replicated-hdd >/dev/null 2>&1; }
+retry 120 "tier hdd StorageClasses gone with its last pool" hdd_classes_gone
 
 log "viewer role: created in the UI, read allowed, mutations refused"
 TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user

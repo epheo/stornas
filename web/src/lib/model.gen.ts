@@ -16,6 +16,7 @@ export interface Pool {
   name: string;
   node: string;
   raid: string;
+  tier: string;
   devices: Device[];
   vg: string;
   capacityBytes: number /* int64 */;

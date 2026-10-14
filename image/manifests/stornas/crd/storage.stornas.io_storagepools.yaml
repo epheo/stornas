@@ -18,6 +18,9 @@ spec:
     - jsonPath: .spec.node
       name: Node
       type: string
+    - jsonPath: .spec.tier
+      name: Tier
+      type: string
     - jsonPath: .spec.raid
       name: Raid
       type: string
@@ -88,6 +91,16 @@ spec:
                 description: thin enables an LVM thin pool; required for snapshots
                   and clones.
                 type: boolean
+              tier:
+                default: default
+                description: |-
+                  tier groups pools across nodes: volumes target a tier through its
+                  StorageClasses, and a replicated volume needs the tier on two nodes.
+                pattern: ^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: tier is immutable
+                  rule: self == oldSelf
             required:
             - devices
             - node

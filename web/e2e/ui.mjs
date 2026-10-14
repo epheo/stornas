@@ -25,6 +25,11 @@ const nav = (name) => page.locator('aside').getByRole('link', { name });
 const volRow = (name) => page.locator('table').first().locator('tr', { hasText: name });
 const snapRow = (name) => page.locator('table').nth(1).locator('tr', { hasText: name });
 const dialog = () => page.getByRole('dialog');
+const poolCard = (name) =>
+	page
+		.locator('section')
+		.filter({ has: page.getByText(name, { exact: true }) })
+		.first();
 
 async function login(user, pw, keepNudge = false) {
 	await page.goto(url);
@@ -91,6 +96,18 @@ const phases = {
 		await page.getByText('test', { exact: true }).waitFor();
 	},
 
+	async 'create-tier-pool'() {
+		// A second pool on the same node, in its own tier.
+		await goTo('Pools', 'Storage pools');
+		const form = page.locator('section', { hasText: 'New pool' });
+		await form.getByPlaceholder('Name').fill(process.env.TARGET_POOL);
+		await form.locator('select').first().selectOption({ index: 1 });
+		await form.getByPlaceholder('Tier (default)').fill(process.env.TARGET_TIER);
+		await form.locator(`input[value="/dev/disk/by-id/${process.env.TARGET_DISK}"]`).check();
+		await form.getByRole('button', { name: 'Create pool' }).click();
+		await poolCard(process.env.TARGET_POOL).waitFor();
+	},
+
 	async 'degraded-replace'() {
 		// The stream must surface the pulled disk, then the dialog drives
 		// the same replace the failure matrix promises.
@@ -131,6 +148,17 @@ const phases = {
 		const form = page.locator('section', { hasText: 'New volume' });
 		await form.getByPlaceholder('Name').fill(process.env.TARGET_VOL);
 		await form.getByPlaceholder('Size (10Gi)').fill('1Gi');
+		await form.getByRole('button', { name: 'Create volume' }).click();
+		await volRow(process.env.TARGET_VOL).waitFor();
+	},
+
+	async 'create-volume-placed'() {
+		await goTo('Volumes', 'Volumes');
+		const form = page.locator('section', { hasText: 'New volume' });
+		await form.getByPlaceholder('Name').fill(process.env.TARGET_VOL);
+		await form.getByPlaceholder('Size (10Gi)').fill('1Gi');
+		// A class name, or pool:<name> to pin a local volume to one pool.
+		await form.locator('select').first().selectOption(process.env.TARGET_PLACEMENT);
 		await form.getByRole('button', { name: 'Create volume' }).click();
 		await volRow(process.env.TARGET_VOL).waitFor();
 	},
@@ -257,14 +285,15 @@ const phases = {
 	async 'delete-pool'() {
 		// Typed confirmation, then the card must leave the page once the
 		// operator's finalizer chain (deregister, host wipe) completes.
+		const pool = process.env.TARGET_POOL || 'test';
 		await goTo('Pools', 'Storage pools');
-		await page.getByRole('button', { name: 'delete' }).click();
+		await poolCard(pool).getByRole('button', { name: 'delete' }).click();
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('heading', { name: 'Delete pool' }).waitFor();
-		await dialog.locator('#confirm-delete-input').fill('test');
+		await dialog.locator('#confirm-delete-input').fill(pool);
 		await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
 		await dialog.waitFor({ state: 'hidden' });
-		await page.getByText('No storage pools yet.').waitFor({ timeout: 120_000 });
+		await poolCard(pool).waitFor({ state: 'hidden', timeout: 120_000 });
 	},
 
 	async 'create-exports'() {

@@ -9,6 +9,7 @@ type Pool struct {
 	Name    string   `json:"name"`
 	Node    string   `json:"node"`
 	Raid    string   `json:"raid"`
+	Tier    string   `json:"tier"`
 	Devices []Device `json:"devices"`
 
 	VG            string `json:"vg"`

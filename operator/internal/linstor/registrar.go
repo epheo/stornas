@@ -73,11 +73,11 @@ func NewRegistrar(controllerURL string) (*Registrar, error) {
 	return &Registrar{client: c}, nil
 }
 
-// EnsurePool registers vg's thin pool under the shared pool name on node
-// and returns nil only once LINSTOR can place volumes on it.
+// EnsurePool registers vg's thin pool as the LINSTOR pool name on node and
+// returns nil only once LINSTOR can place volumes on it.
 // Existing pools keep their props: satellites own them after
 // registration and rewriting them behind LINSTOR's back invites drift.
-func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
+func (r *Registrar) EnsurePool(ctx context.Context, node, name, vg string) error {
 	// A pool created while its satellite is disconnected lands in the
 	// catalog with no error and no capacity, and LINSTOR never fetches
 	// the capacity later (boot-test run 38546789566).
@@ -88,50 +88,54 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
 	if n.ConnectionStatus != "ONLINE" {
 		return fmt.Errorf("satellite %s is %s, registration waits for it", node, n.ConnectionStatus)
 	}
-	sp, err := r.client.Nodes.GetStoragePool(ctx, node, storagev1alpha1.LinstorPool)
+	sp, err := r.client.Nodes.GetStoragePool(ctx, node, name)
 	if errors.Is(err, lapi.NotFoundError) {
-		return r.createPool(ctx, node, vg)
+		return r.createPool(ctx, node, name, vg)
 	}
 	if err != nil {
-		return fmt.Errorf("get storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
+		return fmt.Errorf("get storage pool %s on %s: %w", name, node, err)
+	}
+	// Another StoragePool of the same tier owns the name on this node;
+	// touching it would hand that pool's volumes to this VG.
+	if got := sp.Props[vgProp]; got != vg {
+		return fmt.Errorf("storage pool %s on %s is registered to VG %s", name, node, got)
 	}
 	if rc := firstError(sp.Reports); rc != nil {
-		return r.recreatePool(ctx, node, "reports "+rc.String())
+		return r.recreatePool(ctx, node, name, vg, "reports "+rc.String())
 	}
 	if sp.TotalCapacity <= 0 {
-		return r.recreatePool(ctx, node, "has no capacity on an online satellite")
+		return r.recreatePool(ctx, node, name, vg, "has no capacity on an online satellite")
 	}
 	return nil
 }
 
+var vgProp = golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolVolumeGroup
+
 // recreatePool drops a pool LINSTOR will never make usable on its own, so
 // the next pass creates it again. LINSTOR refuses the drop while the pool
 // backs resources, and then the reason stands for a human.
-func (r *Registrar) recreatePool(ctx context.Context, node, reason string) error {
-	if err := r.DeletePool(ctx, node); err != nil {
-		return fmt.Errorf("storage pool %s on %s %s; recreate: %w",
-			storagev1alpha1.LinstorPool, node, reason, err)
+func (r *Registrar) recreatePool(ctx context.Context, node, name, vg, reason string) error {
+	if err := r.DeletePool(ctx, node, name, vg); err != nil {
+		return fmt.Errorf("storage pool %s on %s %s; recreate: %w", name, node, reason, err)
 	}
-	return fmt.Errorf("storage pool %s on %s %s; recreating",
-		storagev1alpha1.LinstorPool, node, reason)
+	return fmt.Errorf("storage pool %s on %s %s; recreating", name, node, reason)
 }
 
 // createPool always returns an error so the caller re-checks health on the
 // next pass instead of trusting a create the satellite may not have applied.
-func (r *Registrar) createPool(ctx context.Context, node, vg string) error {
+func (r *Registrar) createPool(ctx context.Context, node, name, vg string) error {
 	sp := lapi.StoragePool{
-		StoragePoolName: storagev1alpha1.LinstorPool,
+		StoragePoolName: name,
 		ProviderKind:    lapi.LVM_THIN,
 		Props: map[string]string{
-			golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolVolumeGroup: vg,
-			golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolThinPool:    storagev1alpha1.ThinLV,
+			vgProp: vg,
+			golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolThinPool: storagev1alpha1.ThinLV,
 		},
 	}
 	if err := r.client.Nodes.CreateStoragePool(ctx, node, sp); err != nil {
-		return fmt.Errorf("create storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
+		return fmt.Errorf("create storage pool %s on %s: %w", name, node, err)
 	}
-	return fmt.Errorf("storage pool %s on %s created, waiting for the satellite",
-		storagev1alpha1.LinstorPool, node)
+	return fmt.Errorf("storage pool %s on %s created, waiting for the satellite", name, node)
 }
 
 func firstError(reports []lapi.ApiCallRc) *lapi.ApiCallRc {
@@ -143,14 +147,25 @@ func firstError(reports []lapi.ApiCallRc) *lapi.ApiCallRc {
 	return nil
 }
 
-// DeletePool removes the node's registration from the LINSTOR catalog.
+// DeletePool removes this VG's registration from the LINSTOR catalog.
 // The VG itself is host state and stays: pool deletion is a human decision.
 // LINSTOR refuses while resources still live on the pool, which is what
-// makes the finalizer wait instead of orphaning volumes.
-func (r *Registrar) DeletePool(ctx context.Context, node string) error {
-	err := r.client.Nodes.DeleteStoragePool(ctx, node, storagev1alpha1.LinstorPool)
+// makes the finalizer wait instead of orphaning volumes. A registration
+// held by another VG belongs to another pool and is left alone.
+func (r *Registrar) DeletePool(ctx context.Context, node, name, vg string) error {
+	sp, err := r.client.Nodes.GetStoragePool(ctx, node, name)
+	if errors.Is(err, lapi.NotFoundError) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get storage pool %s on %s: %w", name, node, err)
+	}
+	if sp.Props[vgProp] != vg {
+		return nil
+	}
+	err = r.client.Nodes.DeleteStoragePool(ctx, node, name)
 	if err != nil && !errors.Is(err, lapi.NotFoundError) {
-		return fmt.Errorf("delete storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
+		return fmt.Errorf("delete storage pool %s on %s: %w", name, node, err)
 	}
 	return nil
 }
