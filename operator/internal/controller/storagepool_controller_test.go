@@ -38,13 +38,13 @@ type fakeRegistrar struct {
 	err     error
 }
 
-func (f *fakeRegistrar) EnsurePool(_ context.Context, node, vg string) error {
-	f.calls = append(f.calls, node+":"+vg)
+func (f *fakeRegistrar) EnsurePool(_ context.Context, node, name, vg string) error {
+	f.calls = append(f.calls, node+":"+name+":"+vg)
 	return f.err
 }
 
-func (f *fakeRegistrar) DeletePool(_ context.Context, node string) error {
-	f.deletes = append(f.deletes, node)
+func (f *fakeRegistrar) DeletePool(_ context.Context, node, name, vg string) error {
+	f.deletes = append(f.deletes, node+":"+name+":"+vg)
 	return f.err
 }
 
@@ -54,7 +54,9 @@ var _ = Describe("StoragePool Controller", func() {
 	newPool := func(name, raid string, devices ...string) *storagev1alpha1.StoragePool {
 		return &storagev1alpha1.StoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: devices, Raid: raid},
+			// A tier per pool: specs share node-a, and finalized pools from
+			// earlier specs would otherwise hold the default tier.
+			Spec: storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: devices, Raid: raid, Tier: name},
 		}
 	}
 
@@ -127,7 +129,9 @@ var _ = Describe("StoragePool Controller", func() {
 	})
 
 	It("registers the VG with LINSTOR once the host is ready", func() {
-		Expect(k8sClient.Create(ctx, newPool("registered", "none", "/dev/sda"))).To(Succeed())
+		registered := newPool("registered", "none", "/dev/sda")
+		registered.Spec.Tier = ""
+		Expect(k8sClient.Create(ctx, registered)).To(Succeed())
 		defer deletePool("registered")
 		markHostReady("registered")
 
@@ -135,10 +139,41 @@ var _ = Describe("StoragePool Controller", func() {
 		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}, "registered")
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(reg.calls).To(Equal([]string{"node-a:stornas-registered"}))
-		Expect(pool.Status.LinstorPool).To(Equal(storagev1alpha1.LinstorPool))
+		Expect(reg.calls).To(Equal([]string{"node-a:stornas:stornas-registered"}))
+		Expect(pool.Status.LinstorPool).To(Equal(storagev1alpha1.DefaultLinstorPool))
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)).To(BeTrue())
+	})
+
+	It("registers each tier under its own LINSTOR pool and holds a second pool of one tier", func() {
+		first := newPool("first", "none", "/dev/sda")
+		first.Spec.Tier = "dup"
+		Expect(k8sClient.Create(ctx, first)).To(Succeed())
+		defer deletePool("first")
+		bulk := newPool("bulk", "none", "/dev/sdb")
+		bulk.Spec.Tier = "hdd"
+		Expect(k8sClient.Create(ctx, bulk)).To(Succeed())
+		defer deletePool("bulk")
+		second := newPool("second", "none", "/dev/sdc")
+		second.Spec.Tier = "dup"
+		Expect(k8sClient.Create(ctx, second)).To(Succeed())
+		defer deletePool("second")
+		for _, n := range []string{"first", "bulk", "second"} {
+			markHostReady(n)
+		}
+
+		reg := &fakeRegistrar{}
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
+		for _, n := range []string{"first", "bulk", "second"} {
+			_, err := reconcileOnce(r, n)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		Expect(reg.calls).To(Equal([]string{"node-a:stornas-dup:stornas-first", "node-a:stornas-hdd:stornas-bulk"}))
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "second"}, second)).To(Succeed())
+		available := meta.FindStatusCondition(second.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(available.Status).To(Equal(metav1.ConditionFalse))
+		Expect(available.Reason).To(Equal(storagev1alpha1.ReasonTierConflict))
 	})
 
 	It("deregisters from LINSTOR and waits for the host wipe on delete", func() {
@@ -156,7 +191,7 @@ var _ = Describe("StoragePool Controller", func() {
 		res, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
 		Expect(rerr).NotTo(HaveOccurred())
 		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
-		Expect(reg.deletes).To(Equal([]string{"node-a"}))
+		Expect(reg.deletes).To(Equal([]string{"node-a:stornas-finalized:stornas-finalized"}))
 
 		By("clearing the agent's wipe only after deregistration")
 		got := &storagev1alpha1.StoragePool{}

@@ -50,7 +50,7 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, create, delete]
   - apiGroups: [snapshot.storage.k8s.io]
     resources: [volumesnapshots]
     verbs: [get, list, watch]

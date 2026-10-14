@@ -22,8 +22,9 @@ import (
 )
 
 // StoragePoolSpec defines the desired state of StoragePool.
-// Pools are node local; the operator registers each pool as a LINSTOR
-// storage pool on that node's satellite.
+// Pools are node local; the operator registers each pool as the LINSTOR
+// storage pool of its tier on that node's satellite. A node holds at most
+// one pool per tier.
 type StoragePoolSpec struct {
 	// node that owns the devices; immutable once set.
 	// +required
@@ -38,6 +39,14 @@ type StoragePoolSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:XValidation:rule="size(self) == size(oldSelf)",message="devices may be swapped one for one, not added or removed"
 	Devices []string `json:"devices"`
+
+	// tier groups pools across nodes: volumes target a tier through its
+	// StorageClasses, and a replicated volume needs the tier on two nodes.
+	// +optional
+	// +kubebuilder:default=default
+	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tier is immutable"
+	Tier string `json:"tier,omitempty"`
 
 	// raid level, implemented as LVM raid types.
 	// +optional
@@ -94,6 +103,7 @@ type StoragePoolStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.node`
+// +kubebuilder:printcolumn:name="Tier",type=string,JSONPath=`.spec.tier`
 // +kubebuilder:printcolumn:name="Raid",type=string,JSONPath=`.spec.raid`
 // +kubebuilder:printcolumn:name="Health",type=string,JSONPath=`.status.health`
 // +kubebuilder:printcolumn:name="Capacity",type=string,JSONPath=`.status.capacity`

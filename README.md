@@ -31,16 +31,24 @@ Nothing is documented here before its flow is green.
   verdict, temperature, and power-on hours per disk.
 - A pulled disk degrades the pool, raises an alert, names the dead member,
   and the UI replace flow rebuilds onto a spare while IO continues.
-- Pool deletion dismantles the host: volumes guard it, then the VG, the md
-  array, and member signatures are wiped and the disks read unclaimed again.
+- Several pools per node, grouped by tier (`default`, `ssd`, `hdd`...):
+  a node holds one pool per tier, and each tier is one LINSTOR pool
+  spanning every node that has it.
+- Pool deletion dismantles the host: only that pool's volumes guard it,
+  then the VG, the md array, and member signatures are wiped and the disks
+  read unclaimed again.
 
 **Volumes**
 - Every volume is a Kubernetes PVC; SAN LUNs, NAS shares, and VM disks
   share one CSI path (LINSTOR CSI).
-- Two classes: `stornas-local` (LVM only, zero overhead, default) and
-  `stornas-replicated` (DRBD 9, two synchronous replicas, protocol C,
-  quorum majority with a diskless tiebreaker on a third node).
+- Two classes per tier: `stornas-local` (LVM only, zero overhead, default)
+  and `stornas-replicated` (DRBD 9, two synchronous replicas, protocol C,
+  quorum majority with a diskless tiebreaker on a third node). Other tiers
+  get `stornas-local-<tier>` and `stornas-replicated-<tier>`, created and
+  removed with the tier's pools.
   Replication is a StorageClass choice, never an install mode.
+- The volume form pins a local volume to one pool, or places a replicated
+  volume in a tier held by two nodes.
 - Filesystem (XFS) or raw block mode, chosen at creation.
 - Online resize, snapshots, and restore-to-new-volume from the UI.
   Restores inherit the source volume's class and mode.
@@ -119,6 +127,7 @@ spec:
   node: node-a
   devices: [/dev/disk/by-id/wwn-0x5000c500a1b2c3d4, ...]
   raid: raid1                     # none | raid1
+  tier: default                   # one pool per tier per node
 ```
 
 ```yaml

@@ -312,6 +312,7 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
 	cp "${OVMF_CODE%CODE*}VARS${OVMF_CODE##*CODE}" "$WORKDIR/vars$n.fd" 2>/dev/null \
 		|| cp "$(dirname "$OVMF_CODE")"/OVMF_VARS*.fd "$WORKDIR/vars$n.fd"
 	truncate -s 20G "$WORKDIR/scratch$n.raw"
+	truncate -s 8G "$WORKDIR/fast$n.raw"
 	local accel=tcg
 	[ -w /dev/kvm ] && accel=kvm
 	sudo qemu-system-x86_64 \
@@ -321,6 +322,8 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
 		-drive "file=$disk,if=virtio,format=qcow2" \
 		-drive "file=$WORKDIR/scratch$n.raw,if=none,format=raw,id=scratch" \
 		-device virtio-blk-pci,drive=scratch,serial="$serial" \
+		-drive "file=$WORKDIR/fast$n.raw,if=none,format=raw,id=fast" \
+		-device virtio-blk-pci,drive=fast,serial="${serial}F" \
 		-netdev "tap,id=n0,ifname=$tap,script=no,downscript=no" \
 		-device "virtio-net-pci,netdev=n0,mac=$mac" \
 		-device virtio-rng-pci \
@@ -531,6 +534,30 @@ ui_phase() { # ui_phase <phase>
 		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
 		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
 }
+
+# Tiers across nodes: a second pool on each data node in tier fast
+# registers as LINSTOR pool stornas-fast on both, and the form's
+# replicated tier option places both copies there.
+log "replicated volume in tier fast through the UI"
+for n in 1 2; do
+	api POST /pools "{\"name\":\"fast-node$n\",\"node\":\"node$n\",\"devices\":[\"/dev/disk/by-id/virtio-STORNAS${n}F\"],\"tier\":\"fast\"}" \
+		>/dev/null || die "pool fast-node$n create through the API failed"
+done
+fast_registered() {
+	[ "$(kc get storagepool fast-node1 fast-node2 -o jsonpath='{.items[*].status.linstorPool}')" = "stornas-fast stornas-fast" ]
+}
+retry 600 "tier fast registered on both data nodes" fast_registered
+fast_class() { kc get storageclass stornas-replicated-fast >/dev/null 2>&1; }
+retry 120 "tier fast replicated class created" fast_class
+TARGET_PLACEMENT=stornas-replicated-fast TARGET_VOL=fast-vol ui_phase create-volume-placed
+fast_bound() { kc -n stornas-system get pvc fast-vol -o jsonpath='{.status.phase}' | grep -q Bound; }
+retry 600 "tier fast volume Bound" fast_bound
+FAST_RES=$(kc -n stornas-system get pvc fast-vol -o jsonpath='{.spec.volumeName}')
+fast_placed() {
+	[ "$(linstor_cmd -m resource list -r "$FAST_RES" 2>/dev/null | grep -oE '"storage_pool_name": ?"stornas-fast"' | wc -l)" -eq 2 ]
+}
+retry 300 "both copies of fast-vol in tier fast" fast_placed
+TARGET_VOL=fast-vol ui_phase delete-volume
 
 log "failover setup: a Target and a Share active on node2"
 # Placement follows the DRBD primary and the primary is the first opener,

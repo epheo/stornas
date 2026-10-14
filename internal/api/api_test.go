@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -14,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	lapi "github.com/LINBIT/golinstor/client"
 )
 
 func newAPI() *API {
@@ -304,5 +307,84 @@ func TestReplicatedNeedsThreeNodes(t *testing.T) {
 	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-local"}`, nil)
 	if w.Code != 201 {
 		t.Fatalf("local refused: code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// One LINSTOR pool name per tier and node, and one owner per disk: both
+// are refused up front instead of surfacing later on the host.
+func TestCreatePoolRefusesTierAndDeviceReuse(t *testing.T) {
+	a := newAPI()
+	ok := `{"name":"fast","node":"node1","devices":["/dev/disk/by-id/a"],"raid":"none","tier":"ssd"}`
+	if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", ok, nil); w.Code != 201 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	for name, body := range map[string]string{
+		"same tier":   `{"name":"fast2","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"ssd"}`,
+		"same device": `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/a"],"tier":"hdd"}`,
+	} {
+		if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", body, nil); w.Code != 409 {
+			t.Fatalf("%s: code=%d body=%s", name, w.Code, w.Body.String())
+		}
+	}
+	for _, body := range []string{
+		`{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`,
+		`{"name":"fast-b","node":"node2","devices":["/dev/disk/by-id/a"],"tier":"ssd"}`,
+	} {
+		if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", body, nil); w.Code != 201 {
+			t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+}
+
+// A pinned volume takes its pool's tier class and carries the pin for
+// the binder; replicated tier classes need three nodes like the default.
+func TestCreateVolumeOnPool(t *testing.T) {
+	a := newAPI()
+	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`, nil)
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","pool":"bulk"}`, nil)
+	if w.Code != 201 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	pvc, err := a.CS.CoreV1().PersistentVolumeClaims("stornas-system").Get(context.Background(), "media", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *pvc.Spec.StorageClassName != "stornas-local-hdd" || pvc.Annotations["storage.stornas.io/pool"] != "bulk" {
+		t.Fatalf("class=%s annotations=%v", *pvc.Spec.StorageClassName, pvc.Annotations)
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"m2","size":"1Gi","pool":"bulk","storageClass":"stornas-local"}`, nil)
+	if w.Code != 400 {
+		t.Fatalf("mismatched class accepted: code=%d", w.Code)
+	}
+	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"r","size":"1Gi","storageClass":"stornas-replicated-hdd"}`, nil)
+	if w.Code != 409 {
+		t.Fatalf("replicated tier on two nodes: code=%d", w.Code)
+	}
+}
+
+// The delete guard keys on the pool's own LINSTOR registration: volumes
+// in another tier on the same node do not hold it.
+func TestDeletePoolGuardIsPerTier(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"pvc-1","node_name":"node1","flags":[],"volumes":[{"storage_pool_name":"stornas"}]}]`))
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	c, err := lapi.NewClient(lapi.BaseURL(u))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newAPI()
+	a.Linstor = c
+	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"main","node":"node1","devices":["/dev/disk/by-id/a"]}`, nil)
+	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`, nil)
+	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/main", "", map[string]string{"name": "main"}); w.Code != 409 {
+		t.Fatalf("busy pool deleted: code=%d", w.Code)
+	}
+	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/bulk", "", map[string]string{"name": "bulk"}); w.Code != 200 {
+		t.Fatalf("idle pool refused: code=%d body=%s", w.Code, w.Body.String())
 	}
 }

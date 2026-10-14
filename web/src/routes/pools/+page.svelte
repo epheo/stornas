@@ -3,6 +3,7 @@
 	import { formatBytes } from '#lib/stream.js';
 	import { post, del } from '#lib/api.js';
 	import { toasts } from '#lib/toast.svelte.js';
+	import { validTier, TIER_HINT } from '#lib/validate.js';
 	import Meter from '#lib/ui/Meter.svelte';
 	import StatusBadge from '#lib/ui/StatusBadge.svelte';
 	import Modal from '#lib/ui/Modal.svelte';
@@ -14,11 +15,20 @@
 	let name = $state('');
 	let node = $state('');
 	let raid = $state('none');
+	let tier = $state('');
 	let disks = $state<string[]>([]);
 	let error = $state('');
 
+	// A pool still converging has not claimed its disks on the host yet.
+	const pooled = $derived(new Set(snap.pools.flatMap((p) => p.devices.map((d) => d.path))));
 	const freeDisks = $derived(
-		(snap.nodes.find((n) => n.name === node)?.disks ?? []).filter((d) => !d.claimed),
+		(snap.nodes.find((n) => n.name === node)?.disks ?? []).filter(
+			(d) => !d.claimed && !pooled.has(d.path),
+		),
+	);
+	// One pool per tier and node: LINSTOR registers the tier, not the pool.
+	const tierTaken = $derived(
+		snap.pools.some((p) => p.node === node && (p.tier || 'default') === (tier || 'default')),
 	);
 
 	// Device paths are per-node; a stale selection from another node must not survive the switch.
@@ -33,12 +43,13 @@
 		e.preventDefault();
 		error = '';
 		createBusy = true;
-		const err = await post('/api/v1/pools', { name, node, devices: disks, raid });
+		const err = await post('/api/v1/pools', { name, node, devices: disks, raid, tier });
 		createBusy = false;
 		if (err) error = err;
 		else {
 			toasts.show(`Pool ${name} created`, 'success');
 			name = '';
+			tier = '';
 			disks = [];
 		}
 	}
@@ -122,6 +133,9 @@
 						<span class="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-400">
 							{pool.raid || 'none'}
 						</span>
+						<span class="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-400">
+							tier {pool.tier || 'default'}
+						</span>
 						<StatusBadge kind={healthKind(pool.health)} label={pool.health} />
 						{#if !pool.available && pool.reason}
 							<span class="text-xs text-amber-400">{pool.reason}</span>
@@ -200,6 +214,17 @@
 				>
 					{#each ['none', 'raid1', 'raid5', 'raid10'] as r (r)}<option value={r}>{r}</option>{/each}
 				</select>
+				<input
+					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+					placeholder="Tier (default)"
+					bind:value={tier}
+				/>
+				{#if tier && !validTier(tier)}<p class="text-xs text-amber-400">{TIER_HINT}</p>{/if}
+				{#if node && tierTaken}
+					<p class="text-xs text-amber-400">
+						{node} already has a pool in tier {tier || 'default'}.
+					</p>
+				{/if}
 				<div class="max-h-32 space-y-1 overflow-y-auto text-sm">
 					{#each freeDisks as d (d.path)}
 						<label class="flex items-center gap-2">
@@ -216,7 +241,7 @@
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
-					disabled={createBusy}
+					disabled={createBusy || tierTaken || (tier !== '' && !validTier(tier))}
 				>
 					Create pool
 				</button>

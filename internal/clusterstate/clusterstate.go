@@ -382,6 +382,7 @@ func poolModel(p *storagev1alpha1.StoragePool) model.Pool {
 		Name:    p.Name,
 		Node:    p.Spec.Node,
 		Raid:    p.Spec.Raid,
+		Tier:    p.Spec.Tier,
 		VG:      p.Status.VG,
 		Health:  p.Status.Health,
 		Linstor: p.Status.LinstorPool,

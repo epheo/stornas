@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -71,12 +72,43 @@ type poolRequest struct {
 	Node    string   `json:"node"`
 	Devices []string `json:"devices"`
 	Raid    string   `json:"raid"`
+	Tier    string   `json:"tier"`
 }
 
+// CreatePool refuses what only shows up later on the host or in LINSTOR:
+// a second pool of one tier on a node (one LINSTOR pool name per tier and
+// node), and a device another pool already claims (the agent reports a
+// disk as claimed only once its pool has converged).
 func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 	var req poolRequest
 	if !decode(w, r, &req) {
 		return
+	}
+	req.Tier = orDefault(req.Tier, storagev1alpha1.DefaultTier)
+	pools, err := a.Dyn.Resource(poolGVR).List(r.Context(), metav1.ListOptions{})
+	if err != nil {
+		http.Error(w, "pools: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, p := range pools.Items {
+		node, _, _ := unstructured.NestedString(p.Object, "spec", "node")
+		if node != req.Node {
+			continue
+		}
+		tier, _, _ := unstructured.NestedString(p.Object, "spec", "tier")
+		if orDefault(tier, storagev1alpha1.DefaultTier) == req.Tier {
+			a.record(r, "create pool", req.Name, errInUse)
+			http.Error(w, "pool "+p.GetName()+" already holds tier "+req.Tier+" on "+node, http.StatusConflict)
+			return
+		}
+		devices, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "devices")
+		for _, d := range req.Devices {
+			if slices.Contains(devices, d) {
+				a.record(r, "create pool", req.Name, errInUse)
+				http.Error(w, d+" belongs to pool "+p.GetName(), http.StatusConflict)
+				return
+			}
+		}
 	}
 	pool := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "storage.stornas.io/v1alpha1",
@@ -86,6 +118,7 @@ func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 			"node":    req.Node,
 			"devices": toAny(req.Devices),
 			"raid":    orDefault(req.Raid, "none"),
+			"tier":    req.Tier,
 		},
 	}}
 	created, err := a.Dyn.Resource(poolGVR).Create(r.Context(), pool, metav1.CreateOptions{})
@@ -101,11 +134,11 @@ type replaceRequest struct {
 // ReplacePoolDevice swaps one member of spec.devices; the agent converges
 // the VG (extend, repair or evacuate, reduce). The CRD's same-size CEL
 // rule keeps this a swap, never a grow or shrink.
-// DeletePool refuses while LINSTOR still holds resources on the pool's
-// node: without the check the CR hangs in terminating and the user
-// never learns why. v1 has one pool per node, so node scope is pool
-// scope. The operator's finalizer chain (LINSTOR deregister, agent host
-// wipe) remains the real guard.
+// DeletePool refuses while LINSTOR still holds volumes in the pool's
+// tier on its node, which is this pool's LINSTOR registration: without
+// the check the CR hangs in terminating and the user never learns why.
+// The operator's finalizer chain (LINSTOR deregister, agent host wipe)
+// remains the real guard.
 func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	u, err := a.Dyn.Resource(poolGVR).Get(r.Context(), name, metav1.GetOptions{})
@@ -114,6 +147,8 @@ func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	node, _, _ := unstructured.NestedString(u.Object, "spec", "node")
+	tier, _, _ := unstructured.NestedString(u.Object, "spec", "tier")
+	linstorPool := storagev1alpha1.LinstorPoolName(tier)
 	if a.Linstor != nil {
 		// Fail closed: without the view we cannot prove the pool is idle,
 		// and deleting blind is the data-loss path this guard exists for.
@@ -123,16 +158,17 @@ func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, res := range view {
-			if res.NodeName != node {
-				continue
-			}
 			// A diskless replica (tiebreaker) lives in the diskless pool
 			// and holds no data here.
-			if slices.Contains(res.Flags, "DISKLESS") {
+			if res.NodeName != node || slices.Contains(res.Flags, "DISKLESS") {
 				continue
 			}
-			http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
-			return
+			for _, v := range res.Volumes {
+				if v.StoragePoolName == linstorPool {
+					http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
+					return
+				}
+			}
 		}
 	}
 	derr := a.Dyn.Resource(poolGVR).Delete(r.Context(), name, metav1.DeleteOptions{})
@@ -174,12 +210,15 @@ func (a *API) ReplacePoolDevice(w http.ResponseWriter, r *http.Request) {
 	respondDelete(w, uerr)
 }
 
-// ReplicatedClass needs ReplicationMinNodes: two data replicas and a
+// Replicated classes need ReplicationMinNodes: two data replicas and a
 // diskless tiebreaker form DRBD quorum; two nodes have no majority.
-const (
-	ReplicatedClass     = "stornas-replicated"
-	ReplicationMinNodes = 3
-)
+const ReplicationMinNodes = 3
+
+// replicated covers the shipped class and every tier's clone of it.
+func replicated(class string) bool {
+	return class == storagev1alpha1.ReplicatedClass ||
+		strings.HasPrefix(class, storagev1alpha1.ReplicatedClass+"-")
+}
 
 var errNeedsNodes = errors.New("replication needs three nodes")
 
@@ -191,6 +230,9 @@ type volumeRequest struct {
 	// FromSnapshot restores: the new volume starts as a copy of this
 	// VolumeSnapshot instead of empty.
 	FromSnapshot string `json:"fromSnapshot"`
+	// Pool pins a local volume to one StoragePool; the class follows from
+	// the pool's tier.
+	Pool string `json:"pool"`
 }
 
 func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +279,21 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if req.StorageClass == ReplicatedClass {
+	if req.Pool != "" {
+		pool, err := a.Dyn.Resource(poolGVR).Get(r.Context(), req.Pool, metav1.GetOptions{})
+		if err != nil {
+			http.Error(w, "pool: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		tier, _, _ := unstructured.NestedString(pool.Object, "spec", "tier")
+		local, _ := storagev1alpha1.TierClasses(tier)
+		if req.StorageClass != "" && req.StorageClass != local {
+			http.Error(w, "pool "+req.Pool+" serves class "+local+", not "+req.StorageClass, http.StatusBadRequest)
+			return
+		}
+		req.StorageClass = local
+	}
+	if replicated(req.StorageClass) {
 		nodes, err := a.CS.CoreV1().Nodes().List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, "nodes: "+err.Error(), http.StatusInternalServerError)
@@ -274,6 +330,9 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 				Requests: corev1.ResourceList{corev1.ResourceStorage: size},
 			},
 		},
+	}
+	if req.Pool != "" {
+		pvc.Annotations[storagev1alpha1.PoolAnnotation] = req.Pool
 	}
 	if req.StorageClass != "" {
 		pvc.Spec.StorageClassName = &req.StorageClass

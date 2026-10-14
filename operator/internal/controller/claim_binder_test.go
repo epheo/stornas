@@ -48,10 +48,10 @@ var _ = Describe("Claim binder", func() {
 		}
 	}
 
-	newPool := func(name, node, free string, available bool) *storagev1alpha1.StoragePool {
+	newTierPool := func(name, node, free string, available bool, tier string) *storagev1alpha1.StoragePool {
 		pool := &storagev1alpha1.StoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec:       storagev1alpha1.StoragePoolSpec{Node: node, Devices: []string{"/dev/disk/by-id/" + name}},
+			Spec:       storagev1alpha1.StoragePoolSpec{Node: node, Devices: []string{"/dev/disk/by-id/" + name}, Tier: tier},
 		}
 		Expect(k8sClient.Create(ctx, pool)).To(Succeed())
 		status := metav1.ConditionFalse
@@ -66,6 +66,9 @@ var _ = Describe("Claim binder", func() {
 		pool.Status.Health = "Online"
 		Expect(k8sClient.Status().Update(ctx, pool)).To(Succeed())
 		return pool
+	}
+	newPool := func(name, node, free string, available bool) *storagev1alpha1.StoragePool {
+		return newTierPool(name, node, free, available, "")
 	}
 
 	dropPools := func(pools ...*storagev1alpha1.StoragePool) {
@@ -130,6 +133,36 @@ var _ = Describe("Claim binder", func() {
 		defer dropPools(pools...)
 		newClaim("bind-declared", "bind-wffc", true)
 		_, pvc := bindOnce(binder(), "bind-declared")
+		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-b"))
+	})
+
+	It("binds within the class's tier, and to the exact pool a claim names", func() {
+		mode := storagev1.VolumeBindingWaitForFirstConsumer
+		hdd := &storagev1.StorageClass{
+			ObjectMeta:        metav1.ObjectMeta{Name: "bind-hdd"},
+			Provisioner:       linstorProvisioner,
+			VolumeBindingMode: &mode,
+			Parameters:        map[string]string{storagePoolParam: storagev1alpha1.LinstorPoolName("hdd")},
+		}
+		Expect(k8sClient.Create(ctx, hdd)).To(Succeed())
+		defer func() { Expect(k8sClient.Delete(ctx, hdd)).To(Succeed()) }()
+		setNode(ctx, "bind-node-a", true)
+		setNode(ctx, "bind-node-b", true)
+		big := newPool("bind-tier-big", "bind-node-b", "100Gi", true)
+		slowA := newTierPool("bind-tier-hdd-a", "bind-node-a", "10Gi", true, "hdd")
+		slowB := newTierPool("bind-tier-hdd-b", "bind-node-b", "5Gi", true, "hdd")
+		defer dropPools(big, slowA, slowB)
+
+		By("the freest pool of the tier, not the freest pool overall")
+		newClaim("bind-tier", "bind-hdd", true)
+		_, pvc := bindOnce(binder(), "bind-tier")
+		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-a"))
+
+		By("the pinned pool even when it is not the freest")
+		pinned := newClaim("bind-pinned", "bind-hdd", true)
+		pinned.Annotations[storagev1alpha1.PoolAnnotation] = "bind-tier-hdd-b"
+		Expect(k8sClient.Update(ctx, pinned)).To(Succeed())
+		_, pvc = bindOnce(binder(), "bind-pinned")
 		Expect(pvc.Annotations[selectedNodeAnnotation]).To(Equal("bind-node-b"))
 	})
 

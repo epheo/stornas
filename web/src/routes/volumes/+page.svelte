@@ -14,12 +14,25 @@
 	const snap = $derived(app.snap);
 	// Matches the API: two data replicas need a third node as tiebreaker.
 	const canReplicate = $derived(snap.nodes.length >= 3);
+	// Tier name to the nodes holding it; a replicated volume needs two.
+	const tiers = $derived.by(() => {
+		const m = new Map<string, Set<string>>([['default', new Set()]]);
+		for (const p of snap.pools) {
+			const t = p.tier || 'default';
+			if (!m.has(t)) m.set(t, new Set());
+			m.get(t)!.add(p.node);
+		}
+		return [...m].map(([tier, nodes]) => ({ tier, nodes: nodes.size }));
+	});
+	const replicatedClass = (tier: string) =>
+		tier === 'default' ? 'stornas-replicated' : `stornas-replicated-${tier}`;
 	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
 	let actionError = $state('');
 
 	let name = $state('');
 	let size = $state('10Gi');
-	let storageClass = $state('stornas-local');
+	// A class name, or pool:<name> for a local volume pinned to one pool.
+	let placement = $state('stornas-local');
 	let block = $state(false);
 	let createBusy = $state(false);
 
@@ -27,7 +40,10 @@
 		e.preventDefault();
 		actionError = '';
 		createBusy = true;
-		const err = await post('/api/v1/volumes', { name, size, storageClass, block });
+		const target = placement.startsWith('pool:')
+			? { pool: placement.slice('pool:'.length) }
+			: { storageClass: placement };
+		const err = await post('/api/v1/volumes', { name, size, block, ...target });
 		createBusy = false;
 		if (err) actionError = err;
 		else {
@@ -260,10 +276,23 @@
 				{#if size && sizeBytes(size) == null}<p class="text-xs text-amber-400">{SIZE_HINT}</p>{/if}
 				<select
 					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm focus:border-sky-500 focus:outline-none"
-					bind:value={storageClass}
+					bind:value={placement}
 				>
-					<option value="stornas-local">stornas-local</option>
-					<option value="stornas-replicated" disabled={!canReplicate}>stornas-replicated</option>
+					<optgroup label="Local">
+						<option value="stornas-local">any pool in tier default</option>
+						{#each snap.pools as p (p.name)}
+							<option value="pool:{p.name}">
+								{p.name} on {p.node} (tier {p.tier || 'default'})
+							</option>
+						{/each}
+					</optgroup>
+					<optgroup label="Replicated">
+						{#each tiers as t (t.tier)}
+							<option value={replicatedClass(t.tier)} disabled={!canReplicate || t.nodes < 2}>
+								tier {t.tier}
+							</option>
+						{/each}
+					</optgroup>
 				</select>
 				{#if !canReplicate}
 					<p class="text-xs text-slate-500">Replication needs three nodes.</p>
