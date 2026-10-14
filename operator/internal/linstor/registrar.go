@@ -97,8 +97,8 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, name, vg string) error
 	}
 	// Another StoragePool of the same tier owns the name on this node;
 	// touching it would hand that pool's volumes to this VG.
-	if got := sp.Props[vgProp]; got != vg {
-		return fmt.Errorf("storage pool %s on %s is registered to VG %s", name, node, got)
+	if got := sp.Props[poolNameProp]; got != thinPoolName(vg) {
+		return fmt.Errorf("storage pool %s on %s is registered to %s, not %s", name, node, got, thinPoolName(vg))
 	}
 	if rc := firstError(sp.Reports); rc != nil {
 		return r.recreatePool(ctx, node, name, vg, "reports "+rc.String())
@@ -109,7 +109,14 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, name, vg string) error
 	return nil
 }
 
-var vgProp = golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolVolumeGroup
+var (
+	vgProp = golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolVolumeGroup
+	// LINSTOR stores the created LvmVg and ThinPool as one "vg/thin"
+	// StorPoolName; LvmVg never comes back on a read.
+	poolNameProp = golinstor.NamespcStorageDriver + "/" + golinstor.KeyStorPoolName
+)
+
+func thinPoolName(vg string) string { return vg + "/" + storagev1alpha1.ThinLV }
 
 // recreatePool drops a pool LINSTOR will never make usable on its own, so
 // the next pass creates it again. LINSTOR refuses the drop while the pool
@@ -160,7 +167,7 @@ func (r *Registrar) DeletePool(ctx context.Context, node, name, vg string) error
 	if err != nil {
 		return fmt.Errorf("get storage pool %s on %s: %w", name, node, err)
 	}
-	if sp.Props[vgProp] != vg {
+	if sp.Props[poolNameProp] != thinPoolName(vg) {
 		return nil
 	}
 	err = r.client.Nodes.DeleteStoragePool(ctx, node, name)

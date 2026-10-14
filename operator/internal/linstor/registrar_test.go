@@ -25,13 +25,13 @@ import (
 )
 
 const (
-	tankProps    = `"props":{"StorDriver/LvmVg":"stornas-tank"}`
+	tankProps    = `"props":{"StorDriver/StorPoolName":"stornas-tank/thin"}`
 	poolHealthy  = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576,` + tankProps + `}`
 	poolNoCap    = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` + tankProps + `}`
 	poolSatError = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` + tankProps + `,` +
 		`"reports":[{"ret_code":-4611686018427387904,"message":"thin pool not found"}]}`
 	poolOtherVG = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576,` +
-		`"props":{"StorDriver/LvmVg":"stornas-other"}}`
+		`"props":{"StorDriver/StorPoolName":"stornas-other/thin"}}`
 )
 
 func newServer(t *testing.T, getStatus int, pool string, created *map[string]any) *httptest.Server {
