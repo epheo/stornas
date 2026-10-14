@@ -1,4 +1,4 @@
-# Three-VM replication acceptance: the heaviest gate (5+4+3GB VMs),
+# Three-VM replication acceptance: the heaviest gate (5+3.5+2.5GB VMs),
 # nightly since it went green on runner-sized hardware (2026-08-06).
 name: replication-test
 
