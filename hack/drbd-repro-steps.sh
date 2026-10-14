@@ -1,6 +1,6 @@
 # Sourced by replication-test.sh (REPRO_SCRIPT) after the two-node
 # bring-up; v1/v2/kc/linstor_cmd/retry/log are in scope. Not a gate:
-# it always exits 0 and its product is the VERDICT lines plus the DRBD
+# it always exits 0 and its product is the VERDICT and GI lines plus the DRBD
 # dumps, answering why Immediate-created resources dodge split-brain
 # detection (memory: immediate-flip-blocked).
 
@@ -92,10 +92,25 @@ partition() { # partition <on|off> - copy of the gate's helper, defined below th
 	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
 }
 
+# get-gi prints current:bitmap:history1:history2:flags as seen toward the
+# peer. A non-zero bitmap UUID while connected and in sync is the stale
+# slot that stops the next lone write from minting a generation.
+gi() { # gi <node-fn> <res>
+	local peer
+	peer=$("$1" sh -c "drbdsetup status $2 --verbose | sed -n 's/^  [^ ]* node-id:\([0-9]*\).*/\1/p' | head -1")
+	"$1" timeout 30 drbdsetup get-gi "$2" "$peer" 0 2>&1 || echo unknown
+}
+report_gi() { # report_gi <when> <res>
+	echo "GI $2 $1: node1 $(gi v1 "$2") node2 $(gi v2 "$2")"
+}
+
 diverge() { # diverge <res>
 	local res=$1 m1 m2
 	m1=$(minor_of v1 "$res"); m2=$(minor_of v2 "$res")
 	log "repro: diverging $res (minors node1=$m1 node2=$m2)"
+	# The partition cuts every resource, so an earlier cycle can reset
+	# this one's slots; record the state this cycle really starts from.
+	report_gi before-divergence "$res"
 	v1 drbdsetup primary "$res" || { echo "VERDICT $res: node1 promote failed"; return; }
 	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=16 oflag=direct conv=fsync" 2>/dev/null || echo "NOTE $res: node1 write failed"
 	partition on
@@ -126,6 +141,7 @@ diverge() { # diverge <res>
 	else
 		echo "VERDICT $res: NO DETECTION after 120s"
 	fi
+	report_gi after-divergence "$res"
 	v1 timeout 30 drbdsetup secondary "$res" 2>/dev/null || true
 }
 
@@ -171,6 +187,8 @@ history() { # history <res> <pvc>
 history "$RES_W" repro-wffc
 history "$RES_I" repro-imm
 log "repro: post-history state"
+report_gi after-history "$RES_W"
+report_gi after-history "$RES_I"
 dump "$RES_W"
 dump "$RES_I"
 
