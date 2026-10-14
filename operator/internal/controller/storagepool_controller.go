@@ -89,7 +89,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 			if err := r.Status().Update(ctx, &pool); err != nil {
 				if apierrors.IsConflict(err) {
-					return ctrl.Result{Requeue: true}, nil
+					return ctrl.Result{RequeueAfter: conflictRetry}, nil
 				}
 				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
@@ -194,7 +194,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Status().Update(ctx, &pool); err != nil {
 		// The agent writes this status on a timer, so conflicts are routine.
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, err
 	}

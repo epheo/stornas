@@ -69,7 +69,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if controllerutil.AddFinalizer(&target, teardownFinalizer) {
 		if err := r.Update(ctx, &target); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: conflictRetry}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -171,7 +171,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	meta.SetStatusCondition(&target.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &target); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -202,7 +202,7 @@ func (r *TargetReconciler) reconcileDelete(ctx context.Context, target *storagev
 	controllerutil.RemoveFinalizer(target, teardownFinalizer)
 	if err := r.Update(ctx, target); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, err
 	}
