@@ -69,7 +69,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if controllerutil.AddFinalizer(&target, teardownFinalizer) {
 		if err := r.Update(ctx, &target); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{RequeueAfter: conflictRetry}, nil
+				return ctrl.Result{}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -171,7 +171,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	meta.SetStatusCondition(&target.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &target); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{RequeueAfter: conflictRetry}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -202,7 +202,7 @@ func (r *TargetReconciler) reconcileDelete(ctx context.Context, target *storagev
 	controllerutil.RemoveFinalizer(target, teardownFinalizer)
 	if err := r.Update(ctx, target); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{RequeueAfter: conflictRetry}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -229,6 +229,8 @@ func (r *TargetReconciler) allTargets(ctx context.Context, _ client.Object) []re
 // SetupWithManager sets up the controller with the Manager.
 func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		// Unfiltered on purpose: an update conflict returns without requeue
+		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.Target{}).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.allTargets),
 			builder.WithPredicates(nodeReadyChanged)).

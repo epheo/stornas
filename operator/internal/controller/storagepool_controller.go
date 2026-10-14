@@ -89,7 +89,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 			if err := r.Status().Update(ctx, &pool); err != nil {
 				if apierrors.IsConflict(err) {
-					return ctrl.Result{RequeueAfter: conflictRetry}, nil
+					return ctrl.Result{}, nil
 				}
 				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
@@ -194,7 +194,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Status().Update(ctx, &pool); err != nil {
 		// The agent writes this status on a timer, so conflicts are routine.
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{RequeueAfter: conflictRetry}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -204,6 +204,8 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // SetupWithManager sets up the controller with the Manager.
 func (r *StoragePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		// Unfiltered on purpose: an update conflict returns without requeue
+		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.StoragePool{}).
 		Named("storagepool").
 		Complete(r)

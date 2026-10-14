@@ -80,7 +80,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	meta.SetStatusCondition(&user.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &user); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{RequeueAfter: conflictRetry}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -90,6 +90,8 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // SetupWithManager sets up the controller with the Manager.
 func (r *LocalUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		// Unfiltered on purpose: an update conflict returns without requeue
+		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.LocalUser{}).
 		Named("localuser").
 		Complete(r)
