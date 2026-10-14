@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { app } from '$lib/state.svelte';
-	import { post, del } from '$lib/api';
-	import { toasts } from '$lib/toast.svelte';
-	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import { post, del } from '#lib/api.js';
+	import { toasts } from '#lib/toast.svelte.js';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
 
 	type LocalUser = { name: string; role: string; smb: boolean };
 

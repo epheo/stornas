@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { app } from '$lib/state.svelte';
-	import StatusBadge from '$lib/ui/StatusBadge.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import StatusBadge from '#lib/ui/StatusBadge.svelte';
 
 	const snap = $derived(app.snap);
 </script>

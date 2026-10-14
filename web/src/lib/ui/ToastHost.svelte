@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { CircleAlert, CircleCheck, Info, X } from 'lucide-svelte';
-	import { toasts } from '$lib/toast.svelte';
+	import { toasts } from '#lib/toast.svelte.js';
 </script>
 
 {#if toasts.list.length}

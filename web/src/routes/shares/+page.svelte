@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { app } from '$lib/state.svelte';
-	import { post, del } from '$lib/api';
-	import { toasts } from '$lib/toast.svelte';
-	import StatusBadge from '$lib/ui/StatusBadge.svelte';
-	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+	import { app } from '#lib/state.svelte.js';
+	import { post, del } from '#lib/api.js';
+	import { toasts } from '#lib/toast.svelte.js';
+	import StatusBadge from '#lib/ui/StatusBadge.svelte';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
 
 	const snap = $derived(app.snap);
 	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));

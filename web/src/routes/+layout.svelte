@@ -14,9 +14,9 @@
 		LogOut,
 		KeyRound,
 	} from 'lucide-svelte';
-	import { app, startStream, loadSession } from '$lib/state.svelte';
-	import ToastHost from '$lib/ui/ToastHost.svelte';
-	import ChangePassword from '$lib/ui/ChangePassword.svelte';
+	import { app, startStream, loadSession } from '#lib/state.svelte.js';
+	import ToastHost from '#lib/ui/ToastHost.svelte';
+	import ChangePassword from '#lib/ui/ChangePassword.svelte';
 
 	let { children } = $props();
 	let showPassword = $state(false);
