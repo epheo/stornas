@@ -499,7 +499,8 @@ retry 300 "two UpToDate DRBD replicas" replicas_uptodate
 # The class's quorum setting is what earns the third vote: without it
 # LINSTOR places no tiebreaker and a partition can diverge.
 REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
-tiebreaker_on_node3() { linstor_cmd resource list -r "$REPL_RES" -n node3 2>/dev/null | grep -q TieBreaker; }
+# The table prints the tiebreaker as Diskless; only the flag names it.
+tiebreaker_on_node3() { linstor_cmd -m resource list -r "$REPL_RES" -n node3 2>/dev/null | grep -q TIE_BREAKER; }
 retry 120 "diskless tiebreaker on node3" tiebreaker_on_node3
 
 log "writing through the replicated volume"
