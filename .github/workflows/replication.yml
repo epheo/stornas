@@ -1,4 +1,4 @@
-# Two-VM replication acceptance: the heaviest gate (2 x 5GB VMs),
+# Three-VM replication acceptance: the heaviest gate (5+4+3GB VMs),
 # nightly since it went green on runner-sized hardware (2026-08-06).
 name: replication-test
 
@@ -23,7 +23,7 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: install qemu, UEFI firmware, dnsmasq
+      - name: install qemu, UEFI firmware, dnsmasq, nft
         run: |
           # The azure apt mirror can stall for hours; pin the main
           # archive and bound every apt call so a bad mirror fails the
@@ -31,7 +31,7 @@ jobs:
           sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.sources || true
           sudo timeout 120 apt-get update
-          sudo timeout 600 apt-get install -y qemu-system-x86 ovmf dnsmasq
+          sudo timeout 600 apt-get install -y qemu-system-x86 ovmf dnsmasq nftables
           # ubuntu's dnsmasq package starts a global instance; the test
           # runs its own on the bridge.
           sudo systemctl stop dnsmasq 2>/dev/null || true

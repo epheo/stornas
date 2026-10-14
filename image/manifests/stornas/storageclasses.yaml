@@ -27,9 +27,10 @@ parameters:
   linstor.csi.linbit.com/storagePool: stornas
   linstor.csi.linbit.com/layerList: drbd storage
   linstor.csi.linbit.com/placementCount: "2"
-  # Two replicas cannot form quorum; suspend beats silent divergence, and
-  # the UI owns the manual pick-survivor flow (README failure matrix).
-  property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
+  # Explicit majority keeps quorum on whatever the placement; LINSTOR
+  # adds the diskless tiebreaker on a third node, and piraeus sets
+  # on-no-quorum: suspend-io, so a minority never diverges.
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum: majority
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
   csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: WaitForFirstConsumer

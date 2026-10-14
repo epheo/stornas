@@ -284,6 +284,16 @@ code=$(http_code -H 'Content-Type: application/json' \
 	"http://127.0.0.1:$UI_PORT/api/v1/login")
 [ "$code" = 401 ] || die "wrong-password login got $code, want 401"
 
+# Supported topologies: one node, or three and up (README). A single
+# node must refuse replication in the form and the API alike.
+log "replication refused below three nodes, in the form and the API"
+ui_phase replication-refused
+code=$(http_code -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-replicated"}' \
+	"http://127.0.0.1:$UI_PORT/api/v1/volumes")
+[ "$code" = 409 ] || die "replicated volume on one node got $code, want 409"
+kc -n stornas-system get pvc nope >/dev/null 2>&1 && die "refused volume was created anyway"
+
 log "viewer role: created in the UI, read allowed, mutations refused"
 TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user
 viewer_login() {

@@ -1,4 +1,4 @@
-# Sourced by replication-test.sh (REPRO_SCRIPT) after the two-node
+# Sourced by replication-test.sh (REPRO_SCRIPT) after the three-node
 # bring-up; v1/v2/kc/linstor_cmd/retry/log are in scope. Not a gate:
 # it always exits 0 and its product is the VERDICT and GI lines plus the DRBD
 # dumps, answering why Immediate-created resources dodge split-brain
@@ -15,7 +15,6 @@ parameters:
   linstor.csi.linbit.com/storagePool: stornas
   linstor.csi.linbit.com/layerList: drbd storage
   linstor.csi.linbit.com/placementCount: "2"
-  property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
   csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: Immediate
@@ -84,12 +83,19 @@ minor_of() { # minor_of <node-fn> <res>
 # the partition heals. Serial cycles: the idle resource reconnects clean
 # so the earlier cycle cannot contaminate the later one.
 partition() { # partition <on|off> - copy of the gate's helper, defined below the hook
-	local act=-I
-	[ "$1" = off ] && act=-D
-	sudo bridge link set dev tap-stornas1 isolated "$1"
-	sudo bridge link set dev tap-stornas2 isolated "$1"
-	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas1 --physdev-out tap-stornas2 -j DROP 2>/dev/null || true
-	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
+	if [ "$1" = off ]; then
+		sudo nft delete table bridge stornas_cut
+		return
+	fi
+	sudo nft -f - <<'NFT'
+table bridge stornas_cut {
+	chain forward {
+		type filter hook forward priority 0; policy accept;
+		iifname "tap-stornas2" drop
+		oifname "tap-stornas2" drop
+	}
+}
+NFT
 }
 
 # get-gi prints current:bitmap:history1:history2:flags as seen toward the
@@ -97,7 +103,8 @@ partition() { # partition <on|off> - copy of the gate's helper, defined below th
 # slot that stops the next lone write from minting a generation.
 gi() { # gi <node-fn> <res>
 	local peer
-	peer=$("$1" sh -c "drbdsetup status $2 --verbose | sed -n 's/^  [^ ]* node-id:\([0-9]*\).*/\1/p' | head -1")
+	# node3 is the diskless tiebreaker; the data peer is the other one.
+	peer=$("$1" sh -c "drbdsetup status $2 --verbose | grep -v '^  node3 ' | sed -n 's/^  [^ ]* node-id:\([0-9]*\).*/\1/p' | head -1")
 	"$1" timeout 30 drbdsetup get-gi "$2" "$peer" 0 2>&1 || echo unknown
 }
 report_gi() { # report_gi <when> <res>
