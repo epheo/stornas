@@ -66,7 +66,7 @@ PIDS=()
 nssh() { # nssh <ip> <cmd...>
 	local ip=$1; shift
 	ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o ConnectTimeout=5 -o LogLevel=ERROR -i "$WORKDIR/id" \
+		-o ConnectTimeout=20 -o LogLevel=ERROR -i "$WORKDIR/id" \
 		"root@$ip" "$(printf '%q ' "$@")"
 }
 v1() { nssh "$IP1" "$@"; }
@@ -309,8 +309,11 @@ done
 log "creating the shared NAT bridge network"
 host_net_up
 
-boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
-	local n=$1 disk=$2 serial=$3 mac=$4 tap=$5 mem=$6
+# Three guests share a 4-core runner: workers get 2 vCPUs so the master's
+# startup cannot starve a worker's sshd past the banner timeout (runs
+# 38586927617 and 38592005356 lost node3 that way).
+boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem> <cpus>
+	local n=$1 disk=$2 serial=$3 mac=$4 tap=$5 mem=$6 cpus=$7
 	cp "${OVMF_CODE%CODE*}VARS${OVMF_CODE##*CODE}" "$WORKDIR/vars$n.fd" 2>/dev/null \
 		|| cp "$(dirname "$OVMF_CODE")"/OVMF_VARS*.fd "$WORKDIR/vars$n.fd"
 	truncate -s 20G "$WORKDIR/scratch$n.raw"
@@ -318,7 +321,7 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
 	local accel=tcg
 	[ -w /dev/kvm ] && accel=kvm
 	sudo qemu-system-x86_64 \
-		-machine "q35,accel=$accel" -cpu max -smp 4 -m "$mem" \
+		-machine "q35,accel=$accel" -cpu max -smp "$cpus" -m "$mem" \
 		-drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
 		-drive "if=pflash,format=raw,file=$WORKDIR/vars$n.fd" \
 		-drive "file=$disk,if=virtio,format=qcow2" \
@@ -336,9 +339,9 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
 }
 
 log "booting three appliances on the shared network"
-boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1"
-boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2"
-boot_vm 3 "$DISK3" STORNAS3 "$MAC3" tap-stornas3 "$VM_MEM3"
+boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1" 4
+boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2" 2
+boot_vm 3 "$DISK3" STORNAS3 "$MAC3" tap-stornas3 "$VM_MEM3" 2
 
 retry 600 "node1 ssh reachable" v1 true
 retry 600 "node2 ssh reachable" v2 true
@@ -834,7 +837,7 @@ kc -n stornas-system exec reattach-consumer2 -- sh -c 'echo after-reattach >> /d
 kc taint node node2 node.kubernetes.io/out-of-service-
 
 log "restarting node2: replica must resync to UpToDate"
-boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2"
+boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2" 2
 retry 600 "node2 ssh back" v2 true
 retry 600 "all nodes Ready again" all_ready
 resynced() {
@@ -1340,7 +1343,7 @@ retry 120 "iSCSI IO on node2 with the master dead" md_iscsi_io
 v2 iscsiadm -m node -T "$TIQN2" -p "$VIP2:3260" --logout || true
 
 log "restarting node1: control plane returns, placement must not move"
-boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1"
+boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1" 4
 retry 600 "node1 ssh back" v1 true
 retry 900 "all nodes Ready after master return" all_ready
 retry 300 "target md still exported from node2" target_md_on_node2
