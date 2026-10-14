@@ -56,6 +56,10 @@ type ShareReconciler struct {
 // PVC watch wired, so waiting states poll.
 const volumeSettleInterval = 15 * time.Second
 
+// conflictRetry re-reads after an update conflict: the newer copy already
+// exists, so backoff would only delay converging on it.
+const conflictRetry = time.Second
+
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=shares,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=shares/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=shares/finalizers,verbs=update
@@ -76,7 +80,7 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if controllerutil.AddFinalizer(&share, teardownFinalizer) {
 		if err := r.Update(ctx, &share); err != nil {
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: conflictRetry}, nil
 			}
 			return ctrl.Result{}, err
 		}
@@ -144,7 +148,7 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	meta.SetStatusCondition(&share.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &share); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -173,7 +177,7 @@ func (r *ShareReconciler) reconcileDelete(ctx context.Context, share *storagev1a
 	controllerutil.RemoveFinalizer(share, teardownFinalizer)
 	if err := r.Update(ctx, share); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}

@@ -80,7 +80,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	meta.SetStatusCondition(&user.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &user); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: conflictRetry}, nil
 		}
 		return ctrl.Result{}, err
 	}
