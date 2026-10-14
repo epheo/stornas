@@ -73,17 +73,40 @@ func NewRegistrar(controllerURL string) (*Registrar, error) {
 	return &Registrar{client: c}, nil
 }
 
-// EnsurePool registers vg's thin pool under the shared pool name on node.
-// Existing pools are trusted as-is: satellites own their props after
+// EnsurePool registers vg's thin pool under the shared pool name on node
+// and returns nil only once LINSTOR can place volumes on it.
+// Existing pools keep their props: satellites own them after
 // registration and rewriting them behind LINSTOR's back invites drift.
 func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
-	_, err := r.client.Nodes.GetStoragePool(ctx, node, storagev1alpha1.LinstorPool)
-	if err == nil {
-		return nil
+	sp, err := r.client.Nodes.GetStoragePool(ctx, node, storagev1alpha1.LinstorPool)
+	if errors.Is(err, lapi.NotFoundError) {
+		return r.createPool(ctx, node, vg)
 	}
-	if !errors.Is(err, lapi.NotFoundError) {
+	if err != nil {
 		return fmt.Errorf("get storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
 	}
+	if rc := firstError(sp.Reports); rc != nil {
+		// A pool whose satellite apply failed stays in the catalog and
+		// LINSTOR never retries it, so every volume on it would stall.
+		// Recreating is safe: LINSTOR refuses to drop a pool backing
+		// resources, and then the error stands for a human.
+		if derr := r.DeletePool(ctx, node); derr != nil {
+			return fmt.Errorf("storage pool %s on %s reports %s; recreate: %w",
+				storagev1alpha1.LinstorPool, node, rc.String(), derr)
+		}
+		return fmt.Errorf("storage pool %s on %s reported %s; recreating",
+			storagev1alpha1.LinstorPool, node, rc.String())
+	}
+	if sp.TotalCapacity <= 0 {
+		return fmt.Errorf("storage pool %s on %s has no capacity reported yet",
+			storagev1alpha1.LinstorPool, node)
+	}
+	return nil
+}
+
+// createPool always returns an error so the caller re-checks health on the
+// next pass instead of trusting a create the satellite may not have applied.
+func (r *Registrar) createPool(ctx context.Context, node, vg string) error {
 	sp := lapi.StoragePool{
 		StoragePoolName: storagev1alpha1.LinstorPool,
 		ProviderKind:    lapi.LVM_THIN,
@@ -94,6 +117,16 @@ func (r *Registrar) EnsurePool(ctx context.Context, node, vg string) error {
 	}
 	if err := r.client.Nodes.CreateStoragePool(ctx, node, sp); err != nil {
 		return fmt.Errorf("create storage pool %s on %s: %w", storagev1alpha1.LinstorPool, node, err)
+	}
+	return fmt.Errorf("storage pool %s on %s created, waiting for the satellite",
+		storagev1alpha1.LinstorPool, node)
+}
+
+func firstError(reports []lapi.ApiCallRc) *lapi.ApiCallRc {
+	for i := range reports {
+		if uint64(reports[i].RetCode)&golinstor.MaskError == golinstor.MaskError {
+			return &reports[i]
+		}
 	}
 	return nil
 }
