@@ -24,12 +24,19 @@ import (
 	"testing"
 )
 
-func newServer(t *testing.T, getStatus int, created *map[string]any) *httptest.Server {
+const (
+	poolHealthy  = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN","total_capacity":1048576}`
+	poolNoCap    = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN"}`
+	poolSatError = `{"storage_pool_name":"stornas","provider_kind":"LVM_THIN",` +
+		`"reports":[{"ret_code":-4611686018427387904,"message":"thin pool not found"}]}`
+)
+
+func newServer(t *testing.T, getStatus int, pool string, created *map[string]any) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/nodes/node-a/storage-pools/stornas", func(w http.ResponseWriter, _ *http.Request) {
 		if getStatus == http.StatusOK {
-			_, _ = w.Write([]byte(`{"storage_pool_name":"stornas","provider_kind":"LVM_THIN"}`))
+			_, _ = w.Write([]byte(pool))
 			return
 		}
 		w.WriteHeader(getStatus)
@@ -51,15 +58,16 @@ func newServer(t *testing.T, getStatus int, created *map[string]any) *httptest.S
 
 func TestEnsurePoolCreatesWhenAbsent(t *testing.T) {
 	var created map[string]any
-	srv := newServer(t, http.StatusNotFound, &created)
+	srv := newServer(t, http.StatusNotFound, "", &created)
 	defer srv.Close()
 
 	r, err := NewRegistrar(srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err != nil {
-		t.Fatal(err)
+	// A fresh create is not usable until a later pass sees capacity.
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+		t.Fatal("want not-ready error after create")
 	}
 
 	if created["storage_pool_name"] != "stornas" || created["provider_kind"] != "LVM_THIN" {
@@ -72,7 +80,7 @@ func TestEnsurePoolCreatesWhenAbsent(t *testing.T) {
 }
 
 func TestEnsurePoolIdempotent(t *testing.T) {
-	srv := newServer(t, http.StatusOK, nil)
+	srv := newServer(t, http.StatusOK, poolHealthy, nil)
 	defer srv.Close()
 
 	r, err := NewRegistrar(srv.URL)
@@ -85,7 +93,7 @@ func TestEnsurePoolIdempotent(t *testing.T) {
 }
 
 func TestEnsurePoolSurfacesControllerErrors(t *testing.T) {
-	srv := newServer(t, http.StatusInternalServerError, nil)
+	srv := newServer(t, http.StatusInternalServerError, "", nil)
 	defer srv.Close()
 
 	r, err := NewRegistrar(srv.URL)
@@ -94,5 +102,40 @@ func TestEnsurePoolSurfacesControllerErrors(t *testing.T) {
 	}
 	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestEnsurePoolHoldsUntilCapacity(t *testing.T) {
+	srv := newServer(t, http.StatusOK, poolNoCap, nil)
+	defer srv.Close()
+
+	r, err := NewRegistrar(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+		t.Fatal("want error while LINSTOR reports no capacity")
+	}
+}
+
+func TestEnsurePoolRecreatesFailedPool(t *testing.T) {
+	srv := newServer(t, http.StatusOK, poolSatError, nil)
+	defer srv.Close()
+	deleted := false
+	srv.Config.Handler.(*http.ServeMux).HandleFunc("DELETE /v1/nodes/node-a/storage-pools/stornas",
+		func(w http.ResponseWriter, _ *http.Request) {
+			deleted = true
+			_, _ = w.Write([]byte(`[]`))
+		})
+
+	r, err := NewRegistrar(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.EnsurePool(context.Background(), "node-a", "stornas-tank"); err == nil {
+		t.Fatal("want error for a pool the satellite failed to apply")
+	}
+	if !deleted {
+		t.Fatal("failed pool was not dropped for recreation")
 	}
 }
