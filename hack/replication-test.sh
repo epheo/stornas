@@ -62,6 +62,40 @@ nssh() { # nssh <ip> <cmd...>
 v1() { nssh "$IP1" "$@"; }
 v2() { nssh "$IP2" "$@"; }
 kc() { v1 kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
+
+# GI_TRACE=1 records every replica's generation identifiers at each phase
+# line, to find the phase that leaves a stale bitmap UUID: non-zero while
+# the peer is connected and in sync, which stops the next lone write from
+# minting a generation and hides split-brain. Grep the log for STALE.
+GI_SCAN=$(cat <<'SH'
+drbdsetup status --verbose | awk '
+/^[^ ]/ { res = $1 }
+/^  [^ ]/ && /node-id:/ { peer = $1; split($2, a, ":"); id = a[2]; split($3, c, ":"); cs = c[2] }
+/^    volume:/ && /replication:/ {
+	r = ""; p = ""
+	for (i = 1; i <= NF; i++) {
+		if ($i ~ /^replication:/) { split($i, x, ":"); r = x[2] }
+		if ($i ~ /^peer-disk:/) { split($i, y, ":"); p = y[2] }
+	}
+	print res, peer, id, cs, r, p
+}' | while read -r res peer id cs r p; do
+	gi=$(timeout 10 drbdsetup get-gi "$res" "$id" 0 2>/dev/null | cut -d: -f1-4)
+	bm=$(echo "$gi" | cut -d: -f2)
+	flag=
+	[ "$cs" = Connected ] && [ "$r" = Established ] && [ "$p" = UpToDate ] \
+		&& [ -n "$bm" ] && [ "$bm" != 0000000000000000 ] && flag=STALE
+	echo "$res to=$peer cs=$cs repl=$r pdsk=$p gi=$gi $flag"
+done
+SH
+)
+gi_trace() { # gi_trace <label>
+	[ "${GI_TRACE:-0}" = 1 ] && [ "${GI_TRACING:-0}" = 1 ] || return 0
+	local fn
+	for fn in v1 v2; do
+		$fn timeout 60 sh -c "$GI_SCAN" 2>/dev/null | sed "s|^|GI [$1] $fn |" || true
+	done
+}
+log() { printf '\n== %s\n' "$*"; gi_trace "$*"; }
 linstor_cmd() { kc -n piraeus-datastore exec deploy/linstor-controller -- linstor "$@"; }
 
 host_net_up() {
@@ -403,6 +437,7 @@ pools_available() {
 	[ "$(kc get storagepool -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Available")].status}{"\n"}{end}' 2>/dev/null | grep -c True)" -eq 2 ]
 }
 retry 600 "both storage pools Available" pools_available
+GI_TRACING=1
 
 # The scheduler's CSI capacity check sits between pool and PVC; assert
 # the raw LINSTOR view first so a capacity failure names itself.
