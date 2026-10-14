@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/LINBIT/golinstor v0.64.1
+	github.com/LINBIT/golinstor v0.65.2
 	github.com/epheo/stornas/operator v0.0.0-00010101000000-000000000000
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	k8s.io/api v0.36.3
