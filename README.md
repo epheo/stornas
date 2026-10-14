@@ -52,6 +52,9 @@ Nothing is documented here before its flow is green.
 - Filesystem (XFS) or raw block mode, chosen at creation.
 - Online resize, snapshots, and restore-to-new-volume from the UI.
   Restores inherit the source volume's class and mode.
+- The UI lists claims from every namespace, and each action lands in the
+  claim's own: snapshots sit beside their claim, restores beside their
+  snapshot, and a same-named claim elsewhere is never touched.
 - Volumes bind at creation with no consumer: UI volumes declare their
   consumer is the host, a Share or Target referencing a claim is its
   first consumer arriving, and restores pin to their snapshot's node.

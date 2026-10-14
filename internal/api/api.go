@@ -54,12 +54,18 @@ type API struct {
 // identity Require put on the context. Refused mutations record too, as
 // not-OK: the audit trail answers "who tried", not just "who succeeded".
 func (a *API) record(r *http.Request, verb, name string, err error) {
+	a.recordIn(r, a.Namespace, verb, name, err)
+}
+
+// recordIn is record for objects outside the system namespace: volumes
+// and snapshots live wherever their PVC does.
+func (a *API) recordIn(r *http.Request, namespace, verb, name string, err error) {
 	if a.Tasks == nil {
 		return
 	}
 	a.Tasks.RecordOp(tasks.Op{
 		Verb:      verb,
-		Namespace: a.Namespace,
+		Namespace: namespace,
 		Name:      name,
 		By:        auth.FromContext(r.Context()).Name,
 		OK:        err == nil,
@@ -235,13 +241,19 @@ type volumeRequest struct {
 	Pool string `json:"pool"`
 }
 
+// Volume and snapshot routes carry the namespace in the path: the UI
+// lists PVCs from every namespace, and a default namespace would land an
+// action on a same-named claim in the wrong one.
 func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
+	ns := r.PathValue("namespace")
 	var req volumeRequest
 	if !decode(w, r, &req) {
 		return
 	}
 	if req.FromSnapshot != "" {
-		snap, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Get(r.Context(), req.FromSnapshot, metav1.GetOptions{})
+		// A restore lands next to its snapshot: dataSource cannot cross
+		// namespaces.
+		snap, err := a.Dyn.Resource(snapGVR).Namespace(ns).Get(r.Context(), req.FromSnapshot, metav1.GetOptions{})
 		if err != nil {
 			http.Error(w, "snapshot: "+err.Error(), http.StatusBadRequest)
 			return
@@ -259,7 +271,7 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		// falling to the cluster default would silently downgrade a
 		// replicated volume to local, or mount a block image as a fs.
 		if src, _, _ := unstructured.NestedString(snap.Object, "spec", "source", "persistentVolumeClaimName"); src != "" {
-			pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), src, metav1.GetOptions{})
+			pvc, err := a.CS.CoreV1().PersistentVolumeClaims(ns).Get(r.Context(), src, metav1.GetOptions{})
 			switch {
 			case err == nil:
 				if req.StorageClass == "" && pvc.Spec.StorageClassName != nil {
@@ -300,7 +312,7 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(nodes.Items) < ReplicationMinNodes {
-			a.record(r, "create volume", req.Name, errNeedsNodes)
+			a.recordIn(r, ns, "create volume", req.Name, errNeedsNodes)
 			http.Error(w, errNeedsNodes.Error(), http.StatusConflict)
 			return
 		}
@@ -316,7 +328,7 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 	}
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: req.Name, Namespace: a.Namespace,
+			Name: req.Name, Namespace: ns,
 			// UI volumes are served by nfsd or LIO, never a pod; the
 			// declaration lets the binder complete WFFC without guessing.
 			Annotations: map[string]string{
@@ -345,12 +357,12 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 			Name:     req.FromSnapshot,
 		}
 	}
-	created, cerr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Create(r.Context(), pvc, metav1.CreateOptions{})
+	created, cerr := a.CS.CoreV1().PersistentVolumeClaims(ns).Create(r.Context(), pvc, metav1.CreateOptions{})
 	verb := "create volume"
 	if req.FromSnapshot != "" {
 		verb = "restore volume"
 	}
-	a.record(r, verb, req.Name, cerr)
+	a.recordIn(r, ns, verb, req.Name, cerr)
 	respond(w, created, cerr)
 }
 
@@ -358,17 +370,21 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 // deleting the PVC under an export strands the client, and the CRDs cannot
 // express cross-object liveness.
 func (a *API) DeleteVolume(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if ref, err := a.claimReferenced(r.Context(), name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	} else if ref != "" {
-		a.record(r, "delete volume", name, errInUse)
-		http.Error(w, "volume is in use by "+ref, http.StatusConflict)
-		return
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	// Shares and Targets live in the system namespace and reference
+	// claims there only.
+	if ns == a.Namespace {
+		if ref, err := a.claimReferenced(r.Context(), name); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		} else if ref != "" {
+			a.recordIn(r, ns, "delete volume", name, errInUse)
+			http.Error(w, "volume is in use by "+ref, http.StatusConflict)
+			return
+		}
 	}
-	err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Delete(r.Context(), name, metav1.DeleteOptions{})
-	a.record(r, "delete volume", name, err)
+	err := a.CS.CoreV1().PersistentVolumeClaims(ns).Delete(r.Context(), name, metav1.DeleteOptions{})
+	a.recordIn(r, ns, "delete volume", name, err)
 	respondDelete(w, err)
 }
 
@@ -425,7 +441,8 @@ func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "survivor node required", http.StatusBadRequest)
 		return
 	}
-	pvc, err := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Get(r.Context(), name, metav1.GetOptions{})
+	ns := r.PathValue("namespace")
+	pvc, err := a.CS.CoreV1().PersistentVolumeClaims(ns).Get(r.Context(), name, metav1.GetOptions{})
 	if err != nil {
 		respondDelete(w, err)
 		return
@@ -466,7 +483,7 @@ func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, node := range victims {
 		if err := a.Linstor.Resources.Delete(r.Context(), res, node); err != nil {
-			a.record(r, "resolve split-brain", name, err)
+			a.recordIn(r, ns, "resolve split-brain", name, err)
 			http.Error(w, "delete replica on "+node+": "+err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -474,7 +491,7 @@ func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 	aerr := a.Linstor.Resources.Autoplace(r.Context(), res, lapi.AutoPlaceRequest{
 		SelectFilter: lapi.AutoSelectFilter{PlaceCount: int32(diskful)},
 	})
-	a.record(r, "resolve split-brain", name, aerr)
+	a.recordIn(r, ns, "resolve split-brain", name, aerr)
 	if aerr != nil {
 		http.Error(w, "replicas discarded but autoplace failed, retry resolves it: "+aerr.Error(), http.StatusBadGateway)
 		return
@@ -496,10 +513,11 @@ func (a *API) ResizeVolume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid size: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	patch := []byte(`{"spec":{"resources":{"requests":{"storage":"` + size.String() + `"}}}}`)
-	_, perr := a.CS.CoreV1().PersistentVolumeClaims(a.Namespace).Patch(
-		r.Context(), r.PathValue("name"), types.MergePatchType, patch, metav1.PatchOptions{})
-	a.record(r, "resize volume", r.PathValue("name"), perr)
+	_, perr := a.CS.CoreV1().PersistentVolumeClaims(ns).Patch(
+		r.Context(), name, types.MergePatchType, patch, metav1.PatchOptions{})
+	a.recordIn(r, ns, "resize volume", name, perr)
 	respondDelete(w, perr)
 }
 
@@ -561,7 +579,10 @@ type snapshotRequest struct {
 	Volume string `json:"volume"`
 }
 
+// CreateSnapshot puts the snapshot next to its PVC: the snapshot
+// controller resolves the source claim in the snapshot's namespace.
 func (a *API) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	ns := r.PathValue("namespace")
 	var req snapshotRequest
 	if !decode(w, r, &req) {
 		return
@@ -569,20 +590,21 @@ func (a *API) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	snap := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "snapshot.storage.k8s.io/v1",
 		"kind":       "VolumeSnapshot",
-		"metadata":   map[string]any{"name": req.Name, "namespace": a.Namespace},
+		"metadata":   map[string]any{"name": req.Name, "namespace": ns},
 		"spec": map[string]any{
 			"volumeSnapshotClassName": "stornas",
 			"source":                  map[string]any{"persistentVolumeClaimName": req.Volume},
 		},
 	}}
-	created, err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Create(r.Context(), snap, metav1.CreateOptions{})
-	a.record(r, "create snapshot", req.Name, err)
+	created, err := a.Dyn.Resource(snapGVR).Namespace(ns).Create(r.Context(), snap, metav1.CreateOptions{})
+	a.recordIn(r, ns, "create snapshot", req.Name, err)
 	respond(w, created, err)
 }
 
 func (a *API) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	err := a.Dyn.Resource(snapGVR).Namespace(a.Namespace).Delete(r.Context(), r.PathValue("name"), metav1.DeleteOptions{})
-	a.record(r, "delete snapshot", r.PathValue("name"), err)
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	err := a.Dyn.Resource(snapGVR).Namespace(ns).Delete(r.Context(), name, metav1.DeleteOptions{})
+	a.recordIn(r, ns, "delete snapshot", name, err)
 	respondDelete(w, err)
 }
 

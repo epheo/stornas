@@ -43,7 +43,12 @@
 		const target = placement.startsWith('pool:')
 			? { pool: placement.slice('pool:'.length) }
 			: { storageClass: placement };
-		const err = await post('/api/v1/volumes', { name, size, block, ...target });
+		const err = await post(`/api/v1/namespaces/${snap.systemNamespace}/volumes`, {
+			name,
+			size,
+			block,
+			...target,
+		});
 		createBusy = false;
 		if (err) actionError = err;
 		else {
@@ -52,13 +57,16 @@
 		}
 	}
 
+	// Every volume and snapshot action carries its object's namespace: the
+	// page lists every namespace, and names only identify within one.
 	type ModalState =
-		| { kind: 'delete-volume'; name: string }
-		| { kind: 'resize'; name: string; current: number }
-		| { kind: 'snapshot'; name: string }
-		| { kind: 'restore'; snapshot: string }
-		| { kind: 'delete-snapshot'; name: string }
-		| { kind: 'resolve-split'; name: string; replicas: Replica[] };
+		| { kind: 'delete-volume'; ns: string; name: string }
+		| { kind: 'resize'; ns: string; name: string; current: number }
+		| { kind: 'snapshot'; ns: string; name: string }
+		| { kind: 'restore'; ns: string; snapshot: string }
+		| { kind: 'delete-snapshot'; ns: string; name: string }
+		| { kind: 'resolve-split'; ns: string; name: string; replicas: Replica[] };
+	const volumePath = (ns: string, name: string) => `/api/v1/namespaces/${ns}/volumes/${name}`;
 	let modal = $state<ModalState | null>(null);
 	let modalError = $state('');
 	let busy = $state(false);
@@ -185,19 +193,25 @@
 										{@render actionButton('resolve', true, () =>
 											open({
 												kind: 'resolve-split',
+												ns: vol.namespace,
 												name: vol.name,
 												replicas: vol.replication?.replicas ?? [],
 											}),
 										)}
 									{/if}
 									{@render actionButton('snapshot', false, () =>
-										open({ kind: 'snapshot', name: vol.name }),
+										open({ kind: 'snapshot', ns: vol.namespace, name: vol.name }),
 									)}
 									{@render actionButton('resize', false, () =>
-										open({ kind: 'resize', name: vol.name, current: vol.capacityBytes }),
+										open({
+											kind: 'resize',
+											ns: vol.namespace,
+											name: vol.name,
+											current: vol.capacityBytes,
+										}),
 									)}
 									{@render actionButton('delete', true, () =>
-										open({ kind: 'delete-volume', name: vol.name }),
+										open({ kind: 'delete-volume', ns: vol.namespace, name: vol.name }),
 									)}
 								</td>
 							{/if}
@@ -218,6 +232,7 @@
 					<thead class="text-left text-xs text-slate-400">
 						<tr class="border-b border-slate-800">
 							<th class="px-3 py-2 font-medium">Name</th>
+							<th class="px-3 py-2 font-medium">Namespace</th>
 							<th class="px-3 py-2 font-medium">Volume</th>
 							<th class="px-3 py-2 font-medium">Size</th>
 							<th class="px-3 py-2 font-medium">Created</th>
@@ -229,6 +244,7 @@
 						{#each snap.snapshots as s (s.namespace + '/' + s.name)}
 							<tr class="border-t border-slate-800/60">
 								<td class="px-3 py-2 font-medium text-slate-200">{s.name}</td>
+								<td class="px-3 py-2 text-slate-400">{s.namespace}</td>
 								<td class="px-3 py-2 text-slate-400">{s.source}</td>
 								<td class="px-3 py-2 tabular-nums text-slate-300">{formatBytes(s.sizeBytes)}</td>
 								<td class="px-3 py-2 text-xs tabular-nums text-slate-400">
@@ -243,10 +259,10 @@
 								{#if app.role === 'admin'}
 									<td class="space-x-1 px-3 py-2 whitespace-nowrap">
 										{@render actionButton('restore', false, () =>
-											open({ kind: 'restore', snapshot: s.name }),
+											open({ kind: 'restore', ns: s.namespace, snapshot: s.name }),
 										)}
 										{@render actionButton('delete', true, () =>
-											open({ kind: 'delete-snapshot', name: s.name }),
+											open({ kind: 'delete-snapshot', ns: s.namespace, name: s.name }),
 										)}
 									</td>
 								{/if}
@@ -304,7 +320,10 @@
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
-					disabled={!validName(name) || sizeBytes(size) == null || createBusy}
+					disabled={!validName(name) ||
+						sizeBytes(size) == null ||
+						createBusy ||
+						!snap.systemNamespace}
 				>
 					Create volume
 				</button>
@@ -320,7 +339,7 @@
 		confirmWord={m.name}
 		{busy}
 		error={modalError}
-		onconfirm={() => perform(() => del(`/api/v1/volumes/${m.name}`), `Volume ${m.name} deleted`)}
+		onconfirm={() => perform(() => del(volumePath(m.ns, m.name)), `Volume ${m.name} deleted`)}
 		onclose={() => (modal = null)}
 	>
 		<p>
@@ -337,7 +356,7 @@
 				e.preventDefault();
 				if (resizeValid)
 					perform(
-						() => post(`/api/v1/volumes/${m.name}/resize`, { size: newSize }),
+						() => post(`${volumePath(m.ns, m.name)}/resize`, { size: newSize }),
 						`Volume ${m.name} resized to ${newSize}`,
 					);
 			}}
@@ -370,7 +389,7 @@
 			<button
 				onclick={() =>
 					perform(
-						() => post(`/api/v1/volumes/${m.name}/resize`, { size: newSize }),
+						() => post(`${volumePath(m.ns, m.name)}/resize`, { size: newSize }),
 						`Volume ${m.name} resized to ${newSize}`,
 					)}
 				disabled={!resizeValid || busy}
@@ -406,7 +425,7 @@
 			<button
 				onclick={() =>
 					perform(
-						() => post('/api/v1/snapshots', { name: snapName, volume: m.name }),
+						() => post(`/api/v1/namespaces/${m.ns}/snapshots`, { name: snapName, volume: m.name }),
 						`Snapshot ${snapName} created`,
 					)}
 				disabled={!validName(snapName) || busy}
@@ -446,7 +465,11 @@
 				onclick={() =>
 					perform(
 						() =>
-							post('/api/v1/volumes', { name: restoreName, size: '', fromSnapshot: m.snapshot }),
+							post(`/api/v1/namespaces/${m.ns}/volumes`, {
+								name: restoreName,
+								size: '',
+								fromSnapshot: m.snapshot,
+							}),
 						`Volume ${restoreName} restored from ${m.snapshot}`,
 					)}
 				disabled={!validName(restoreName) || busy}
@@ -489,7 +512,7 @@
 			<button
 				onclick={() =>
 					perform(
-						() => post(`/api/v1/volumes/${m.name}/resolve-split`, { survivor }),
+						() => post(`${volumePath(m.ns, m.name)}/resolve-split`, { survivor }),
 						`Keeping ${survivor}; other replicas resync from it`,
 					)}
 				disabled={!survivor || busy}
@@ -506,7 +529,10 @@
 		{busy}
 		error={modalError}
 		onconfirm={() =>
-			perform(() => del(`/api/v1/snapshots/${m.name}`), `Snapshot ${m.name} deleted`)}
+			perform(
+				() => del(`/api/v1/namespaces/${m.ns}/snapshots/${m.name}`),
+				`Snapshot ${m.name} deleted`,
+			)}
 		onclose={() => (modal = null)}
 	>
 		<p>

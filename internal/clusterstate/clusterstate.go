@@ -77,6 +77,10 @@ type State struct {
 	specs []reflectorSpec
 
 	healthy atomic.Bool // any reflector's List/Watch failing flips this false
+
+	// SystemNamespace rides in every snapshot: new appliance volumes go
+	// there, and Shares and Targets reference claims there only.
+	SystemNamespace string
 }
 
 type reflectorSpec struct {
@@ -240,7 +244,7 @@ func (s *State) Healthy() bool {
 // in-memory; sorted so identical cluster state yields identical frames
 // (the WS hub dedupes on the encoded bytes).
 func (s *State) Snapshot() model.Snapshot {
-	var snap model.Snapshot
+	snap := model.Snapshot{SystemNamespace: s.SystemNamespace}
 	for _, u := range reflect.List(s.pools) {
 		var pool storagev1alpha1.StoragePool
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &pool); err != nil {

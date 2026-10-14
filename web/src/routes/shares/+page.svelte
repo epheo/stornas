@@ -6,7 +6,10 @@
 	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
 
 	const snap = $derived(app.snap);
-	const fsVolumes = $derived(snap.volumes.filter((v) => !v.block));
+	// A Share lives in the system namespace and references claims there.
+	const fsVolumes = $derived(
+		snap.volumes.filter((v) => !v.block && v.namespace === snap.systemNamespace),
+	);
 
 	// Agent conventions: the shares directory is the NFSv4 fsid=0 pseudo
 	// root, so clients mount /<ns>-<name>, never the on-host directory.

@@ -6,7 +6,10 @@
 	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
 
 	const snap = $derived(app.snap);
-	const blockVolumes = $derived(snap.volumes.filter((v) => v.block));
+	// A Target lives in the system namespace and references claims there.
+	const blockVolumes = $derived(
+		snap.volumes.filter((v) => v.block && v.namespace === snap.systemNamespace),
+	);
 
 	// What an initiator discovers against: the VIP when the target has
 	// one, else the active node's address.

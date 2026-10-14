@@ -189,6 +189,7 @@ export interface Task {
  * sends a full frame per change rather than diffs.
  */
 export interface Snapshot {
+  systemNamespace: string;
   pools: Pool[];
   nodes: Node[];
   volumes: Volume[];

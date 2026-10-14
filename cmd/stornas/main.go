@@ -61,6 +61,7 @@ func main() {
 
 	bus := eventbus.New()
 	state := clusterstate.New(cs, dyn, bus)
+	state.SystemNamespace = src.Namespace
 	state.Run(ctx)
 
 	var poller *linstorpoll.Poller
@@ -111,16 +112,17 @@ func main() {
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
 	mux.Handle("DELETE /api/v1/pools/{name}", admin(mutate.DeletePool))
 	mux.Handle("POST /api/v1/pools/{name}/replace", admin(mutate.ReplacePoolDevice))
-	mux.Handle("POST /api/v1/volumes", admin(mutate.CreateVolume))
-	mux.Handle("DELETE /api/v1/volumes/{name}", admin(mutate.DeleteVolume))
-	mux.Handle("POST /api/v1/volumes/{name}/resize", admin(mutate.ResizeVolume))
-	mux.Handle("POST /api/v1/volumes/{name}/resolve-split", admin(mutate.ResolveSplitBrain))
+	// Volumes and snapshots live in any namespace; no route defaults one.
+	mux.Handle("POST /api/v1/namespaces/{namespace}/volumes", admin(mutate.CreateVolume))
+	mux.Handle("DELETE /api/v1/namespaces/{namespace}/volumes/{name}", admin(mutate.DeleteVolume))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/volumes/{name}/resize", admin(mutate.ResizeVolume))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/volumes/{name}/resolve-split", admin(mutate.ResolveSplitBrain))
 	mux.Handle("POST /api/v1/shares", admin(mutate.CreateShare))
 	mux.Handle("DELETE /api/v1/shares/{name}", admin(mutate.DeleteShare))
 	mux.Handle("POST /api/v1/targets", admin(mutate.CreateTarget))
 	mux.Handle("DELETE /api/v1/targets/{name}", admin(mutate.DeleteTarget))
-	mux.Handle("POST /api/v1/snapshots", admin(mutate.CreateSnapshot))
-	mux.Handle("DELETE /api/v1/snapshots/{name}", admin(mutate.DeleteSnapshot))
+	mux.Handle("POST /api/v1/namespaces/{namespace}/snapshots", admin(mutate.CreateSnapshot))
+	mux.Handle("DELETE /api/v1/namespaces/{namespace}/snapshots/{name}", admin(mutate.DeleteSnapshot))
 	mux.Handle("GET /api/v1/users", admin(mutate.ListUsers))
 	mux.Handle("POST /api/v1/users", admin(mutate.CreateUser))
 	mux.Handle("DELETE /api/v1/users/{name}", admin(mutate.DeleteUser))

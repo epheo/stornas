@@ -168,12 +168,13 @@ type Task struct {
 // Snapshot is one consistent frame of everything the UI shows; the WS hub
 // sends a full frame per change rather than diffs.
 type Snapshot struct {
-	Pools     []Pool           `json:"pools"`
-	Nodes     []Node           `json:"nodes"`
-	Volumes   []Volume         `json:"volumes"`
-	Shares    []Share          `json:"shares"`
-	Targets   []Target         `json:"targets"`
-	Snapshots []VolumeSnapshot `json:"snapshots"`
-	Alerts    []Alert          `json:"alerts"`
-	Tasks     []Task           `json:"tasks"`
+	SystemNamespace string           `json:"systemNamespace"`
+	Pools           []Pool           `json:"pools"`
+	Nodes           []Node           `json:"nodes"`
+	Volumes         []Volume         `json:"volumes"`
+	Shares          []Share          `json:"shares"`
+	Targets         []Target         `json:"targets"`
+	Snapshots       []VolumeSnapshot `json:"snapshots"`
+	Alerts          []Alert          `json:"alerts"`
+	Tasks           []Task           `json:"tasks"`
 }
