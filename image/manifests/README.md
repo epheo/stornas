@@ -4,7 +4,7 @@ Baked into the bootc image and applied from disk by MicroShift, in
 lexical order:
 
 - `piraeus/` -> `/usr/lib/microshift/manifests.d/000-piraeus/`
-  piraeus-operator v2.11.0, vendored via kustomize render; regenerate
+  piraeus-operator v2.12.0, vendored via kustomize render; regenerate
   with a new ref and bump image/embedded-images.txt together.
 - `stornas/` -> `/usr/lib/microshift/manifests.d/010-stornas/`
   stornas CRDs (synced by `make sync-manifests`), LinstorCluster, the
