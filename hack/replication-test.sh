@@ -195,12 +195,16 @@ diagnostics() {
 		| grep -iE 'error|fail|capacity' | tail -12 || true
 	log "DIAGNOSTICS: failover placement and host state"
 	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A30 'status:' | tail -80 || true
+	avail='.status.conditions[?(@.type=="Available")]'
+	kc -n stornas-system get targets -o custom-columns="NAME:.metadata.name,ACTIVE:.status.activeNode,STATE:.status.state,REASON:$avail.reason,MESSAGE:$avail.message" 2>&1 || true
+	kc -n stornas-system get shares -o custom-columns="NAME:.metadata.name,NODE:.status.node,STATE:.status.state,REASON:$avail.reason,MESSAGE:$avail.message" 2>&1 || true
 	for fn in v1 v2; do
 		$fn sh -c "hostname; ip -j addr show to ${VIP:-0.0.0.0} 2>/dev/null; targetcli ls /iscsi 1 2>/dev/null; exportfs -v 2>/dev/null" 2>&1 || true
 	done
 	log "DIAGNOSTICS: stornas control plane placement and operator log"
 	kc -n stornas-system get pods -o wide 2>&1 || true
-	kc -n stornas-system logs deploy/stornas-operator --tail=30 2>&1 || true
+	# The LINSTOR client's DEBUG lines would bury every reconcile message.
+	kc -n stornas-system logs deploy/stornas-operator --tail=400 2>&1 | grep -v '^\[DEBUG\]' | tail -40 || true
 	log "DIAGNOSTICS: NFS server view on node1"
 	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; ls -Z /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
 	log "DIAGNOSTICS: one verbose NFS mount attempt from node2"
