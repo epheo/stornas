@@ -4,6 +4,11 @@ name: replication-test
 
 on:
   workflow_dispatch:
+    inputs:
+      gi_trace:
+        description: Record DRBD generation identifiers at every phase
+        type: boolean
+        default: false
   schedule:
     - cron: "47 4 * * *"
 
@@ -60,6 +65,8 @@ jobs:
         run: make image PODMAN=podman
       - name: replication test
         run: make replication-test PODMAN='sudo podman'
+        env:
+          GI_TRACE: ${{ inputs.gi_trace && '1' || '0' }}
       - name: collect console logs on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.2
