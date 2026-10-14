@@ -62,6 +62,13 @@ jobs:
           echo "VERSION=$(date -u +%Y%m%d).${{ github.run_number }}.g${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           digest=$(skopeo inspect --format '{{.Digest}}' docker://ghcr.io/epheo/microshift:latest)
           echo "BASE_IMAGE=ghcr.io/epheo/microshift@${digest}" >> "$GITHUB_ENV"
+      # Registry archives are immutable per pinned list; restoring them keeps
+      # the gate off quay.io and registry.k8s.io. Exact key only, so a bump
+      # starts clean instead of dragging old archives along.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: .cache/registry-images
+          key: registry-images-${{ hashFiles('image/embedded-images.txt') }}
       - name: build the appliance image
         run: make image PODMAN=podman VERSION="$VERSION" BASE_IMAGE="$BASE_IMAGE"
       # No smoke step: microshift-in-container crash-loops on GH runners

@@ -68,4 +68,11 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      # Registry archives are immutable per pinned list; restoring them keeps
+      # the gate off quay.io and registry.k8s.io. Exact key only, so a bump
+      # starts clean instead of dragging old archives along.
+      - uses: actions/cache@v6.1.0
+        with:
+          path: .cache/registry-images
+          key: registry-images-${{ hashFiles('image/embedded-images.txt') }}
       - run: make image
