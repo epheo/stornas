@@ -53,6 +53,11 @@ sync-manifests: generate
 # archive gets a "path ref" line in a fragment the Containerfile appends
 # to the distro manifest; a tar without a line is dead weight and the
 # pod behind it pulls from the network.
+# Registry archives are named by pinned ref and reused when present: CI
+# restores this dir from a cache keyed on image/embedded-images.txt, so
+# gates stop depending on registries. .part keeps a failed copy out.
+REGISTRY_ARCHIVES := .cache/registry-images
+
 embed: images
 	mkdir -p image/build/embedded-images
 	: > image/build/embedded-images/manifest.stornas
@@ -62,11 +67,16 @@ embed: images
 		echo "/usr/lib/embedded-images/$$(basename $$img).tar $$img:latest" \
 			>> image/build/embedded-images/manifest.stornas; \
 	done
+	mkdir -p $(REGISTRY_ARCHIVES)
 	grep -v '^#' image/embedded-images.txt | while read -r img; do \
 		[ -z "$$img" ] && continue; \
 		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
-		skopeo copy docker://$$img \
-			oci-archive:image/build/embedded-images/$$out:$$img || exit 1; \
+		if [ ! -s $(REGISTRY_ARCHIVES)/$$out ]; then \
+			skopeo copy docker://$$img \
+				oci-archive:$(REGISTRY_ARCHIVES)/$$out.part:$$img || exit 1; \
+			mv $(REGISTRY_ARCHIVES)/$$out.part $(REGISTRY_ARCHIVES)/$$out; \
+		fi; \
+		cp $(REGISTRY_ARCHIVES)/$$out image/build/embedded-images/$$out || exit 1; \
 		echo "/usr/lib/embedded-images/$$out $$img" \
 			>> image/build/embedded-images/manifest.stornas; \
 	done
