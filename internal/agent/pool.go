@@ -411,7 +411,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	if err := r.Status().Update(ctx, &pool); err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -427,6 +427,8 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		// Unfiltered on purpose: an update conflict returns without requeue
+		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.StoragePool{}).
 		Named("pool-agent").
 		Complete(r)
