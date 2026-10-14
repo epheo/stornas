@@ -15,7 +15,7 @@ parameters:
   # XFS everywhere (README architecture); the CSI default is ext4, and the agent
   # mounts shares as xfs.
   csi.storage.k8s.io/fstype: xfs
-volumeBindingMode: WaitForFirstConsumer
+volumeBindingMode: Immediate
 allowVolumeExpansion: true
 ---
 apiVersion: storage.k8s.io/v1
@@ -32,5 +32,5 @@ parameters:
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
   csi.storage.k8s.io/fstype: xfs
-volumeBindingMode: WaitForFirstConsumer
+volumeBindingMode: Immediate
 allowVolumeExpansion: true
