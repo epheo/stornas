@@ -174,6 +174,15 @@ func (a *API) ReplacePoolDevice(w http.ResponseWriter, r *http.Request) {
 	respondDelete(w, uerr)
 }
 
+// ReplicatedClass needs ReplicationMinNodes: two data replicas and a
+// diskless tiebreaker form DRBD quorum; two nodes have no majority.
+const (
+	ReplicatedClass     = "stornas-replicated"
+	ReplicationMinNodes = 3
+)
+
+var errNeedsNodes = errors.New("replication needs three nodes")
+
 type volumeRequest struct {
 	Name         string `json:"name"`
 	Size         string `json:"size"`
@@ -226,6 +235,18 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 					"); pass storageClass (and block) explicitly", http.StatusConflict)
 				return
 			}
+		}
+	}
+	if req.StorageClass == ReplicatedClass {
+		nodes, err := a.CS.CoreV1().Nodes().List(r.Context(), metav1.ListOptions{})
+		if err != nil {
+			http.Error(w, "nodes: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(nodes.Items) < ReplicationMinNodes {
+			a.record(r, "create volume", req.Name, errNeedsNodes)
+			http.Error(w, errNeedsNodes.Error(), http.StatusConflict)
+			return
 		}
 	}
 	size, err := resource.ParseQuantity(req.Size)

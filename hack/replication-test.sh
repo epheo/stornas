@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Two-node replication acceptance test: the first real exercise of the
+# Three-node replication acceptance test: the first real exercise of the
 # stornas-replicated StorageClass and the DRBD kmod beyond modprobe.
+# node1 and node2 hold data; node3 holds no pool and serves only as the
+# diskless quorum tiebreaker LINSTOR places for each two-copy volume.
 # The join is the distro's worker role (microshift-profile worker +
 # add-node --worker); firewalld and greenboot stay in place, so this
 # also proves the stornas firewall service and the role-aware check.
@@ -14,10 +16,10 @@
 # survive. Also: keep every guest subnet out of 10.42-10.44; 10.44.0.0
 # is microshift's apiserver advertise address on br-ex.
 #
-# The storage assertions: a StoragePool per node, a replicated PVC
-# placing DRBD replicas on both, writes surviving the loss of the peer
-# node (two replicas cannot form quorum, LINSTOR leaves quorum off, IO
-# must continue), and a resync back to UpToDate when the peer returns.
+# The storage assertions: a StoragePool per data node, a replicated PVC
+# placing DRBD replicas on both and its tiebreaker on node3, writes
+# surviving the loss of the peer node (node1 and the tiebreaker keep
+# quorum), and a resync back to UpToDate when the peer returns.
 #
 # The same kill cycle carries the failover assertions (failure matrix:
 # "node dies, replicated volume"): a Target and a Share active on the
@@ -27,12 +29,13 @@
 # means no re-placement, only surviving IO.
 #
 # After the failover cycle: real client IO (NFS mount, iSCSI CHAP login)
-# against the moved exports, the 2-node split-brain row (bridge port
-# isolation, forced divergence, pick-survivor through the API), and the
-# controller-down row (IO continues, provisioning blocks and recovers).
+# against the moved exports, the partition row (node2 cut off: its IO
+# suspends without quorum and resumes on heal, the majority keeps
+# writing), the forced-promote row (pick-survivor through the UI), and
+# the controller-down row (IO continues, provisioning blocks and recovers).
 #
-# Needs a root-capable podman, qemu-system-x86_64, dnsmasq, and sudo
-# for the bridge/taps. CI-sized: two 5GB VMs.
+# Needs a root-capable podman, qemu-system-x86_64, dnsmasq, nft, and sudo
+# for the bridge/taps. CI-sized: 5GB + 4GB + 3GB VMs on a 16GB runner.
 set -euo pipefail
 # shellcheck source=hack/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -41,13 +44,18 @@ IMAGE=${IMAGE:-localhost/stornas-os:dev}
 PODMAN=${PODMAN:-podman}
 BIB_IMAGE=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
 WORKDIR=${WORKDIR:-$(mktemp -d /tmp/stornas-repl.XXXXXX)}
-VM_MEM=${VM_MEM:-5120}
+# The master runs the control plane; node3 runs only the worker stack.
+VM_MEM1=${VM_MEM1:-5120}
+VM_MEM2=${VM_MEM2:-4096}
+VM_MEM3=${VM_MEM3:-3072}
 BR=stornas-br0
 NET=192.168.100
 IP1=$NET.11
 IP2=$NET.12
+IP3=$NET.13
 MAC1=52:54:00:44:00:01
 MAC2=52:54:00:44:00:02
+MAC3=52:54:00:44:00:03
 KEEP=${KEEP:-0}
 PIDS=()
 
@@ -61,6 +69,7 @@ nssh() { # nssh <ip> <cmd...>
 }
 v1() { nssh "$IP1" "$@"; }
 v2() { nssh "$IP2" "$@"; }
+v3() { nssh "$IP3" "$@"; }
 kc() { v1 kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
 linstor_cmd() { kc -n piraeus-datastore exec deploy/linstor-controller -- linstor "$@"; }
 
@@ -73,21 +82,20 @@ host_net_up() {
 		|| sudo iptables -t nat -A POSTROUTING -s "$NET.0/24" ! -o "$BR" -j MASQUERADE
 	sudo iptables -C FORWARD -i "$BR" -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD -i "$BR" -j ACCEPT
 	sudo iptables -C FORWARD -o "$BR" -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD -o "$BR" -j ACCEPT
-	for t in tap-stornas1 tap-stornas2; do
+	for t in tap-stornas1 tap-stornas2 tap-stornas3; do
 		sudo ip tuntap add "$t" mode tap 2>/dev/null || true
 		sudo ip link set "$t" master "$BR" up
 	done
 	sudo dnsmasq --interface="$BR" --bind-interfaces --except-interface=lo \
 		--dhcp-range="$NET.10,$NET.50,12h" \
-		--dhcp-host="$MAC1,$IP1" --dhcp-host="$MAC2,$IP2" \
+		--dhcp-host="$MAC1,$IP1" --dhcp-host="$MAC2,$IP2" --dhcp-host="$MAC3,$IP3" \
 		--pid-file="$WORKDIR/dnsmasq.pid" || die "dnsmasq failed to start"
 }
 
 host_net_down() {
-	sudo iptables -D FORWARD -m physdev --physdev-in tap-stornas1 --physdev-out tap-stornas2 -j DROP 2>/dev/null || true
-	sudo iptables -D FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
+	sudo nft delete table bridge stornas_cut 2>/dev/null || true
 	sudo kill "$(cat "$WORKDIR/dnsmasq.pid" 2>/dev/null)" 2>/dev/null || true
-	for t in tap-stornas1 tap-stornas2; do sudo ip link del "$t" 2>/dev/null || true; done
+	for t in tap-stornas1 tap-stornas2 tap-stornas3; do sudo ip link del "$t" 2>/dev/null || true; done
 	sudo ip link del "$BR" 2>/dev/null || true
 	sudo iptables -t nat -D POSTROUTING -s "$NET.0/24" ! -o "$BR" -j MASQUERADE 2>/dev/null || true
 	sudo iptables -D FORWARD -i "$BR" -j ACCEPT 2>/dev/null || true
@@ -95,6 +103,11 @@ host_net_down() {
 }
 
 diagnostics() {
+	log "DIAGNOSTICS: memory on the runner and each node"
+	free -m || true
+	for fn in v1 v2 v3; do
+		$fn sh -c 'hostname; free -m' 2>&1 || true
+	done
 	log "DIAGNOSTICS: nodes and pods"
 	kc get nodes -o wide 2>&1 || true
 	kc get pods -A --no-headers 2>&1 | grep -vE 'Running|Completed' || true
@@ -132,7 +145,7 @@ diagnostics() {
 		kc -n stornas-system exec "${agent2:-none}" -- curl -s -m5 -o /dev/null -w '%{http_code}\n' "$u" 2>&1 | tail -2 || true
 	done
 	v2 sh -c "curl -s -m5 -o /dev/null -w 'host->pod %{http_code}\n' http://${lc_pod:-127.0.0.1}:3370/health; curl -s -m5 -o /dev/null -w 'host->svc %{http_code}\n' http://${lc_svc:-127.0.0.1}:3370/health; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
-	log "DIAGNOSTICS: tunnels, routes, firewall on both nodes"
+	log "DIAGNOSTICS: tunnels, routes, firewall on the data nodes"
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ovs-vsctl --columns=name,options find interface type=geneve 2>/dev/null; ip route show 2>/dev/null; firewall-cmd --list-all 2>/dev/null | grep -E "interfaces|services|ports|target"; ss -unl 2>/dev/null | grep 6081' 2>&1 || true
 	done
@@ -185,7 +198,7 @@ diagnostics() {
 	linstor_cmd resource list 2>&1 || true
 	linstor_cmd err list 2>&1 | tail -12 || true
 	log "DIAGNOSTICS: DRBD kernel view per node"
-	for fn in v1 v2; do
+	for fn in v1 v2 v3; do
 		$fn sh -c 'hostname; drbdsetup status --verbose 2>/dev/null; dmesg | grep -i drbd | tail -25' 2>&1 || true
 	done
 	log "DIAGNOSTICS: CSI capacity view"
@@ -231,6 +244,7 @@ diagnostics() {
 	log "DIAGNOSTICS: consoles (last 15 lines each)"
 	tail -15 "$WORKDIR/console1.log" 2>/dev/null || true
 	tail -15 "$WORKDIR/console2.log" 2>/dev/null || true
+	tail -15 "$WORKDIR/console3.log" 2>/dev/null || true
 }
 
 cleanup() {
@@ -280,7 +294,9 @@ $PODMAN run --rm --privileged \
 DISK1="$WORKDIR/output/qcow2/disk.qcow2"
 [ -f "$DISK1" ] || die "bootc-image-builder produced no qcow2"
 DISK2="$WORKDIR/disk2.qcow2"
+DISK3="$WORKDIR/disk3.qcow2"
 cp --reflink=auto "$DISK1" "$DISK2"
+cp --reflink=auto "$DISK1" "$DISK3"
 
 OVMF_CODE=""
 for c in /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
@@ -291,15 +307,15 @@ done
 log "creating the shared NAT bridge network"
 host_net_up
 
-boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap>
-	local n=$1 disk=$2 serial=$3 mac=$4 tap=$5
+boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap> <mem>
+	local n=$1 disk=$2 serial=$3 mac=$4 tap=$5 mem=$6
 	cp "${OVMF_CODE%CODE*}VARS${OVMF_CODE##*CODE}" "$WORKDIR/vars$n.fd" 2>/dev/null \
 		|| cp "$(dirname "$OVMF_CODE")"/OVMF_VARS*.fd "$WORKDIR/vars$n.fd"
 	truncate -s 20G "$WORKDIR/scratch$n.raw"
 	local accel=tcg
 	[ -w /dev/kvm ] && accel=kvm
 	sudo qemu-system-x86_64 \
-		-machine "q35,accel=$accel" -cpu max -smp 4 -m "$VM_MEM" \
+		-machine "q35,accel=$accel" -cpu max -smp 4 -m "$mem" \
 		-drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
 		-drive "if=pflash,format=raw,file=$WORKDIR/vars$n.fd" \
 		-drive "file=$disk,if=virtio,format=qcow2" \
@@ -313,12 +329,14 @@ boot_vm() { # boot_vm <n> <disk> <scratch-serial> <mac> <tap>
 	PIDS+=("$(sudo cat "$WORKDIR/qemu$n.pid")")
 }
 
-log "booting two appliances on the shared network"
-boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1
-boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2
+log "booting three appliances on the shared network"
+boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1"
+boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2"
+boot_vm 3 "$DISK3" STORNAS3 "$MAC3" tap-stornas3 "$VM_MEM3"
 
 retry 600 "node1 ssh reachable" v1 true
 retry 600 "node2 ssh reachable" v2 true
+retry 600 "node3 ssh reachable" v3 true
 
 # First boot pulls the OKD release images; cleanup keeps them local.
 settled() { # settled <vssh-fn>
@@ -326,12 +344,14 @@ settled() { # settled <vssh-fn>
 }
 node1_settled() { settled v1; }
 node2_settled() { settled v2; }
+node3_settled() { settled v3; }
 retry 900 "node1 first boot settled" node1_settled
 retry 900 "node2 first boot settled" node2_settled
+retry 900 "node3 first boot settled" node3_settled
 
 # The apiserver reaches kubelets by node name (logs, exec, metrics).
-for fn in v1 v2; do
-	$fn sh -c "printf '$IP1 node1\n$IP2 node2\n' >> /etc/hosts"
+for fn in v1 v2 v3; do
+	$fn sh -c "printf '$IP1 node1\n$IP2 node2\n$IP3 node3\n' >> /etc/hosts"
 done
 
 # Distro worker-role flow (multinode-test.sh in epheo/microshift):
@@ -356,21 +376,27 @@ retry 600 "microshift active on node1" microshift_ready
 node1_ready() { kc get node node1 --no-headers 2>/dev/null | grep -q ' Ready'; }
 retry 600 "node1 Ready" node1_ready
 
-log "joining node2 as a worker (microshift-profile worker + add-node --worker)"
-node_config v2 node2 "$IP2"
-v2 microshift-profile worker
-v2 systemctl enable microshift
 BOOTSTRAP="/var/lib/microshift/resources/kubeadmin/$IP1/kubeconfig"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 	-i "$WORKDIR/id" "root@$IP1:$BOOTSTRAP" "$WORKDIR/bootstrap-kubeconfig"
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-	-i "$WORKDIR/id" "$WORKDIR/bootstrap-kubeconfig" "root@$IP2:/root/bootstrap-kubeconfig"
-v2 microshift add-node --worker --kubeconfig /root/bootstrap-kubeconfig
+join_worker() { # join_worker <vssh-fn> <hostname> <ip>
+	log "joining $2 as a worker (microshift-profile worker + add-node --worker)"
+	node_config "$1" "$2" "$3"
+	"$1" microshift-profile worker
+	"$1" systemctl enable microshift
+	scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+		-i "$WORKDIR/id" "$WORKDIR/bootstrap-kubeconfig" "root@$3:/root/bootstrap-kubeconfig"
+	"$1" microshift add-node --worker --kubeconfig /root/bootstrap-kubeconfig
+}
+join_worker v2 node2 "$IP2"
+join_worker v3 node3 "$IP3"
 
-both_ready() { [ "$(kc get nodes --no-headers 2>/dev/null | grep -c ' Ready')" -eq 2 ]; }
-retry 900 "both nodes Ready" both_ready
-kc get node node2 -o jsonpath='{.metadata.labels}' | grep -q 'node-role.kubernetes.io/worker' \
-	|| die "node2 is missing the worker role label"
+all_ready() { [ "$(kc get nodes --no-headers 2>/dev/null | grep -c ' Ready')" -eq 3 ]; }
+retry 900 "all three nodes Ready" all_ready
+for n in node2 node3; do
+	kc get node "$n" -o jsonpath='{.metadata.labels}' | grep -q 'node-role.kubernetes.io/worker' \
+		|| die "$n is missing the worker role label"
+done
 
 # Zones exchange pod traffic over the geneve transit switch; a broken
 # overlay otherwise surfaces twenty minutes later as a CSI pod stuck in
@@ -383,10 +409,10 @@ n1_to_n2() { v1 ping -c1 -W2 "$MP2"; }
 retry 120 "overlay: node2 reaches node1 management port $MP1" n2_to_n1
 retry 120 "overlay: node1 reaches node2 management port $MP2" n1_to_n2
 
-satellites_up() { [ "$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers 2>/dev/null | grep -c Running)" -eq 2 ]; }
-retry 900 "two linstor satellites Running" satellites_up
+satellites_up() { [ "$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers 2>/dev/null | grep -c Running)" -eq 3 ]; }
+retry 900 "three linstor satellites Running" satellites_up
 
-log "creating a StoragePool on each node"
+log "creating a StoragePool on each data node; node3 stays diskless"
 for n in 1 2; do
 	kc apply -f - <<EOF
 apiVersion: storage.stornas.io/v1alpha1
@@ -412,7 +438,7 @@ pools_have_capacity() {
 }
 retry 600 "LINSTOR reports free capacity on both pools" pools_have_capacity
 
-# A repro harness reuses the two-node bring-up: with REPRO_SCRIPT set
+# A repro harness reuses the three-node bring-up: with REPRO_SCRIPT set
 # the gate stops here and the sourced steps own the cluster.
 if [ -n "${REPRO_SCRIPT:-}" ]; then
 	# shellcheck disable=SC1090
@@ -470,6 +496,11 @@ replicas_uptodate() {
 	[ "$(linstor_cmd -m resource list 2>/dev/null | grep -o UpToDate | wc -l)" -ge 2 ]
 }
 retry 300 "two UpToDate DRBD replicas" replicas_uptodate
+# The class's quorum setting is what earns the third vote: without it
+# LINSTOR places no tiebreaker and a partition can diverge.
+REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
+tiebreaker_on_node3() { linstor_cmd resource list -r "$REPL_RES" -n node3 2>/dev/null | grep -q TieBreaker; }
+retry 120 "diskless tiebreaker on node3" tiebreaker_on_node3
 
 log "writing through the replicated volume"
 kc -n stornas-system exec repl-consumer -- sh -c 'echo before-failover > /data/marker && sync'
@@ -710,7 +741,7 @@ log "killing node2: writes must survive the peer loss"
 sudo kill "$(sudo cat "$WORKDIR/qemu2.pid")"
 sleep 10
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-failover >> /data/marker && sync' \
-	|| die "IO blocked after peer loss (quorum should be off with two replicas)"
+	|| die "IO blocked after peer loss (node1 and the tiebreaker hold quorum)"
 log "ok: IO continued with the peer down"
 
 # Failover: once node2 goes NotReady the operator must re-place both
@@ -730,9 +761,10 @@ ui_phase node-down
 
 # The k8s non-graceful shutdown flow: the pod object on the dead node is
 # force-removed and the out-of-service taint releases its attachments;
-# only then can the survivor mount the replicated volume.
+# only then can the survivor mount the replicated volume. With quorum,
+# piraeus's HA controller may have evicted the pod already.
 log "consumer reattaches on the survivor with its data"
-kc -n stornas-system delete pod reattach-consumer --force --grace-period=0 --wait=false
+kc -n stornas-system delete pod reattach-consumer --force --grace-period=0 --wait=false --ignore-not-found
 kc taint node node2 node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
 kc apply -f - <<'EOF'
 apiVersion: v1
@@ -771,9 +803,9 @@ kc -n stornas-system exec reattach-consumer2 -- sh -c 'echo after-reattach >> /d
 kc taint node node2 node.kubernetes.io/out-of-service-
 
 log "restarting node2: replica must resync to UpToDate"
-boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2
+boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2"
 retry 600 "node2 ssh back" v2 true
-retry 600 "both nodes Ready again" both_ready
+retry 600 "all nodes Ready again" all_ready
 resynced() {
 	out=$(linstor_cmd -m resource list 2>/dev/null) || return 1
 	[ "$(grep -o UpToDate <<<"$out" | wc -l)" -ge 2 ] && ! grep -q Inconsistent <<<"$out"
@@ -953,64 +985,139 @@ kc -n stornas-system exec repl-restore-consumer -- grep -q during-failover /data
 log "UI shows the failed-over placements in a real browser"
 ui_phase repl-pages
 
-# Failure matrix: 2-node split brain. Isolated bridge ports cut only
-# VM-to-VM traffic, the host still reaches both. Divergence needs a
-# primary on each side, so the stale side is force-promoted: the operator
-# error the pick-survivor flow exists for. Quorum is off with two
-# replicas, so DRBD detects the divergence on reconnect and refuses to
-# merge; the API discards the loser and resyncs from the survivor.
-log "splitting the two nodes: writes diverge, pick-survivor resolves"
-REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
-kc -n stornas-system exec repl-consumer -- sh -c 'echo before-split >> /data/marker && sync'
-# Two mechanisms because runners differ: port isolation cuts plain
-# bridge forwarding, the physdev drops cover bridges rerouted through
-# iptables by br_netfilter (docker loads it on GH runners).
-partition() { # partition <on|off>
-	local act=-I
-	[ "$1" = off ] && act=-D
-	sudo bridge link set dev tap-stornas1 isolated "$1"
-	sudo bridge link set dev tap-stornas2 isolated "$1"
-	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas1 --physdev-out tap-stornas2 -j DROP 2>/dev/null || true
-	sudo iptables $act FORWARD -m physdev --physdev-in tap-stornas2 --physdev-out tap-stornas1 -j DROP 2>/dev/null || true
+# Failure matrix: network partition. node2 is cut off from both peers
+# while the host still reaches all three. node2 holds one primary
+# (minority) and node1 another (repl-test): quorum must suspend the
+# minority's IO, keep the majority writing, and resume on heal.
+log "partition setup: a replicated block volume primary on node2"
+kc apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minority
+  namespace: stornas-system
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Block
+  storageClassName: stornas-replicated
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minority-holder
+  namespace: stornas-system
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: node2
+  serviceAccountName: stornas-agent
+  containers:
+    - name: c
+      image: ghcr.io/epheo/stornas:latest
+      imagePullPolicy: Never
+      command: [sleep, "7200"]
+      securityContext:
+        runAsUser: 0
+      volumeDevices:
+        - name: v
+          devicePath: /dev/minority
+  volumes:
+    - name: v
+      persistentVolumeClaim:
+        claimName: minority
+EOF
+minority_steered() { steered minority; }
+retry 600 "minority primary on node2" minority_steered
+MIN_RES=$(kc -n stornas-system get pvc minority -o jsonpath='{.spec.volumeName}')
+# drbdsetup, never drbdadm: LINSTOR keeps its res files out of
+# /etc/drbd.d, so only kernel-direct commands see these resources.
+drbd_minor() { # drbd_minor <vssh-fn> <resource>
+	$1 sh -c "drbdsetup status $2 --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1"
 }
+MIN_DEV=/dev/drbd$(drbd_minor v2 "$MIN_RES")
+[ "$MIN_DEV" != /dev/drbd ] || die "no DRBD minor for $MIN_RES on node2"
+# Baseline: the same write that must stall later completes when healthy.
+v2 sh -c "head -c 4096 /dev/urandom > /root/min-probe \
+	&& timeout 60 dd if=/root/min-probe of=$MIN_DEV bs=4096 count=1 oflag=direct status=none" \
+	|| die "baseline write on the minority volume failed"
+
+# Forward-hook drops on the bridge cut VM-to-VM frames whatever
+# br_netfilter does (docker loads it on GH runners); frames to the host
+# take the input path, so ssh to every node survives.
+partition() { # partition <on|off>
+	if [ "$1" = off ]; then
+		sudo nft delete table bridge stornas_cut
+		return
+	fi
+	sudo nft -f - <<'NFT'
+table bridge stornas_cut {
+	chain forward {
+		type filter hook forward priority 0; policy accept;
+		iifname "tap-stornas2" drop
+		oifname "tap-stornas2" drop
+	}
+}
+NFT
+}
+log "partitioning node2 from node1 and node3"
+kc -n stornas-system exec repl-consumer -- sh -c 'echo before-split >> /data/marker && sync'
 partition on
 # The cut itself is asserted first: a silently ineffective partition
 # voids every assertion after it.
-partition_effective() { ! v1 ping -c 1 -W 1 "$IP2"; }
-retry 60 "VM to VM traffic cut" partition_effective
-# drbdsetup, never drbdadm: LINSTOR keeps its res files out of
-# /etc/drbd.d, so only kernel-direct commands see these resources.
-# Both sides must see the cut: DRBD rides out a dead TCP session until
-# its ping cycle expires, and the force-promote below is refused while
+partition_effective() { ! v1 ping -c 1 -W 1 "$IP2" && ! v3 ping -c 1 -W 1 "$IP2"; }
+retry 60 "node2 cut off from both peers" partition_effective
+v1 ping -c 1 -W 2 "$IP3" >/dev/null || die "the partition also cut node1 from node3"
+# The class's quorum and piraeus's on-no-quorum: suspend-io, observed
+# where they act.
+min_suspended() { v2 sh -c "drbdsetup status $MIN_RES | grep -q 'suspended:.*quorum'"; }
+retry 120 "node2 lost quorum and suspended the minority's IO" min_suspended
+kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
+	|| die "IO blocked on the majority during the partition"
+log "ok: the majority keeps writing"
+v2 sh -c "rm -f /run/min-rc; nohup sh -c 'dd if=/root/min-probe of=$MIN_DEV bs=4096 count=1 seek=1 oflag=direct status=none; echo \$? > /run/min-rc' </dev/null >/dev/null 2>&1 &"
+sleep 20
+v2 test ! -e /run/min-rc || die "node2 completed a write without quorum"
+log "ok: the minority's write is held, not diverging"
+
+# Forced promote: the operator error the pick-survivor flow exists for.
+# --force overrides quorum, so the stale side diverges on purpose.
+# Both sides must see the cut first: DRBD rides out a dead TCP session
+# until its ping cycle expires, and the force-promote is refused while
 # node2 still believes in a connected primary peer.
 peer_lost() { v1 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
 retry 300 "DRBD peer connection lost" peer_lost
 peer_lost_node2() { v2 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
 retry 120 "node2 sees the partition" peer_lost_node2
-kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
-	|| die "IO blocked on the primary during the partition"
-# The accident under test: an operator force-promotes the stale side.
-v2 sh -c "minor=\$(drbdsetup status $REPL_RES --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1) \
-	&& drbdsetup primary --force $REPL_RES \
-	&& mount /dev/drbd\$minor /mnt \
+REPL_DEV=/dev/drbd$(drbd_minor v2 "$REPL_RES")
+v2 sh -c "drbdsetup primary --force $REPL_RES \
+	&& mount $REPL_DEV /mnt \
 	&& echo divergent > /mnt/divergent && umount /mnt \
 	&& drbdsetup secondary $REPL_RES" \
-	|| die "could not diverge the stale side"
+	|| die "could not force-promote the stale side"
 
-log "healing the partition: DRBD must refuse to merge"
+log "healing the partition"
 partition off
+min_resumed() { [ "$(v2 cat /run/min-rc 2>/dev/null)" = 0 ]; }
+retry 300 "the minority's held write completed on heal" min_resumed
+v2 sh -c "dd if=$MIN_DEV bs=4096 skip=1 count=1 iflag=direct status=none | cmp - /root/min-probe" \
+	|| die "the minority's held write did not land"
 # The assert is the product's own verdict, not a kernel log string: the
 # poller flags splitBrain on a StandAlone connection and the UI resolve
 # flow keys on it. dmesg wording is DRBD's business (CLAUDE.md: kernel
 # internals are never the test subject).
-split_flagged() {
+volume_split() { # volume_split <pvc>
 	curl -fsS -m 15 -b "$WORKDIR/cookies" "http://$IP1:30080/api/v1/state" \
 		| node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
-			const v=JSON.parse(d).volumes.find(v=>v.name==="repl-test");
-			process.exit(v?.replication?.splitBrain===true?0:1)})'
+			const v=JSON.parse(d).volumes.find(v=>v.name===process.argv[1]);
+			process.exit(v?.replication?.splitBrain===true?0:1)})' "$1"
 }
-retry 300 "API flags split brain on repl-test" split_flagged
-retry 600 "both nodes Ready after heal" both_ready
+split_flagged() { volume_split repl-test; }
+retry 300 "API flags the forced split brain on repl-test" split_flagged
+volume_split minority && die "API flags split brain on the volume quorum held"
+retry 600 "all nodes Ready after heal" all_ready
 
 log "pick-survivor through the UI resolve dialog"
 ui_phase split-brain
@@ -1018,6 +1125,9 @@ retry 900 "replicas resynced after pick-survivor" resynced
 kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-split \
 	|| die "survivor lost its writes"
 log "ok: survivor kept its writes, loser was discarded"
+# The HA controller evicts it during the partition: its volume lost quorum.
+kc -n stornas-system delete pod minority-holder --wait --ignore-not-found
+kc -n stornas-system delete pvc minority --wait
 
 # Failure matrix: LINSTOR controller down. The piraeus operator would
 # undo the scale-down, so it goes first.
@@ -1199,9 +1309,9 @@ retry 120 "iSCSI IO on node2 with the master dead" md_iscsi_io
 v2 iscsiadm -m node -T "$TIQN2" -p "$VIP2:3260" --logout || true
 
 log "restarting node1: control plane returns, placement must not move"
-boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1
+boot_vm 1 "$DISK1" STORNAS1 "$MAC1" tap-stornas1 "$VM_MEM1"
 retry 600 "node1 ssh back" v1 true
-retry 900 "both nodes Ready after master return" both_ready
+retry 900 "all nodes Ready after master return" all_ready
 retry 300 "target md still exported from node2" target_md_on_node2
 retry 300 "share md still exported from node2" share_md_on_node2
 retry 900 "replicas resynced after master return" resynced
@@ -1213,7 +1323,7 @@ AGENT2=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent -
 [ -n "$AGENT2" ] || die "no agent pod found on node2"
 kc -n stornas-system delete pod "$AGENT2" --wait=false
 retry 120 "NFS IO with node2's agent gone" md_nfs_io
-agents_running() { [ "$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --no-headers | grep -c Running)" -eq 2 ]; }
+agents_running() { [ "$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --no-headers | grep -c Running)" -eq 3 ]; }
 retry 300 "agent back" agents_running
 retry 120 "share md stayed exported through the restart" share_md_on_node2
 retry 120 "target md stayed exported through the restart" target_md_on_node2
@@ -1242,7 +1352,7 @@ v2 sh -c 'targetcli ls /iscsi 1 | grep -q stornas:md' \
 	|| die "node2 already shed the export; the partition was not effective"
 vip2_on_node2 || die "node2 already shed VIP2; the partition was not effective"
 partition off
-retry 600 "both nodes Ready after the delete-heal" both_ready
+retry 600 "all nodes Ready after the delete-heal" all_ready
 node2_shed_md_export() { ! v2 sh -c 'targetcli ls /iscsi 1 2>/dev/null | grep -q stornas:md'; }
 node2_shed_vip2() { ! v2 sh -c "ip -j addr show to $VIP2 | grep -q ifname"; }
 node2_shed_md_mount() { ! v2 findmnt /var/lib/stornas/shares/stornas-system-md; }
@@ -1278,13 +1388,14 @@ code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DEL
 kc get storagepool pool-node1 >/dev/null 2>&1 || die "guarded pool was deleted anyway"
 
 # Replicated lifecycle closes where it opened: deletion must reach the
-# hosts, dropping the DRBD resource on both, not just the PVC.
+# hosts, dropping the DRBD resource on every node, not just the PVC.
 log "replicated snapshot and volumes deleted through the UI dialogs"
 TARGET_SNAP=repl-snap ui_phase delete-snapshot
 repl_snap_gone() { ! kc -n stornas-system get volumesnapshot repl-snap >/dev/null 2>&1; }
 retry 120 "replicated snapshot gone" repl_snap_gone
 # pvc-protection holds claimed volumes; the consumers go first.
-kc -n stornas-system delete pod repl-restore-consumer repl-consumer --wait
+# The HA controller may have evicted repl-consumer while node1 was dead.
+kc -n stornas-system delete pod repl-restore-consumer repl-consumer --wait --ignore-not-found
 TARGET_VOL=repl-restore ui_phase delete-volume
 TARGET_VOL=repl-test ui_phase delete-volume
 pvc_gone() { ! kc -n stornas-system get pvc "$1" >/dev/null 2>&1; }
@@ -1293,11 +1404,12 @@ retry 180 "repl-test PVC gone" pvc_gone repl-test
 res_gone() { ! $1 sh -c "drbdsetup status $REPL_RES" >/dev/null 2>&1; }
 retry 180 "DRBD resource gone from node1" res_gone v1
 retry 180 "DRBD resource gone from node2" res_gone v2
+retry 180 "DRBD tiebreaker gone from node3" res_gone v3
 
 # Run the packaged check scripts directly (distro multinode-test shape):
 # exactly what greenboot executes, and the stornas check must pass on
 # the controller (full stack) and short-circuit on the worker.
-log "greenboot health checks green on both roles"
+log "greenboot health checks green on every role"
 greenboot_checks() { # greenboot_checks <vssh-fn> <label>
 	$1 sh -c 'rc=0; for s in /usr/lib/greenboot/check/required.d/*.sh /etc/greenboot/check/required.d/*.sh; do
 		[ -e "$s" ] || continue
@@ -1307,5 +1419,6 @@ greenboot_checks() { # greenboot_checks <vssh-fn> <label>
 }
 greenboot_checks v1 controller
 greenboot_checks v2 worker
+greenboot_checks v3 "tiebreaker worker"
 
 log "REPLICATION AND FAILOVER TEST PASSED"

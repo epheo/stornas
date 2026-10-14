@@ -32,7 +32,7 @@ jobs:
           sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' \
             /etc/apt/sources.list /etc/apt/sources.list.d/*.sources || true
           sudo timeout 120 apt-get update
-          sudo timeout 600 apt-get install -y qemu-system-x86 ovmf dnsmasq
+          sudo timeout 600 apt-get install -y qemu-system-x86 ovmf dnsmasq nftables
           sudo systemctl stop dnsmasq 2>/dev/null || true
           sudo systemctl disable dnsmasq 2>/dev/null || true
       - uses: actions/setup-go@v7.0.0

@@ -135,6 +135,17 @@ const phases = {
 		await volRow(process.env.TARGET_VOL).waitFor();
 	},
 
+	async 'replication-refused'() {
+		// Fewer than three nodes: the class is offered but not selectable,
+		// and the form says why.
+		await goTo('Volumes', 'Volumes');
+		const form = page.locator('section', { hasText: 'New volume' });
+		await form.getByText('Replication needs three nodes.').waitFor();
+		if (!(await form.locator('option[value="stornas-replicated"]').isDisabled())) {
+			throw new Error('stornas-replicated selectable below three nodes');
+		}
+	},
+
 	async 'create-volume-block'() {
 		// Block mode is a create-time choice; the row must say so.
 		await goTo('Volumes', 'Volumes');

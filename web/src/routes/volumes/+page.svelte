@@ -12,6 +12,8 @@
 	import type { Replica } from '#lib/model.gen.js';
 
 	const snap = $derived(app.snap);
+	// Matches the API: two data replicas need a third node as tiebreaker.
+	const canReplicate = $derived(snap.nodes.length >= 3);
 	const downNodes = $derived(new Set(snap.nodes.filter((n) => !n.ready).map((n) => n.name)));
 	let actionError = $state('');
 
@@ -261,8 +263,11 @@
 					bind:value={storageClass}
 				>
 					<option value="stornas-local">stornas-local</option>
-					<option value="stornas-replicated">stornas-replicated</option>
+					<option value="stornas-replicated" disabled={!canReplicate}>stornas-replicated</option>
 				</select>
+				{#if !canReplicate}
+					<p class="text-xs text-slate-500">Replication needs three nodes.</p>
+				{/if}
 				<label class="flex items-center gap-2 text-sm text-slate-300">
 					<input type="checkbox" bind:checked={block} /> Block mode (VM/iSCSI)
 				</label>
@@ -431,7 +436,8 @@
 				discarded and rebuilt from it. Writes that only reached a discarded replica are lost.
 			</p>
 			<div class="space-y-1.5 text-sm">
-				{#each m.replicas as r (r.node)}
+				<!-- A diskless replica (the quorum tiebreaker) holds no data to keep. -->
+				{#each m.replicas.filter((r) => r.diskState !== 'Diskless') as r (r.node)}
 					<label class="flex items-center gap-2.5 rounded border border-slate-800 px-3 py-2">
 						<input type="radio" name="survivor" value={r.node} bind:group={survivor} />
 						<span class="font-medium text-slate-200">{r.node}</span>

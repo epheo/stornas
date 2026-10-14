@@ -14,6 +14,15 @@ real NFS, SMB, and iSCSI clients drive the data path,
 and real failures (disk pulls, node kills, network partitions) drive recovery.
 Nothing is documented here before its flow is green.
 
+## Topologies
+
+- One node: `stornas-local` volumes, no replication.
+- Three or more nodes: replication with DRBD quorum. Two nodes hold
+  each volume's data; a third holds a diskless tiebreaker and needs no
+  disks.
+- Two nodes: replicated volumes are refused in the UI and the API, since
+  two votes cannot form a majority.
+
 ## Features
 
 **Pools**
@@ -29,7 +38,8 @@ Nothing is documented here before its flow is green.
 - Every volume is a Kubernetes PVC; SAN LUNs, NAS shares, and VM disks
   share one CSI path (LINSTOR CSI).
 - Two classes: `stornas-local` (LVM only, zero overhead, default) and
-  `stornas-replicated` (DRBD 9, two synchronous replicas, protocol C).
+  `stornas-replicated` (DRBD 9, two synchronous replicas, protocol C,
+  quorum majority with a diskless tiebreaker on a third node).
   Replication is a StorageClass choice, never an install mode.
 - Filesystem (XFS) or raw block mode, chosen at creation.
 - Online resize, snapshots, and restore-to-new-volume from the UI.
@@ -62,8 +72,10 @@ Nothing is documented here before its flow is green.
   VIPs move, consumers reattach on the survivor with their data
   (the Kubernetes non-graceful shutdown flow), and the returned node is
   fenced clean and resynced.
-- Two-node split brain: IO suspends instead of diverging silently
-  (`auto-quorum: suspend-io`), and the UI owns the pick-survivor flow.
+- Network partition: the side without quorum suspends IO and resumes
+  on heal; the majority keeps writing; nothing diverges.
+- An admin force-promote that diverges anyway is flagged as split brain,
+  and the UI owns the pick-survivor flow.
 - Master death: worker data planes keep serving; placement stays put when
   the master returns.
 - LINSTOR controller down: IO continues; provisioning blocks and recovers.
@@ -148,13 +160,12 @@ spec:
 | Node dies, replicated volume | Peer keeps IO; VIP moves; consumers reattach | Auto resync on return |
 | Node dies, local volume | Volume unavailable until node returns | Stated plainly in UI |
 | Master dies, workers alive | Data IO continues; no provisioning; UI down | Restore master |
-| 2-node split brain | IO suspended on both sides | Pick-survivor flow in UI |
+| Network partition | Minority suspends IO; majority keeps writing | None; resumes on heal |
+| Admin force-promotes the minority | Split brain flagged on heal | Pick-survivor flow in UI |
 | Bad upgrade image | greenboot fails; bootc rolls back | None; data intact |
 | LINSTOR controller down | IO fine; provisioning blocked | Recovers with the controller |
 
 Every row is enforced by a CI gate.
-Two-node clusters cannot have quorum; the documented upgrade is a third
-machine running only a diskless tiebreaker satellite.
 
 ## Building and testing
 
@@ -163,7 +174,7 @@ make ci                # generate, build, lint, unit tests, web build
 make images            # server/agent/operator images (local podman)
 make image             # the full bootc appliance image
 make vm-test           # boot gate: single node, full UI/UX flows, air gap
-make replication-test  # two nodes: replication, failover, clients, split brain
+make replication-test  # three nodes: replication, failover, clients, partition
 make upgrade-test      # air-gapped upgrade and poisoned-image rollback
 ```
 

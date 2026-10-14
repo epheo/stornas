@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,9 +24,13 @@ func newAPI() *API {
 		targetGVR: "TargetList",
 		snapGVR:   "VolumeSnapshotList",
 	}
+	var nodes []runtime.Object
+	for _, n := range []string{"node1", "node2", "node3"} {
+		nodes = append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: n}})
+	}
 	return &API{
 		Dyn:       dynfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds),
-		CS:        k8sfake.NewClientset(),
+		CS:        k8sfake.NewClientset(nodes...),
 		Namespace: "stornas-system",
 	}
 }
@@ -282,5 +287,22 @@ func TestCreateVolumeBlockMode(t *testing.T) {
 	}
 	if *pvc.Spec.StorageClassName != "stornas-replicated" || string(*pvc.Spec.VolumeMode) != "Block" {
 		t.Fatalf("pvc = %+v", pvc.Spec)
+	}
+}
+
+// Two nodes cannot form DRBD quorum: replicated volumes are refused up
+// front rather than created to suspend on the first peer loss.
+func TestReplicatedNeedsThreeNodes(t *testing.T) {
+	a := newAPI()
+	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-replicated"}`, nil)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "three nodes") {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-local"}`, nil)
+	if w.Code != 201 {
+		t.Fatalf("local refused: code=%d body=%s", w.Code, w.Body.String())
 	}
 }
