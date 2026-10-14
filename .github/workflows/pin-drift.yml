@@ -1,0 +1,25 @@
+# Fails when a pinned input falls behind its latest stable release, so
+# drift shows up as a red run instead of waiting for an audit.
+name: pin-drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 2 * * *"
+  pull_request:
+    paths:
+      - hack/pin-drift.sh
+      - hack/pin-drift-holds
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - run: hack/pin-drift.sh
