@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: free runner disk
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -36,12 +36,12 @@ jobs:
           # runs its own on the bridge.
           sudo systemctl stop dnsmasq 2>/dev/null || true
           sudo systemctl disable dnsmasq 2>/dev/null || true
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
@@ -55,7 +55,7 @@ jobs:
         run: make replication-test PODMAN='sudo podman'
       - name: collect console logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: repl-consoles
           path: |
