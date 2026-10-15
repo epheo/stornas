@@ -37,11 +37,6 @@ check drbd "$(sed -n 's/^ARG DRBD_VERSION=//p' $kmod)" \
 check drbd-utils "$(sed -n 's/^ARG DRBD_UTILS_VERSION=//p' $kmod)" \
 	"$(latest_tag https://github.com/LINBIT/drbd-utils v)"
 
-# piraeus; the rest of the LINSTOR stack follows its render.
-check piraeus-operator \
-	"$(sed -n 's|.*/piraeus-operator:||p' image/embedded-images.txt)" \
-	"$(latest_tag https://github.com/piraeusdatastore/piraeus-operator v v)"
-
 # Build tools pinned in the operator Makefile and the lint plugin config.
 mk=operator/Makefile
 check golangci-lint "$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' $mk)" \

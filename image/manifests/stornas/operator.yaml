@@ -38,21 +38,19 @@ rules:
   - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]
-  # patch: the claim binder writes the selected-node annotation that
-  # completes WaitForFirstConsumer for host-consumed claims: declared by
-  # the API at creation, or referenced by a Share or Target. It never
-  # reads pods; undeclared claims keep upstream WFFC semantics.
   - apiGroups: [""]
-    resources: [persistentvolumeclaims]
-    verbs: [get, list, watch, update, patch]
-  - apiGroups: [""]
-    resources: [persistentvolumes]
+    resources: [persistentvolumeclaims, persistentvolumes]
     verbs: [get, list, watch]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list, watch, create, delete]
-  - apiGroups: [snapshot.storage.k8s.io]
-    resources: [volumesnapshots]
+  # One r-drbd Pool per StoragePool; Volume status drives share and
+  # target placement.
+  - apiGroups: [r-drbd.io]
+    resources: [pools]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [r-drbd.io]
+    resources: [volumes, snapshots]
     verbs: [get, list, watch]
   # Node readiness drives failover: placement avoids NotReady nodes.
   - apiGroups: [""]
@@ -126,10 +124,6 @@ spec:
           image: ghcr.io/epheo/stornas-operator:latest
           imagePullPolicy: Never # embedded via /usr/lib/embedded-images
           args: [--leader-elect]
-          env:
-            # Piraeus places the controller Service in its own namespace.
-            - name: LINSTOR_URL
-              value: http://linstor-controller.piraeus-datastore.svc:3370
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

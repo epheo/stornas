@@ -3,22 +3,24 @@
 Baked into the bootc image and applied from disk by MicroShift, in
 lexical order:
 
-- `piraeus/` -> `/usr/lib/microshift/manifests.d/000-piraeus/`
-  piraeus-operator v2.12.0, vendored via kustomize render; regenerate
-  with a new ref and bump image/embedded-images.txt together.
+- `r-drbd/` -> `/usr/lib/microshift/manifests.d/000-r-drbd/`
+  the r-drbd storage plane: namespace r-drbd-system, RBAC, the Pool,
+  Volume and Snapshot CRDs (`r-drbd crds` output), CSIDriver r-drbd.io,
+  the controller Deployment and the agent DaemonSet. Copied from
+  r-drbd's deploy/base; bump with the image tag in
+  image/embedded-images.txt.
 - `stornas/` -> `/usr/lib/microshift/manifests.d/010-stornas/`
-  stornas CRDs (synced by `make sync-manifests`), LinstorCluster, the
-  satellite patch that drops the module loader (kmod ships in the OS),
-  StorageClasses, agent, operator, server.
+  stornas CRDs (synced by `make sync-manifests`), StorageClasses,
+  VolumeSnapshotClass, agent, operator, server.
 
 Every referenced workload image is embedded as an OCI archive under
-`/usr/lib/embedded-images/` (list: image/embedded-images.txt); pods use
-pull policy Never. Nothing is fetched at runtime.
+`/usr/lib/embedded-images/` (list: image/embedded-images.txt). Nothing
+is fetched at runtime.
 
-The LINSTOR storage pool name is `stornas` by convention: every
-StoragePool CR registers its VG under that name so StorageClasses stay
-node agnostic.
+Each StoragePool gets an r-drbd Pool of the same name (VG
+`stornas-<pool>`, thin pool `thin`); StorageClasses select by the
+`tier` parameter, so they stay node agnostic.
 
 The external snapshot-controller ships with MicroShift, not here;
 these manifests add only the VolumeSnapshotClass and the
-csi-snapshotter sidecar the LINSTOR CSI pods run.
+csi-snapshotter sidecar in the r-drbd controller pod.

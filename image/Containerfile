@@ -56,10 +56,10 @@ COPY build/embedded-images/ /usr/lib/embedded-images/
 # distro's (which keeps its own entries, e.g. portail).
 RUN cat /usr/lib/embedded-images/manifest.stornas >> /usr/lib/embedded-images/manifest \
 	&& rm /usr/lib/embedded-images/manifest.stornas
-COPY manifests/piraeus/ /usr/lib/microshift/manifests.d/000-piraeus/
+COPY manifests/r-drbd/ /usr/lib/microshift/manifests.d/000-r-drbd/
 COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
 
-# LINSTOR CSI replaces the distro's TopoLVM (README architecture): two default
+# r-drbd replaces the distro's TopoLVM (README architecture): two default
 # StorageClasses is a conflict, and two LVM managers must not share VGs.
 # Erase the RPM, not just the manifests: it also ships a required greenboot
 # check that would wait forever for TopoLVM and block boot-complete.target.
@@ -102,15 +102,14 @@ RUN touch /etc/samba/stornas-shares.conf \
 # boolean is the appliance-wide grant, no per-path fcontext to keep in sync.
 RUN setsebool -P samba_export_all_rw on
 
-# Storage kernel modules load at boot, not on demand: the satellite
-# probes DRBD at startup and reports the layer unsupported if absent
-# (the compile-on-node loader is removed for the air gap), and lvcreate
-# runs inside the satellite container whose modprobe cannot see the
-# host tree (dm-snapshot for LVM snapshots, dm-thin-pool for pools).
-# usermode_helper=disabled is what the deleted loader would have set:
-# SELinux confines kernel-spawned helpers (kernel_generic_helper_t
-# cannot exec bash), each resync handler then exits 1 and DRBD drops
-# the fresh connection; LINSTOR handles these events itself.
+# Storage kernel modules load at boot, not on demand: the r-drbd agent
+# reports DRBD unsupported if the module is absent, and nothing on the
+# node compiles or loads modules (air gap; dm-snapshot for LVM
+# snapshots, dm-thin-pool for pools).
+# usermode_helper=disabled: SELinux confines kernel-spawned helpers
+# (kernel_generic_helper_t cannot exec bash), each resync handler then
+# exits 1 and DRBD drops the fresh connection; the r-drbd agent follows
+# DRBD events itself.
 RUN printf '%s\n' drbd drbd_transport_tcp dm-snapshot dm-thin-pool \
 		> /usr/lib/modules-load.d/stornas-storage.conf \
 	&& echo 'options drbd usermode_helper=disabled' \

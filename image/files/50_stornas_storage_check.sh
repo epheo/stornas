@@ -1,9 +1,7 @@
 #!/bin/bash
 # Required greenboot check for the stornas storage plane, replacing the
 # microshift-topolvm check erased in the Containerfile. Gates on workloads
-# with static names only; LINSTOR satellites are per-node objects the
-# piraeus operator names dynamically, so they are covered indirectly by
-# linstor-controller needing a working cluster.
+# with static names only.
 set -euo pipefail
 
 # shellcheck disable=SC1091
@@ -31,8 +29,9 @@ WAIT_TIMEOUT_SECS=$(get_wait_timeout)
 if ! microshift healthcheck \
         -v=2 --timeout="${WAIT_TIMEOUT_SECS}s" \
         --custom '{
-            "piraeus-datastore": {
-                "deployments": ["piraeus-operator-controller-manager", "linstor-controller"]
+            "r-drbd-system": {
+                "deployments": ["r-drbd-controller"],
+                "daemonsets": ["r-drbd-agent"]
             },
             "stornas-system": {
                 "deployments": ["stornas-operator", "stornas-server"],
