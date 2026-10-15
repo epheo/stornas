@@ -2,9 +2,7 @@
 # as OCI archives under /usr/lib/embedded-images (imported into cri-o at
 # boot; pods never pull). Tags mirror image/manifests/r-drbd; bump both
 # together.
-# TODO(owner): pin to a published sha tag of r-drbd and mirror it with an
-# images: override in image/manifests/r-drbd/kustomization.yaml.
-ghcr.io/epheo/r-drbd:latest
+ghcr.io/epheo/r-drbd:sha-51e566b
 registry.k8s.io/sig-storage/csi-attacher:v4.13.0
 registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
 registry.k8s.io/sig-storage/csi-snapshotter:v8.6.0

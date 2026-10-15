@@ -31,6 +31,10 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
+  # csi-resizer lists pods to find the ones using a PVC being expanded.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
