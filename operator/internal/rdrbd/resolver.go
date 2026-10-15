@@ -25,8 +25,10 @@ import (
 // ResolvePlacement picks the node that should serve a Volume and the
 // block device to open there. An UpToDate replica always beats an
 // Outdated or Inconsistent one: serving stale data is worse than moving.
-// Then: the current primary (moving an
-// export off a live primary would break it), then prefer (sticky
+// A primary whose disk is not UpToDate is therefore moved on purpose, a
+// planned failover with a short export outage. Then: the current
+// primary (moving an export off a live primary would break it), then
+// prefer (sticky
 // placement avoids flapping), then any diskful replica. Nodes in avoid
 // never serve; skipping an avoided primary is the failover itself, since
 // DRBD auto-promote lets the next opener take over once quorum fenced
