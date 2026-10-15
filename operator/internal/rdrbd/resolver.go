@@ -23,7 +23,9 @@ import (
 )
 
 // ResolvePlacement picks the node that should serve a Volume and the
-// block device to open there. Priority: the current primary (moving an
+// block device to open there. An UpToDate replica always beats an
+// Outdated or Inconsistent one: serving stale data is worse than moving.
+// Then: the current primary (moving an
 // export off a live primary would break it), then prefer (sticky
 // placement avoids flapping), then any diskful replica. Nodes in avoid
 // never serve; skipping an avoided primary is the failover itself, since
@@ -34,13 +36,14 @@ func ResolvePlacement(v *rdrbdv1alpha1.Volume, prefer string, avoid map[string]b
 	type candidate struct {
 		node, device string
 		inUse        bool
+		upToDate     bool
 	}
 	var all []candidate
 	for _, r := range v.Status.Replicas {
 		if !r.Present || r.DevicePath == "" || !v.Diskful(r.Node) {
 			continue
 		}
-		all = append(all, candidate{r.Node, r.DevicePath, r.InUse || v.Status.Primary == r.Node})
+		all = append(all, candidate{r.Node, r.DevicePath, r.InUse || v.Status.Primary == r.Node, r.DiskState == "UpToDate"})
 	}
 	if v.Spec.Assignment != nil {
 		for _, a := range v.Spec.Assignment.Replicas {
@@ -50,13 +53,17 @@ func ResolvePlacement(v *rdrbdv1alpha1.Volume, prefer string, avoid map[string]b
 		}
 	}
 	score := func(c candidate) int {
+		s := 0
+		if c.upToDate {
+			s = 4
+		}
 		switch {
 		case c.inUse:
-			return 2
+			return s + 2
 		case c.node == prefer:
-			return 1
+			return s + 1
 		default:
-			return 0
+			return s
 		}
 	}
 	pick := -1

@@ -80,14 +80,16 @@ func serving(v *rdrbdv1alpha1.Volume) servingKey {
 		}
 	}
 	for _, r := range v.Status.Replicas {
-		k.replicas[r.Node] = rdrbdv1alpha1.ReplicaStatus{Node: r.Node, Present: r.Present, InUse: r.InUse, DevicePath: r.DevicePath}
+		k.replicas[r.Node] = rdrbdv1alpha1.ReplicaStatus{
+			Node: r.Node, Present: r.Present, InUse: r.InUse, DevicePath: r.DevicePath, DiskState: r.DiskState,
+		}
 	}
 	return k
 }
 
 // volumeServingChanged passes Volume updates that can move placement:
-// primary, roles, presence, devices. Sync progress and peer states
-// churn without changing who serves.
+// primary, roles, presence, devices, disk states. Sync progress and peer
+// states churn without changing who serves.
 var volumeServingChanged = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		oldVol, okOld := e.ObjectOld.(*rdrbdv1alpha1.Volume)

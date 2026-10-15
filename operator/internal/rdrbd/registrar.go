@@ -68,8 +68,9 @@ func EnsurePool(ctx context.Context, c client.Client, sp *storagev1alpha1.Storag
 	// Spec fields are immutable in r-drbd; a mismatch is a Pool someone
 	// made by hand, and adopting it would hand its volumes to this VG.
 	if pool.Spec != want {
-		return false, fmt.Sprintf("r-drbd pool %s exists for %s/%s on %s, not %s/%s on %s",
-			sp.Name, pool.Spec.VG, pool.Spec.ThinPool, pool.Spec.Node, want.VG, want.ThinPool, want.Node), nil
+		return false, fmt.Sprintf("r-drbd pool %s exists for %s/%s on %s in tier %s, not %s/%s on %s in tier %s",
+			sp.Name, pool.Spec.VG, pool.Spec.ThinPool, pool.Spec.Node, pool.Spec.Tier,
+			want.VG, want.ThinPool, want.Node, want.Tier), nil
 	}
 	if !pool.DeletionTimestamp.IsZero() {
 		return false, "r-drbd pool " + sp.Name + " is still being deleted", nil

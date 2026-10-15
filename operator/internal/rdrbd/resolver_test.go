@@ -41,7 +41,7 @@ func volume(primary string, replicas ...replica) *rdrbdv1alpha1.Volume {
 	for _, r := range replicas {
 		v.Spec.Assignment.Replicas = append(v.Spec.Assignment.Replicas, rdrbdv1alpha1.AssignedReplica{Node: r.node, Role: r.role})
 		v.Status.Replicas = append(v.Status.Replicas, rdrbdv1alpha1.ReplicaStatus{
-			Node: r.node, Present: true, InUse: r.inUse, DevicePath: "/dev/drbd1000",
+			Node: r.node, Present: true, InUse: r.inUse, DevicePath: "/dev/drbd1000", DiskState: "UpToDate",
 		})
 	}
 	return v
@@ -156,5 +156,36 @@ func TestResolvePlacementAllReplicasAvoided(t *testing.T) {
 	v := volume("", replica{node: "node-a", role: rdrbdv1alpha1.RoleDiskful})
 	if _, _, _, err := ResolvePlacement(v, "", map[string]bool{"node-a": true}); err == nil {
 		t.Fatal("want error when every replica is unhealthy")
+	}
+}
+
+// A stale primary never serves while an UpToDate copy exists.
+func TestResolvePlacementPrefersUpToDate(t *testing.T) {
+	v := volume("node-a",
+		replica{node: "node-a", role: rdrbdv1alpha1.RoleDiskful, inUse: true},
+		replica{node: "node-b", role: rdrbdv1alpha1.RoleDiskful})
+	v.Status.Replicas[0].DiskState = "Outdated"
+	node, _, _, err := ResolvePlacement(v, "node-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-b" {
+		t.Fatalf("node = %s", node)
+	}
+}
+
+// Nothing UpToDate: the old order holds rather than refusing to serve.
+func TestResolvePlacementWithoutUpToDateKeepsOrder(t *testing.T) {
+	v := volume("node-b",
+		replica{node: "node-a", role: rdrbdv1alpha1.RoleDiskful},
+		replica{node: "node-b", role: rdrbdv1alpha1.RoleDiskful, inUse: true})
+	v.Status.Replicas[0].DiskState = "Inconsistent"
+	v.Status.Replicas[1].DiskState = "Outdated"
+	node, _, _, err := ResolvePlacement(v, "node-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-b" {
+		t.Fatalf("node = %s", node)
 	}
 }

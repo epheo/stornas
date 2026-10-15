@@ -42,7 +42,7 @@ func TestVolumeServingChanged(t *testing.T) {
 		want   bool
 	}{
 		"sync progress":   {func(v *rdrbdv1alpha1.Volume) { v.Status.Replicas[1].SyncPercent = &pct }, false},
-		"disk state":      {func(v *rdrbdv1alpha1.Volume) { v.Status.Replicas[1].DiskState = "UpToDate" }, false},
+		"disk state":      {func(v *rdrbdv1alpha1.Volume) { v.Status.Replicas[1].DiskState = "UpToDate" }, true},
 		"peer state":      {func(v *rdrbdv1alpha1.Volume) { v.Status.Replicas[0].Peers = map[string]string{"b": "Connecting"} }, false},
 		"primary moves":   {func(v *rdrbdv1alpha1.Volume) { v.Status.Primary = "b" }, true},
 		"device appears":  {func(v *rdrbdv1alpha1.Volume) { v.Status.Replicas[1].DevicePath = "" }, true},
