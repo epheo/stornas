@@ -417,7 +417,7 @@ func TestResolveSplitBrainSetsSurvivor(t *testing.T) {
 	replica := func(node, role string, id int64) any {
 		return map[string]any{"node": node, "nodeId": id, "role": role}
 	}
-	createUnstructured(t, a, rdrbdVolumeGVR, map[string]any{
+	vol := map[string]any{
 		"apiVersion": "r-drbd.io/v1alpha1", "kind": "Volume",
 		"metadata": map[string]any{"name": "pvc-1"},
 		"spec": map[string]any{
@@ -426,8 +426,21 @@ func TestResolveSplitBrainSetsSurvivor(t *testing.T) {
 				replica("node1", "diskful", 0), replica("node2", "diskful", 1), replica("node3", "tiebreaker", 2),
 			}},
 		},
-	})
+	}
+	createUnstructured(t, a, rdrbdVolumeGVR, vol)
 	path := map[string]string{"namespace": "stornas-system", "name": "media"}
+
+	// No SplitBrain condition: discarding a copy would destroy good data.
+	w := doReq(t, a.ResolveSplitBrain, "POST", "/", `{"survivor":"node2"}`, path)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "not in split brain") {
+		t.Fatalf("healthy volume resolved: code=%d body=%s", w.Code, w.Body.String())
+	}
+	vol["status"] = map[string]any{"conditions": []any{map[string]any{
+		"type": "SplitBrain", "status": "True", "reason": "Diverged", "message": "", "lastTransitionTime": "2026-10-15T00:00:00Z",
+	}}}
+	if _, err := a.Dyn.Resource(rdrbdVolumeGVR).Update(context.Background(), &unstructured.Unstructured{Object: vol}, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 
 	// The tiebreaker holds no data to keep.
 	if w := doReq(t, a.ResolveSplitBrain, "POST", "/", `{"survivor":"node3"}`, path); w.Code != 409 {

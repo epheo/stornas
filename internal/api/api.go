@@ -16,6 +16,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -438,6 +439,12 @@ func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 	var vol rdrbdv1alpha1.Volume
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &vol); err != nil {
 		http.Error(w, "r-drbd volume "+res+": "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	// The resolve discards every other diskful copy; without r-drbd's
+	// verdict that the copies diverged it would only destroy good data.
+	if !meta.IsStatusConditionTrue(vol.Status.Conditions, rdrbdv1alpha1.ConditionSplitBrain) {
+		http.Error(w, name+" is not in split brain (r-drbd reports no SplitBrain condition)", http.StatusConflict)
 		return
 	}
 	if !vol.Diskful(req.Survivor) {
