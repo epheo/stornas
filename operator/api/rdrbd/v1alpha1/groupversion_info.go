@@ -49,10 +49,6 @@ const (
 	ParamTier     = "tier"
 	ParamReplicas = "replicas"
 
-	// PVC annotations read by the CSI controller plugin to pin placement.
-	AnnotationPool = "r-drbd.io/pool"
-	AnnotationNode = "r-drbd.io/node"
-
 	ConditionReady      = "Ready"
 	ConditionDegraded   = "Degraded"
 	ConditionQuorumLost = "QuorumLost"

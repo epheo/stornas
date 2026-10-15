@@ -37,14 +37,32 @@ var _ = Describe("Claim binder", func() {
 	ctx := context.Background()
 
 	// Each spec uses its own tier: StoragePools outlive specs in envtest.
-	ensureClass := func(name, tier, replicas string, mode storagev1.VolumeBindingMode) {
+	ensureClassOf := func(provisioner, name, tier, replicas string, mode storagev1.VolumeBindingMode) {
 		sc := &storagev1.StorageClass{
 			ObjectMeta:        metav1.ObjectMeta{Name: name},
-			Provisioner:       rdrbdv1alpha1.Driver,
+			Provisioner:       provisioner,
 			VolumeBindingMode: &mode,
 			Parameters:        map[string]string{rdrbdv1alpha1.ParamTier: tier, rdrbdv1alpha1.ParamReplicas: replicas},
 		}
 		Expect(k8sClient.Create(ctx, sc)).To(Succeed())
+	}
+	ensureClass := func(name, tier, replicas string, mode storagev1.VolumeBindingMode) {
+		ensureClassOf(rdrbdv1alpha1.Driver, name, tier, replicas, mode)
+	}
+
+	setFree := func(name, free string, available bool) {
+		p := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, p)).To(Succeed())
+		status := metav1.ConditionFalse
+		if available {
+			status = metav1.ConditionTrue
+		}
+		meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+			Type: storagev1alpha1.ConditionAvailable, Status: status, Reason: "Test",
+		})
+		q := resource.MustParse(free)
+		p.Status.Free = &q
+		Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
 	}
 
 	newPool := func(name, node, tier, free string, available bool) {
@@ -113,17 +131,13 @@ var _ = Describe("Claim binder", func() {
 		newClaim("pinned", "bind-pin", host(storagev1alpha1.PoolAnnotation, "bind-pin-small"), false)
 		Expect(selected("pinned")).To(BeEmpty(), "pool not Available yet")
 
-		p := &storagev1alpha1.StoragePool{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "bind-pin-small"}, p)).To(Succeed())
-		meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-			Type: storagev1alpha1.ConditionAvailable, Status: metav1.ConditionTrue, Reason: "Test",
-		})
-		Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+		By("the pool turning Available enqueueing the waiting claim")
+		setFree("bind-pin-small", "10Gi", true)
+		pool := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "bind-pin-small"}, pool)).To(Succeed())
+		Expect((&ClaimBinder{Client: k8sClient}).pendingHostClaims(ctx, pool)).To(
+			ContainElement(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "pinned"}}))
 		Expect(selected("pinned")).To(Equal("bind-b"))
-
-		By("honouring the pre r-drbd annotation too")
-		newClaim("pinned-legacy", "bind-pin", host("storage.stornas.io/pool", "bind-pin-small"), false)
-		Expect(selected("pinned-legacy")).To(Equal("bind-b"))
 	})
 
 	It("binds a local claim to the Ready node with the most free space in its tier", func() {
@@ -139,6 +153,10 @@ var _ = Describe("Claim binder", func() {
 		newPool("bind-other-c", "bind-c", "bindother", "999Gi", true)
 
 		newClaim("local", "bind-local", host(), false)
+		Expect(selected("local")).To(Equal("bind-d"))
+
+		By("keeping the node once set, whatever free space does later")
+		setFree("bind-local-c", "800Gi", true)
 		Expect(selected("local")).To(Equal("bind-d"))
 
 		By("leaving undeclared claims to the scheduler")
@@ -165,5 +183,10 @@ var _ = Describe("Claim binder", func() {
 		ensureClass("bind-imm", "bindrepl", "2", storagev1.VolumeBindingImmediate)
 		newClaim("imm", "bind-imm", host(), false)
 		Expect(selected("imm")).To(BeEmpty())
+
+		By("ignoring other provisioners")
+		ensureClassOf("example.com/other", "bind-foreign", "bindrepl", "2", wffc)
+		newClaim("foreign-claim", "bind-foreign", host(), false)
+		Expect(selected("foreign-claim")).To(BeEmpty())
 	})
 })

@@ -40,9 +40,6 @@ import (
 // De facto API, not a documented contract.
 const selectedNodeAnnotation = "volume.kubernetes.io/selected-node"
 
-// legacyPoolAnnotation is the pin stornas stamped before r-drbd.
-const legacyPoolAnnotation = "storage.stornas.io/pool"
-
 // ClaimBinder completes WaitForFirstConsumer for claims the host consumes
 // (nfsd, LIO): no pod ever schedules them, so without selected-node the
 // provisioner never calls r-drbd. Only claims declaring
@@ -74,7 +71,8 @@ func (r *ClaimBinder) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 	}
 	// Patch the one key: the PVC is shared with the scheduler and the
 	// provisioner, and a whole-object update would claim their fields.
-	patch := client.MergeFrom(pvc.DeepCopy())
+	// The resourceVersion guard keeps a stale cache from placing twice.
+	patch := client.MergeFromWithOptions(pvc.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	if pvc.Annotations == nil {
 		pvc.Annotations = map[string]string{}
 	}
@@ -117,9 +115,6 @@ func (r *ClaimBinder) pickNode(ctx context.Context, pvc *corev1.PersistentVolume
 		return "", err
 	}
 	pinned := pvc.Annotations[storagev1alpha1.PoolAnnotation]
-	if pinned == "" {
-		pinned = pvc.Annotations[legacyPoolAnnotation]
-	}
 	if pinned != "" {
 		for _, p := range pools.Items {
 			if p.Name == pinned && meta.IsStatusConditionTrue(p.Status.Conditions, storagev1alpha1.ConditionAvailable) {
@@ -176,7 +171,7 @@ func (r *ClaimBinder) pickNode(ctx context.Context, pvc *corev1.PersistentVolume
 	return nodes[0], nil
 }
 
-// pendingHostClaims maps a pool or node event to every claim still
+// pendingHostClaims maps a pool, class or node event to every claim still
 // waiting, so a pool going Available or a node returning binds them.
 func (r *ClaimBinder) pendingHostClaims(ctx context.Context, _ client.Object) []reconcile.Request {
 	var pvcs corev1.PersistentVolumeClaimList
@@ -197,6 +192,8 @@ func (r *ClaimBinder) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.PersistentVolumeClaim{}).
 		Watches(&storagev1alpha1.StoragePool{}, handler.EnqueueRequestsFromMapFunc(r.pendingHostClaims)).
+		// A host claim created before its class binds once the class exists.
+		Watches(&storagev1.StorageClass{}, handler.EnqueueRequestsFromMapFunc(r.pendingHostClaims)).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.pendingHostClaims),
 			builder.WithPredicates(nodeReadyChanged)).
 		Named("claimbinder").
