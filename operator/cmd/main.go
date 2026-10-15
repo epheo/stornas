@@ -195,6 +195,10 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "LocalUser")
 		os.Exit(1)
 	}
+	if err := (&controller.ClaimBinder{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "ClaimBinder")
+		os.Exit(1)
+	}
 	if err := (&controller.TierClasses{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TierClasses")
 		os.Exit(1)

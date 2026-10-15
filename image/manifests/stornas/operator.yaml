@@ -39,8 +39,14 @@ rules:
     resources: [events]
     verbs: [create, patch]
   - apiGroups: [""]
-    resources: [persistentvolumeclaims, persistentvolumes]
+    resources: [persistentvolumes]
     verbs: [get, list, watch]
+  # patch: the claim binder writes the selected-node annotation that
+  # completes WaitForFirstConsumer for claims declaring a host consumer.
+  # It never reads pods; undeclared claims keep upstream WFFC semantics.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, patch]
   - apiGroups: [storage.k8s.io]
     resources: [storageclasses]
     verbs: [get, list, watch, create, delete]

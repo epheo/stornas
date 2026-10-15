@@ -54,7 +54,9 @@ Nothing is documented here before its flow is green.
 - The UI lists claims from every namespace, and each action lands in the
   claim's own: snapshots sit beside their claim, restores beside their
   snapshot, and a same-named claim elsewhere is never touched.
-- A volume pinned to a pool lands in it, and restores land where their
+- Volumes bind at creation with no consumer: UI volumes declare their
+  consumer is the host and bind to the node that will serve them, a
+  volume pinned to a pool lands in it, and restores land where their
   snapshot lives. A claim a pod references keeps scheduler placement.
 
 **SAN (iSCSI)**
