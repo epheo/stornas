@@ -152,6 +152,17 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		available.Message = fmt.Sprintf("%s needs at least %d devices, got %d",
 			pool.Spec.Raid, storagev1alpha1.MinDevices(pool.Spec.Raid), len(pool.Spec.Devices))
 
+	case pool.Spec.Thin != nil && !*pool.Spec.Thin:
+		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+			Type:               storagev1alpha1.ConditionRegistered,
+			Status:             metav1.ConditionFalse,
+			Reason:             storagev1alpha1.ReasonUnsupported,
+			Message:            "r-drbd pools are thin only",
+			ObservedGeneration: pool.Generation,
+		})
+		available.Reason = storagev1alpha1.ReasonUnsupported
+		available.Message = "r-drbd pools are thin only"
+
 	case !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionHostReady):
 		// No requeue: the agent's status write triggers the next pass.
 		available.Reason = storagev1alpha1.ReasonWaitingForAgent

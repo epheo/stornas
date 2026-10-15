@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
@@ -236,6 +237,25 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(rerr).NotTo(HaveOccurred())
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, &storagev1alpha1.StoragePool{})
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("refuses a thick pool without creating an r-drbd Pool", func() {
+		thick := newPool("thick", "none", "/dev/sda")
+		thin := false
+		thick.Spec.Thin = &thin
+		Expect(k8sClient.Create(ctx, thick)).To(Succeed())
+		defer deletePool("thick")
+		markHostReady("thick")
+
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "thick")
+		Expect(err).NotTo(HaveOccurred())
+		registered := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionRegistered)
+		Expect(registered.Status).To(Equal(metav1.ConditionFalse))
+		Expect(registered.Reason).To(Equal(storagev1alpha1.ReasonUnsupported))
+		Expect(registered.Message).To(Equal("r-drbd pools are thin only"))
+		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeFalse())
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: "thick"}, &rdrbdv1alpha1.Pool{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
 	It("emits a warning event when the pool degrades", func() {
