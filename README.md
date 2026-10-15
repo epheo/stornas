@@ -2,7 +2,7 @@
 
 A NAS/SAN appliance for homelabs and small KubeVirt clusters.
 Successor in spirit to FreeNAS, built on the Red Hat ecosystem:
-CentOS Stream 10, bootc, mdadm, LVM, DRBD 9, LINSTOR, XFS, LIO, MicroShift.
+CentOS Stream 10, bootc, mdadm, LVM, DRBD 9, r-drbd, XFS, LIO, MicroShift.
 
 stornas ships as a single bootc image layered on
 [epheo/microshift](https://github.com/epheo/microshift).
@@ -31,16 +31,15 @@ Nothing is documented here before its flow is green.
   verdict, temperature, and power-on hours per disk.
 - A pulled disk degrades the pool, raises an alert, names the dead member,
   and the UI replace flow rebuilds onto a spare while IO continues.
-- Several pools per node, grouped by tier (`default`, `ssd`, `hdd`...):
-  a node holds one pool per tier, and each tier is one LINSTOR pool
-  spanning every node that has it.
+- Several pools per node, grouped by tier (`default`, `ssd`, `hdd`...);
+  a node may hold several pools of one tier.
 - Pool deletion dismantles the host: only that pool's volumes guard it,
   then the VG, the md array, and member signatures are wiped and the disks
   read unclaimed again.
 
 **Volumes**
 - Every volume is a Kubernetes PVC; SAN LUNs, NAS shares, and VM disks
-  share one CSI path (LINSTOR CSI).
+  share one CSI path (the r-drbd driver).
 - Two classes per tier: `stornas-local` (LVM only, zero overhead, default)
   and `stornas-replicated` (DRBD 9, two synchronous replicas, protocol C,
   quorum majority with a diskless tiebreaker on a third node). Other tiers
@@ -55,10 +54,8 @@ Nothing is documented here before its flow is green.
 - The UI lists claims from every namespace, and each action lands in the
   claim's own: snapshots sit beside their claim, restores beside their
   snapshot, and a same-named claim elsewhere is never touched.
-- Volumes bind at creation with no consumer: UI volumes declare their
-  consumer is the host, a Share or Target referencing a claim is its
-  first consumer arriving, and restores pin to their snapshot's node.
-  A claim a pod references keeps scheduler placement.
+- A volume pinned to a pool lands in it, and restores land where their
+  snapshot lives. A claim a pod references keeps scheduler placement.
 
 **SAN (iSCSI)**
 - Targets with per-initiator CHAP; credentials live in Secrets and
@@ -89,7 +86,7 @@ Nothing is documented here before its flow is green.
   and the UI owns the pick-survivor flow.
 - Master death: worker data planes keep serving; placement stays put when
   the master returns.
-- LINSTOR controller down: IO continues; provisioning blocks and recovers.
+- r-drbd controller down: IO continues; provisioning blocks and recovers.
 
 **Appliance lifecycle**
 - First boot generates an admin password (console and MOTD) and the UI
@@ -98,14 +95,14 @@ Nothing is documented here before its flow is green.
   (`bootc switch --transport oci-archive`); greenboot gates the boot and
   a bad image rolls back automatically with data intact.
 - No registry pull, package install, or download happens at runtime:
-  stornas, Piraeus/LINSTOR, and CSI images are embedded and digest-pinned.
+  stornas, r-drbd, and CSI sidecar images are embedded and digest-pinned.
 
 ## Architecture
 
 Three moving parts, one rule each:
 
 - **stornas-operator** makes every decision. It reconciles the CRDs,
-  registers pools with LINSTOR, places targets and shares on the DRBD
+  registers pools with r-drbd, places targets and shares on the DRBD
   primary, and drives failover and deletion finalizer chains.
 - **stornas-agent** is a dumb, privileged DaemonSet, the only thing that
   touches the host. It reconciles md/LVM, LIO configfs, samba, and
@@ -113,12 +110,17 @@ Three moving parts, one rule each:
 - **stornas server** serves the API and the SvelteKit UI, streams live
   state over a websocket, and writes CRDs on behalf of session users.
 
-Piraeus operator, LINSTOR controller (master) and satellites (per node),
-and LINSTOR CSI do volume orchestration; stornas never drives DRBD directly.
+[r-drbd](https://github.com/epheo/r-drbd) does volume orchestration:
+one controller Deployment (with the CSI driver `r-drbd.io`) and one
+agent DaemonSet, driven by the cluster-scoped CRDs Pool, Volume and
+Snapshot in `r-drbd.io`. The operator turns each StoragePool into a
+Pool of the same name; volumes, replica state and split brain are
+Volume objects stornas watches. Replicated volumes run DRBD 9 with
+protocol C, quorum majority, suspend-io on quorum loss and a diskless
+tiebreaker on a third node. stornas never drives DRBD directly.
 
 Raid lives in mdadm below the LVM PV: each layer has one owner, and
-LINSTOR only ever sees a linear pool on a plain device, the one
-configuration its containerized satellite can always activate.
+r-drbd only ever sees a thin pool on a plain device.
 
 stornas is the storage plane only; VM features belong to dotvirt.
 
@@ -130,7 +132,7 @@ spec:
   node: node-a
   devices: [/dev/disk/by-id/wwn-0x5000c500a1b2c3d4, ...]
   raid: raid1                     # none | raid1
-  tier: default                   # one pool per tier per node
+  tier: default                   # StorageClasses select by tier
 ```
 
 ```yaml
@@ -175,7 +177,7 @@ spec:
 | Network partition | Minority suspends IO; majority keeps writing | None; resumes on heal |
 | Admin force-promotes the minority | Split brain flagged on heal | Pick-survivor flow in UI |
 | Bad upgrade image | greenboot fails; bootc rolls back | None; data intact |
-| LINSTOR controller down | IO fine; provisioning blocked | Recovers with the controller |
+| r-drbd controller down | IO fine; provisioning blocked | Recovers with the controller |
 
 Every row is enforced by a CI gate.
 
