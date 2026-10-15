@@ -20,7 +20,7 @@ rules:
     resources: [nodes, persistentvolumeclaims, events]
     verbs: [get, list, watch]
   - apiGroups: [r-drbd.io]
-    resources: [pools, volumes, snapshots]
+    resources: [pools, volumes]
     verbs: [get, list, watch]
   # Mutations: pools are cluster-scoped, and volume actions follow the
   # claim into any namespace the UI lists (issue 17). Everything else the

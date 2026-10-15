@@ -95,6 +95,9 @@ var _ = Describe("StoragePool Controller", func() {
 
 		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
+		registered := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionRegistered)
+		Expect(registered.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(registered.Reason).To(Equal(storagev1alpha1.ReasonHostNotReady))
 	})
 
 	getBackend := func(name string) *rdrbdv1alpha1.Pool {

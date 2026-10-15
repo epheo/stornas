@@ -53,7 +53,7 @@ type StoragePoolReconciler struct {
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups=r-drbd.io,resources=pools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=r-drbd.io,resources=pools,verbs=get;list;watch;create;delete
 
 func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var pool storagev1alpha1.StoragePool
@@ -115,6 +115,8 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 		}
 		controllerutil.RemoveFinalizer(&pool, poolFinalizer)
+		// Only unblocks pools left by a LINSTOR build; no data migration is implied.
+		controllerutil.RemoveFinalizer(&pool, "storage.stornas.io/linstor-deregister")
 		if err := r.Update(ctx, &pool); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
@@ -164,6 +166,14 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		available.Message = "r-drbd pools are thin only"
 
 	case !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionHostReady):
+		// The VG may be gone; a stale Registered=True would claim otherwise.
+		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+			Type:               storagev1alpha1.ConditionRegistered,
+			Status:             metav1.ConditionUnknown,
+			Reason:             storagev1alpha1.ReasonHostNotReady,
+			Message:            "waiting for the node agent to converge host state",
+			ObservedGeneration: pool.Generation,
+		})
 		// No requeue: the agent's status write triggers the next pass.
 		available.Reason = storagev1alpha1.ReasonWaitingForAgent
 		available.Message = "waiting for the node agent to converge host state"

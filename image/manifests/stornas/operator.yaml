@@ -54,9 +54,9 @@ rules:
   # target placement.
   - apiGroups: [r-drbd.io]
     resources: [pools]
-    verbs: [get, list, watch, create, update, patch, delete]
+    verbs: [get, list, watch, create, delete]
   - apiGroups: [r-drbd.io]
-    resources: [volumes, snapshots]
+    resources: [volumes]
     verbs: [get, list, watch]
   # Node readiness drives failover: placement avoids NotReady nodes.
   - apiGroups: [""]

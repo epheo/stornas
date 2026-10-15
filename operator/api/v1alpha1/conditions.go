@@ -45,6 +45,7 @@ const (
 	ReasonWaitingForPool   = "WaitingForPool"
 	ReasonBackendError     = "BackendError"
 	ReasonUnsupported      = "Unsupported"
+	ReasonHostNotReady     = "HostNotReady"
 )
 
 // DefaultTier is the tier of the shipped StorageClasses (image/manifests);
