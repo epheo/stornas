@@ -33,23 +33,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
+	"github.com/epheo/stornas/operator/internal/rdrbd"
 )
-
-// SharePlacer resolves where a LINSTOR resource should be served and which
-// device to mount there; nil means no controller is configured. prefer
-// keeps placement sticky, avoid excludes unready nodes, replicas reports
-// the diskful copy count.
-type SharePlacer interface {
-	ResolvePlacement(ctx context.Context, resource, prefer string, avoid map[string]bool) (node, device string, replicas int, err error)
-}
 
 // ShareReconciler owns placement and the Available condition; the agent on
 // the placed node mounts and exports, reporting HostReady and State.
 type ShareReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Linstor SharePlacer
+	Scheme *runtime.Scheme
 }
 
 // volumeSettleInterval paces re-checks while the PVC binds; there is no
@@ -61,6 +54,7 @@ const volumeSettleInterval = 15 * time.Second
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=shares/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims;persistentvolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=r-drbd.io,resources=volumes,verbs=get;list;watch
 
 func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var share storagev1alpha1.Share
@@ -89,7 +83,7 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	res := ctrl.Result{}
 
-	handle, reason, msg := claimHandle(ctx, r.Client, share.Namespace, share.Spec.ClaimName)
+	vol, reason, msg := claimVolume(ctx, r.Client, share.Namespace, share.Spec.ClaimName)
 	switch {
 	case reason != "":
 		available.Reason = reason
@@ -98,23 +92,17 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			res.RequeueAfter = volumeSettleInterval
 		}
 
-	case r.Linstor == nil:
-		available.Reason = storagev1alpha1.ReasonNotConfigured
-		available.Message = "no LINSTOR controller configured"
-
 	default:
 		avoid, err := unreadyNodes(ctx, r.Client)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		node, device, _, err := r.Linstor.ResolvePlacement(ctx, handle, share.Status.Node, avoid)
+		node, device, _, err := rdrbd.ResolvePlacement(vol, share.Status.Node, avoid)
 		if err != nil {
-			// Flat requeue, not an error: LINSTOR heals on its own
-			// schedule, and exponential backoff would strand placement
-			// for minutes after it recovers; failover cannot wait that.
-			available.Reason = storagev1alpha1.ReasonLinstorError
+			// No requeue: the Volume watch brings the next pass when a
+			// replica can serve again.
+			available.Reason = storagev1alpha1.ReasonWaitingForVolume
 			available.Message = err.Error()
-			res.RequeueAfter = volumeSettleInterval
 			break
 		}
 		moved := share.Status.Node != "" && share.Status.Node != node
@@ -138,7 +126,6 @@ func (r *ShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			available.Reason = storagev1alpha1.ReasonWaitingForAgent
 			available.Message = "waiting for the node agent to mount and export"
 		}
-		res.RequeueAfter = placementRecheckInterval
 	}
 
 	meta.SetStatusCondition(&share.Status.Conditions, available)
@@ -196,6 +183,25 @@ func (r *ShareReconciler) allShares(ctx context.Context, _ client.Object) []reco
 	return reqs
 }
 
+// volumeShares maps a Volume event to the shares of its claim.
+func (r *ShareReconciler) volumeShares(ctx context.Context, obj client.Object) []reconcile.Request {
+	claim, ok := volumeClaim(ctx, r.Client, obj)
+	if !ok {
+		return nil
+	}
+	var list storagev1alpha1.ShareList
+	if err := r.List(ctx, &list, client.InNamespace(claim.Namespace)); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, s := range list.Items {
+		if s.Spec.ClaimName == claim.Name {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&s)})
+		}
+	}
+	return reqs
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ShareReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -204,6 +210,8 @@ func (r *ShareReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&storagev1alpha1.Share{}).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.allShares),
 			builder.WithPredicates(nodeReadyChanged)).
+		Watches(&rdrbdv1alpha1.Volume{}, handler.EnqueueRequestsFromMapFunc(r.volumeShares),
+			builder.WithPredicates(volumeServingChanged)).
 		Named("share").
 		Complete(r)
 }

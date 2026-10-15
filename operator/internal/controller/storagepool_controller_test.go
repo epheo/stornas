@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,24 +28,9 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
-
-type fakeRegistrar struct {
-	calls   []string
-	deletes []string
-	err     error
-}
-
-func (f *fakeRegistrar) EnsurePool(_ context.Context, node, name, vg string) error {
-	f.calls = append(f.calls, node+":"+name+":"+vg)
-	return f.err
-}
-
-func (f *fakeRegistrar) DeletePool(_ context.Context, node, name, vg string) error {
-	f.deletes = append(f.deletes, node+":"+name+":"+vg)
-	return f.err
-}
 
 var _ = Describe("StoragePool Controller", func() {
 	ctx := context.Background()
@@ -54,9 +38,7 @@ var _ = Describe("StoragePool Controller", func() {
 	newPool := func(name, raid string, devices ...string) *storagev1alpha1.StoragePool {
 		return &storagev1alpha1.StoragePool{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			// A tier per pool: specs share node-a, and finalized pools from
-			// earlier specs would otherwise hold the default tier.
-			Spec: storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: devices, Raid: raid, Tier: name},
+			Spec:       storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: devices, Raid: raid, Tier: name},
 		}
 	}
 
@@ -114,87 +96,132 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
 	})
 
-	It("goes available without LINSTOR when no registrar is configured", func() {
-		Expect(k8sClient.Create(ctx, newPool("hostonly", "none", "/dev/sda"))).To(Succeed())
-		defer deletePool("hostonly")
-		markHostReady("hostonly")
+	getBackend := func(name string) *rdrbdv1alpha1.Pool {
+		p := &rdrbdv1alpha1.Pool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, p)).To(Succeed())
+		return p
+	}
 
-		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "hostonly")
-		Expect(err).NotTo(HaveOccurred())
+	// setAvailable plays the r-drbd agent.
+	setAvailable := func(name string, status metav1.ConditionStatus, msg string) {
+		p := getBackend(name)
+		meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+			Type: rdrbdv1alpha1.ConditionAvailable, Status: status, Reason: "Test", Message: msg,
+		})
+		Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+	}
 
-		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
-		linstor := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)
-		Expect(linstor.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(linstor.Reason).To(Equal(storagev1alpha1.ReasonNotConfigured))
-	})
-
-	It("registers the VG with LINSTOR once the host is ready", func() {
+	It("registers the VG as an r-drbd Pool once the host is ready", func() {
 		registered := newPool("registered", "none", "/dev/sda")
 		registered.Spec.Tier = ""
 		Expect(k8sClient.Create(ctx, registered)).To(Succeed())
 		defer deletePool("registered")
 		markHostReady("registered")
 
-		reg := &fakeRegistrar{}
-		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}, "registered")
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		pool, err := reconcileOnce(r, "registered")
 		Expect(err).NotTo(HaveOccurred())
+		Expect(getBackend("registered").Spec).To(Equal(rdrbdv1alpha1.PoolSpec{
+			Node: "node-a", Tier: storagev1alpha1.DefaultTier, VG: "stornas-registered", ThinPool: storagev1alpha1.ThinLV,
+		}))
+		available := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(available.Status).To(Equal(metav1.ConditionFalse))
+		Expect(available.Reason).To(Equal(storagev1alpha1.ReasonWaitingForPool))
 
-		Expect(reg.calls).To(Equal([]string{"node-a:stornas:stornas-registered"}))
-		Expect(pool.Status.LinstorPool).To(Equal(storagev1alpha1.DefaultLinstorPool))
+		By("mirroring the Pool's Available condition")
+		setAvailable("registered", metav1.ConditionTrue, "")
+		pool, err = reconcileOnce(r, "registered")
+		Expect(err).NotTo(HaveOccurred())
 		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
-		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionLinstorRegistered)).To(BeTrue())
+		Expect(meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionRegistered)).To(BeTrue())
 	})
 
-	It("registers each tier under its own LINSTOR pool and holds a second pool of one tier", func() {
-		first := newPool("first", "none", "/dev/sda")
-		first.Spec.Tier = "dup"
-		Expect(k8sClient.Create(ctx, first)).To(Succeed())
-		defer deletePool("first")
-		bulk := newPool("bulk", "none", "/dev/sdb")
-		bulk.Spec.Tier = "hdd"
-		Expect(k8sClient.Create(ctx, bulk)).To(Succeed())
-		defer deletePool("bulk")
-		second := newPool("second", "none", "/dev/sdc")
-		second.Spec.Tier = "dup"
-		Expect(k8sClient.Create(ctx, second)).To(Succeed())
-		defer deletePool("second")
-		for _, n := range []string{"first", "bulk", "second"} {
+	It("surfaces the agent's reason when the Pool is unavailable", func() {
+		Expect(k8sClient.Create(ctx, newPool("broken", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("broken")
+		markHostReady("broken")
+
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		_, err := reconcileOnce(r, "broken")
+		Expect(err).NotTo(HaveOccurred())
+		setAvailable("broken", metav1.ConditionFalse, "thin pool stornas-broken/thin not found")
+		pool, err := reconcileOnce(r, "broken")
+		Expect(err).NotTo(HaveOccurred())
+		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForPool))
+		Expect(cond.Message).To(ContainSubstring("not found"))
+	})
+
+	// r-drbd pools are per node objects with a tier field, so a tier is no
+	// longer a per node name (docs/architecture.md G6 in r-drbd).
+	It("registers several pools of one tier on one node", func() {
+		for _, n := range []string{"dup-a", "dup-b"} {
+			p := newPool(n, "none", "/dev/sd"+n)
+			p.Spec.Tier = "dup"
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			defer deletePool(n)
 			markHostReady(n)
 		}
-
-		reg := &fakeRegistrar{}
-		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
-		for _, n := range []string{"first", "bulk", "second"} {
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		for _, n := range []string{"dup-a", "dup-b"} {
 			_, err := reconcileOnce(r, n)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(getBackend(n).Spec.Tier).To(Equal("dup"))
 		}
-		Expect(reg.calls).To(Equal([]string{"node-a:stornas-dup:stornas-first", "node-a:stornas-hdd:stornas-bulk"}))
-
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "second"}, second)).To(Succeed())
-		available := meta.FindStatusCondition(second.Status.Conditions, storagev1alpha1.ConditionAvailable)
-		Expect(available.Status).To(Equal(metav1.ConditionFalse))
-		Expect(available.Reason).To(Equal(storagev1alpha1.ReasonTierConflict))
 	})
 
-	It("deregisters from LINSTOR and waits for the host wipe on delete", func() {
+	It("refuses a hand-made Pool of the same name on another VG", func() {
+		Expect(k8sClient.Create(ctx, &rdrbdv1alpha1.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: "squatted"},
+			Spec:       rdrbdv1alpha1.PoolSpec{Node: "node-a", Tier: "squatted", VG: "other", ThinPool: "thin"},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, newPool("squatted", "none", "/dev/sda"))).To(Succeed())
+		defer deletePool("squatted")
+		markHostReady("squatted")
+
+		pool, err := reconcileOnce(&StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "squatted")
+		Expect(err).NotTo(HaveOccurred())
+		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Message).To(ContainSubstring("other"))
+		Expect(getBackend("squatted").Spec.VG).To(Equal("other"))
+	})
+
+	It("deletes the r-drbd Pool and waits for its release and the host wipe", func() {
 		setNode(ctx, "node-a", true)
 		Expect(k8sClient.Create(ctx, newPool("finalized", "none", "/dev/sda"))).To(Succeed())
 		markHostReady("finalized")
 
-		reg := &fakeRegistrar{}
-		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
+		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_, err := reconcileOnce(r, "finalized")
 		Expect(err).NotTo(HaveOccurred())
 
+		By("r-drbd holding the Pool while a volume uses it")
+		backend := getBackend("finalized")
+		backend.Finalizers = []string{"r-drbd.io/pool"}
+		Expect(k8sClient.Update(ctx, backend)).To(Succeed())
+		backend.Status.Volumes = []string{"pvc-1"}
+		Expect(k8sClient.Status().Update(ctx, backend)).To(Succeed())
+
 		pool := &storagev1alpha1.StoragePool{ObjectMeta: metav1.ObjectMeta{Name: "finalized"}}
 		Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
+		_, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
+		Expect(rerr).NotTo(HaveOccurred())
+		Expect(getBackend("finalized").DeletionTimestamp.IsZero()).To(BeFalse())
+		got := &storagev1alpha1.StoragePool{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, got)).To(Succeed())
+		dereg := meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionDeregistered)
+		Expect(dereg.Status).To(Equal(metav1.ConditionFalse))
+		Expect(dereg.Message).To(ContainSubstring("pvc-1"))
+
+		By("clearing the agent's wipe only after r-drbd released the Pool")
+		backend = getBackend("finalized")
+		backend.Finalizers = nil
+		Expect(k8sClient.Update(ctx, backend)).To(Succeed())
 		res, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "finalized"}})
 		Expect(rerr).NotTo(HaveOccurred())
 		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
-		Expect(reg.deletes).To(Equal([]string{"node-a:stornas-finalized:stornas-finalized"}))
-
-		By("clearing the agent's wipe only after deregistration")
-		got := &storagev1alpha1.StoragePool{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, got)).To(Succeed())
 		Expect(meta.IsStatusConditionTrue(got.Status.Conditions, storagev1alpha1.ConditionDeregistered)).To(BeTrue())
 
@@ -209,26 +236,6 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(rerr).NotTo(HaveOccurred())
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: "finalized"}, &storagev1alpha1.StoragePool{})
 		Expect(err).To(HaveOccurred())
-	})
-
-	It("surfaces LINSTOR errors and retries", func() {
-		Expect(k8sClient.Create(ctx, newPool("failing", "none", "/dev/sda"))).To(Succeed())
-		defer deletePool("failing")
-		markHostReady("failing")
-
-		reg := &fakeRegistrar{err: fmt.Errorf("controller unreachable")}
-		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: reg}
-		res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "failing"}})
-		// Flat requeue, no error: exponential backoff would strand
-		// registration long after LINSTOR or DNS recovers.
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.RequeueAfter).To(Equal(volumeSettleInterval))
-
-		pool := &storagev1alpha1.StoragePool{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "failing"}, pool)).To(Succeed())
-		cond := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
 	})
 
 	It("emits a warning event when the pool degrades", func() {

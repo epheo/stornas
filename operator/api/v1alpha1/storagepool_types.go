@@ -22,9 +22,8 @@ import (
 )
 
 // StoragePoolSpec defines the desired state of StoragePool.
-// Pools are node local; the operator registers each pool as the LINSTOR
-// storage pool of its tier on that node's satellite. A node holds at most
-// one pool per tier.
+// Pools are node local; the operator registers each pool as the r-drbd
+// Pool of the same name, carrying its node and tier.
 type StoragePoolSpec struct {
 	// node that owns the devices; immutable once set.
 	// +required
@@ -82,8 +81,6 @@ type StoragePoolStatus struct {
 
 	// +optional
 	VG string `json:"vg,omitempty"`
-	// +optional
-	LinstorPool string `json:"linstorPool,omitempty"`
 	// +optional
 	Capacity *resource.Quantity `json:"capacity,omitempty"`
 	// +optional

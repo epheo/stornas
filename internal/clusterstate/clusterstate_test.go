@@ -16,7 +16,7 @@ func stateWith(t *testing.T, pools []*storagev1alpha1.StoragePool, nodes []*core
 	t.Helper()
 	s := &State{
 		pools: newIndexer(), shares: newIndexer(), inventories: newIndexer(),
-		targets: newIndexer(), snapshots: newIndexer(),
+		targets: newIndexer(), snapshots: newIndexer(), backing: newIndexer(),
 		nodes: newIndexer(), pvcs: newIndexer(), events: newIndexer(),
 	}
 	for _, p := range pools {
@@ -54,11 +54,10 @@ func TestSnapshotPoolMapping(t *testing.T) {
 			Devices: []string{"/dev/sda", "/dev/sdb"},
 		},
 		Status: storagev1alpha1.StoragePoolStatus{
-			VG:          "stornas-tank",
-			LinstorPool: "stornas",
-			Capacity:    &cap100,
-			Free:        &free90,
-			Health:      "Online",
+			VG:       "stornas-tank",
+			Capacity: &cap100,
+			Free:     &free90,
+			Health:   "Online",
 			Devices: []storagev1alpha1.DeviceStatus{
 				{Path: "/dev/sda", State: "InSync", Smart: "Passed"},
 			},

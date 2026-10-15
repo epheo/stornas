@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,25 +29,37 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-type fakePlacer struct {
-	node, device string
-	fallback     string // wins when node is avoided, like a surviving replica
-	replicas     int    // 0 means 1
-	err          error
-}
-
-func (f *fakePlacer) ResolvePlacement(_ context.Context, _ string, _ string, avoid map[string]bool) (string, string, int, error) {
-	node, replicas := f.node, f.replicas
-	if avoid[node] && f.fallback != "" {
-		node = f.fallback
+// backingVolume creates the r-drbd Volume behind a claim as the r-drbd
+// controller and agents would report it: every diskful node present with
+// device, primary on primary.
+func backingVolume(ctx context.Context, name, device, primary string, diskful ...string) *rdrbdv1alpha1.Volume {
+	v := &rdrbdv1alpha1.Volume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: rdrbdv1alpha1.VolumeSpec{
+			SizeBytes: 1 << 30, Replicas: int32(len(diskful)), Tier: storagev1alpha1.DefaultTier,
+			Assignment: &rdrbdv1alpha1.Assignment{},
+		},
 	}
-	if replicas == 0 {
-		replicas = 1
+	for i, n := range diskful {
+		v.Spec.Assignment.Replicas = append(v.Spec.Assignment.Replicas,
+			rdrbdv1alpha1.AssignedReplica{Node: n, NodeID: int32(i), Role: rdrbdv1alpha1.RoleDiskful})
 	}
-	return node, f.device, replicas, f.err
+	Expect(k8sClient.Create(ctx, v)).To(Succeed())
+	if device == "" {
+		return v
+	}
+	v.Status.Primary = primary
+	for _, n := range diskful {
+		v.Status.Replicas = append(v.Status.Replicas, rdrbdv1alpha1.ReplicaStatus{
+			Node: n, Present: true, DiskState: "UpToDate", DevicePath: device, InUse: n == primary,
+		})
+	}
+	Expect(k8sClient.Status().Update(ctx, v)).To(Succeed())
+	return v
 }
 
 // setNode pins a node's Ready condition; envtest runs no node controller,
@@ -87,10 +98,11 @@ var _ = Describe("Share Controller", func() {
 				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
-						Driver:       "linstor.csi.linbit.com",
+						Driver:       rdrbdv1alpha1.Driver,
 						VolumeHandle: volume,
 					},
 				},
+				ClaimRef: &corev1.ObjectReference{Namespace: "default", Name: name},
 			},
 		}
 		Expect(k8sClient.Create(ctx, pv)).To(Succeed())
@@ -120,7 +132,7 @@ var _ = Describe("Share Controller", func() {
 			Expect(k8sClient.Delete(ctx, newShare("unbound", "no-such-claim"))).To(Succeed())
 		}()
 
-		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: &fakePlacer{}}, "unbound")
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "unbound")
 		Expect(err).NotTo(HaveOccurred())
 
 		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
@@ -134,8 +146,9 @@ var _ = Describe("Share Controller", func() {
 			Expect(k8sClient.Delete(ctx, newShare("media", "media"))).To(Succeed())
 		}()
 
-		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1000"}
-		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "media")
+		backingVolume(ctx, "pvc-media-1", "/dev/drbd1000", "node-a", "node-a")
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		share, err := reconcileOnce(r, "media")
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(share.Status.Node).To(Equal("node-a"))
@@ -151,31 +164,33 @@ var _ = Describe("Share Controller", func() {
 		})
 		Expect(k8sClient.Status().Update(ctx, share)).To(Succeed())
 
-		share, err = reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}, "media")
+		share, err = reconcileOnce(r, "media")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(meta.IsStatusConditionTrue(share.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
+
+		By("mapping Volume events back to the share")
+		Expect(r.volumeShares(ctx, &rdrbdv1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "pvc-media-1"}})).To(
+			ConsistOf(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "media"}}))
 	})
 
-	It("surfaces placement errors and retries on a flat interval", func() {
+	It("waits on the Volume watch while no replica can serve", func() {
 		boundClaim("erring", "pvc-erring-1")
+		backingVolume(ctx, "pvc-erring-1", "", "", "node-a")
 		Expect(k8sClient.Create(ctx, newShare("erring", "erring"))).To(Succeed())
 		defer func() {
 			Expect(k8sClient.Delete(ctx, newShare("erring", "erring"))).To(Succeed())
 		}()
 
-		placer := &fakePlacer{err: fmt.Errorf("controller unreachable")}
-		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "erring"}})
-		// Flat requeue, no error: exponential backoff would strand
-		// placement long after LINSTOR recovers.
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.RequeueAfter).To(Equal(volumeSettleInterval))
+		Expect(result.RequeueAfter).To(BeZero())
 
 		share := &storagev1alpha1.Share{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "erring"}, share)).To(Succeed())
 		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForVolume))
 	})
 
 	It("moves the share off an unready node and resets HostReady", func() {
@@ -189,8 +204,8 @@ var _ = Describe("Share Controller", func() {
 			Expect(k8sClient.Delete(ctx, newShare("failover", "failover"))).To(Succeed())
 		}()
 
-		placer := &fakePlacer{node: "node-a", fallback: "node-b", device: "/dev/drbd1000"}
-		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-failover-1", "/dev/drbd1000", "node-a", "node-a", "node-b")
+		r := &ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		share, err := reconcileOnce(r, "failover")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(share.Status.Node).To(Equal("node-a"))
@@ -261,7 +276,7 @@ var _ = Describe("Share Controller", func() {
 		Expect(k8sClient.Get(ctx, key, got)).To(HaveOccurred())
 	})
 
-	It("rejects claims not backed by LINSTOR CSI", func() {
+	It("rejects claims not backed by r-drbd", func() {
 		pv := &corev1.PersistentVolume{
 			ObjectMeta: metav1.ObjectMeta{Name: "pv-hostpath"},
 			Spec: corev1.PersistentVolumeSpec{
@@ -289,7 +304,7 @@ var _ = Describe("Share Controller", func() {
 			Expect(k8sClient.Delete(ctx, newShare("foreign", "foreign"))).To(Succeed())
 		}()
 
-		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: &fakePlacer{}}, "foreign")
+		share, err := reconcileOnce(&ShareReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}, "foreign")
 		Expect(err).NotTo(HaveOccurred())
 
 		cond := meta.FindStatusCondition(share.Status.Conditions, storagev1alpha1.ConditionAvailable)

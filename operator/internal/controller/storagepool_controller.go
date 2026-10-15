@@ -30,29 +30,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
+	"github.com/epheo/stornas/operator/internal/rdrbd"
 )
 
-// LinstorRegistrar registers a node's VG under its tier's LINSTOR pool
-// name. nil means no controller is configured; registration is skipped
-// and reported as such rather than failed.
-type LinstorRegistrar interface {
-	EnsurePool(ctx context.Context, node, name, vg string) error
-	DeletePool(ctx context.Context, node, name, vg string) error
-}
-
-// poolFinalizer holds deletion until the LINSTOR catalog entry is gone;
-// without it the registration needs manual cleanup after delete-recreate.
-const poolFinalizer = "storage.stornas.io/linstor-deregister"
+// poolFinalizer holds deletion until the r-drbd Pool is gone; the agent
+// may only wipe the VG after that.
+const poolFinalizer = "storage.stornas.io/deregister"
 
 // StoragePoolReconciler owns every StoragePool condition except HostReady,
 // which belongs to the node agent (internal/agent in the root module).
 type StoragePoolReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Linstor  LinstorRegistrar
 	Recorder events.EventRecorder
 }
 
@@ -61,6 +53,7 @@ type StoragePoolReconciler struct {
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=storagepools/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=r-drbd.io,resources=pools,verbs=get;list;watch;create;update;patch;delete
 
 func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var pool storagev1alpha1.StoragePool
@@ -72,15 +65,27 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if !controllerutil.ContainsFinalizer(&pool, poolFinalizer) {
 			return ctrl.Result{}, nil
 		}
-		if r.Linstor != nil {
-			// LINSTOR refuses to drop a pool that still backs resources:
-			// the deletion guard, retried flat while volumes remain.
-			if err := r.Linstor.DeletePool(ctx, pool.Spec.Node, pool.LinstorPoolName(), pool.VGName()); err != nil {
-				return ctrl.Result{RequeueAfter: volumeSettleInterval}, nil
+		gone, msg, err := rdrbd.DeletePool(ctx, r.Client, &pool)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !gone {
+			// The Pool watch brings the next pass; the condition says why
+			// deletion hangs.
+			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
+				Type:               storagev1alpha1.ConditionDeregistered,
+				Status:             metav1.ConditionFalse,
+				Reason:             storagev1alpha1.ReasonWaitingForPool,
+				Message:            msg,
+				ObservedGeneration: pool.Generation,
+			})
+			if err := r.Status().Update(ctx, &pool); err != nil && !apierrors.IsConflict(err) {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
+			return ctrl.Result{}, nil
 		}
 		// Deregistered is the agent's go-ahead to wipe: until it is set,
-		// LINSTOR may still back live volumes with this VG, and the agent
+		// r-drbd may still back live volumes with this VG, and the agent
 		// wiping concurrently would destroy them.
 		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionDeregistered) {
 			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
@@ -140,66 +145,46 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: pool.Generation,
 	}
-	res := ctrl.Result{}
-	holder, err := r.tierHolder(ctx, &pool)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
+	var backendErr error
 	switch {
 	case len(pool.Spec.Devices) < storagev1alpha1.MinDevices(pool.Spec.Raid):
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = fmt.Sprintf("%s needs at least %d devices, got %d",
 			pool.Spec.Raid, storagev1alpha1.MinDevices(pool.Spec.Raid), len(pool.Spec.Devices))
 
-	case holder != "":
-		// No requeue: the holder's deletion re-enqueues this pool.
-		available.Reason = storagev1alpha1.ReasonTierConflict
-		available.Message = fmt.Sprintf("pool %s already holds tier %s on %s",
-			holder, pool.Spec.Tier, pool.Spec.Node)
-
 	case !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionHostReady):
 		// No requeue: the agent's status write triggers the next pass.
 		available.Reason = storagev1alpha1.ReasonWaitingForAgent
 		available.Message = "waiting for the node agent to converge host state"
 
-	case r.Linstor == nil:
-		meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
-			Type:               storagev1alpha1.ConditionLinstorRegistered,
-			Status:             metav1.ConditionUnknown,
-			Reason:             storagev1alpha1.ReasonNotConfigured,
-			Message:            "no LINSTOR controller configured",
-			ObservedGeneration: pool.Generation,
-		})
-		available.Status = metav1.ConditionTrue
-		available.Reason = storagev1alpha1.ReasonReady
-
 	default:
-		if err := r.Linstor.EnsurePool(ctx, pool.Spec.Node, pool.LinstorPoolName(), pool.Status.VG); err != nil {
-			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
-				Type:               storagev1alpha1.ConditionLinstorRegistered,
-				Status:             metav1.ConditionFalse,
-				Reason:             storagev1alpha1.ReasonLinstorError,
-				Message:            err.Error(),
-				ObservedGeneration: pool.Generation,
-			})
-			available.Reason = storagev1alpha1.ReasonLinstorError
-			available.Message = err.Error()
-			// Flat requeue, not an error: LINSTOR and cluster DNS heal on
-			// their own schedule, and exponential backoff would strand
-			// registration for minutes after they recover.
-			res.RequeueAfter = volumeSettleInterval
-		} else {
-			pool.Status.LinstorPool = pool.LinstorPoolName()
-			meta.SetStatusCondition(&pool.Status.Conditions, metav1.Condition{
-				Type:               storagev1alpha1.ConditionLinstorRegistered,
-				Status:             metav1.ConditionTrue,
-				Reason:             storagev1alpha1.ReasonReady,
-				ObservedGeneration: pool.Generation,
-			})
+		registered := metav1.Condition{
+			Type:               storagev1alpha1.ConditionRegistered,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: pool.Generation,
+		}
+		// No requeue on a false ready: the Pool watch brings the next pass
+		// when the r-drbd agent reports.
+		ready, msg, err := rdrbd.EnsurePool(ctx, r.Client, &pool)
+		backendErr = err
+		switch {
+		case err != nil:
+			registered.Reason = storagev1alpha1.ReasonBackendError
+			registered.Message = err.Error()
+		case !ready:
+			registered.Reason = storagev1alpha1.ReasonWaitingForPool
+			registered.Message = msg
+		default:
+			registered.Status = metav1.ConditionTrue
+			registered.Reason = storagev1alpha1.ReasonReady
 			available.Status = metav1.ConditionTrue
 			available.Reason = storagev1alpha1.ReasonReady
 		}
+		if registered.Status != metav1.ConditionTrue {
+			available.Reason = registered.Reason
+			available.Message = registered.Message
+		}
+		meta.SetStatusCondition(&pool.Status.Conditions, registered)
 	}
 
 	meta.SetStatusCondition(&pool.Status.Conditions, available)
@@ -210,29 +195,7 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		return ctrl.Result{}, err
 	}
-	return res, nil
-}
-
-// tierHolder names the older pool already holding this pool's tier on its
-// node, or "". The LINSTOR pool name is per tier and node, so only one
-// of them can register; the oldest wins and the rest wait for it to go.
-func (r *StoragePoolReconciler) tierHolder(ctx context.Context, pool *storagev1alpha1.StoragePool) (string, error) {
-	var pools storagev1alpha1.StoragePoolList
-	if err := r.List(ctx, &pools); err != nil {
-		return "", err
-	}
-	for _, p := range pools.Items {
-		if p.Name == pool.Name || p.Spec.Node != pool.Spec.Node ||
-			p.LinstorPoolName() != pool.LinstorPoolName() {
-			continue
-		}
-		older := p.CreationTimestamp.Before(&pool.CreationTimestamp) ||
-			(p.CreationTimestamp.Equal(&pool.CreationTimestamp) && p.Name < pool.Name)
-		if older {
-			return p.Name, nil
-		}
-	}
-	return "", nil
+	return ctrl.Result{}, backendErr
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -241,27 +204,9 @@ func (r *StoragePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Unfiltered on purpose: an update conflict returns without requeue
 		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.StoragePool{}).
-		// A tier's holder going away frees the pools waiting on it.
-		Watches(&storagev1alpha1.StoragePool{}, handler.EnqueueRequestsFromMapFunc(r.sameTier)).
+		// A Pool keeps its StoragePool's name, so its events map straight
+		// back: Available flips and the release on delete.
+		Watches(&rdrbdv1alpha1.Pool{}, &handler.EnqueueRequestForObject{}).
 		Named("storagepool").
 		Complete(r)
-}
-
-func (r *StoragePoolReconciler) sameTier(ctx context.Context, obj client.Object) []reconcile.Request {
-	changed, ok := obj.(*storagev1alpha1.StoragePool)
-	if !ok {
-		return nil
-	}
-	var pools storagev1alpha1.StoragePoolList
-	if err := r.List(ctx, &pools); err != nil {
-		return nil
-	}
-	var reqs []reconcile.Request
-	for _, p := range pools.Items {
-		if p.Name != changed.Name && p.Spec.Node == changed.Spec.Node &&
-			p.LinstorPoolName() == changed.LinstorPoolName() {
-			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
-		}
-	}
-	return reqs
 }

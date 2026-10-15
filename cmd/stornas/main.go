@@ -21,7 +21,6 @@ import (
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/clusterstate"
 	"github.com/epheo/stornas/internal/eventbus"
-	"github.com/epheo/stornas/internal/linstorpoll"
 	"github.com/epheo/stornas/internal/model"
 	"github.com/epheo/stornas/internal/stream"
 	"github.com/epheo/stornas/internal/tasks"
@@ -64,19 +63,9 @@ func main() {
 	state.SystemNamespace = src.Namespace
 	state.Run(ctx)
 
-	var poller *linstorpoll.Poller
-	if u := os.Getenv("LINSTOR_URL"); u != "" {
-		p, err := linstorpoll.New(u, bus)
-		if err != nil {
-			log.Fatalf("linstor poller: %v", err)
-		}
-		poller = p
-		go poller.Run(ctx)
-	}
 	feed := tasks.New(bus)
 	snapFn := func() model.Snapshot {
 		snap := state.Snapshot()
-		poller.Decorate(&snap)
 		snap.Tasks = taskModels(feed)
 		return snap
 	}
@@ -107,7 +96,7 @@ func main() {
 	})))
 	mux.Handle("GET /api/v1/stream", sessions.Require(hub))
 
-	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed, Linstor: poller.Client()}
+	mutate := &api.API{Dyn: dyn, CS: cs, Namespace: src.Namespace, Tasks: feed}
 	admin := func(h http.HandlerFunc) http.Handler { return sessions.RequireAdmin(h) }
 	mux.Handle("POST /api/v1/pools", admin(mutate.CreatePool))
 	mux.Handle("DELETE /api/v1/pools/{name}", admin(mutate.DeletePool))

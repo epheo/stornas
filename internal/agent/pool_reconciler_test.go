@@ -59,7 +59,7 @@ func TestPoolReconcilerKeepsDevicesOnTransientError(t *testing.T) {
 }
 
 // The wipe must wait for the operator's Deregistered clearance: before
-// it, LINSTOR may still back live volumes with this VG, and a kubectl
+// it, r-drbd may still back live volumes with this VG, and a kubectl
 // delete would otherwise destroy them.
 func TestPoolReconcilerHoldsWipeUntilDeregistered(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -71,7 +71,7 @@ func TestPoolReconcilerHoldsWipeUntilDeregistered(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tank", Namespace: "stornas-system",
 			DeletionTimestamp: &now,
-			Finalizers:        []string{"storage.stornas.io/linstor-deregister"},
+			Finalizers:        []string{"storage.stornas.io/deregister"},
 		},
 		Spec: storagev1alpha1.StoragePoolSpec{Node: "node-a", Devices: []string{"/dev/vdb"}},
 	}

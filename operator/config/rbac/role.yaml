@@ -8,21 +8,12 @@ rules:
   - ""
   resources:
   - nodes
+  - persistentvolumeclaims
   - persistentvolumes
   - secrets
   verbs:
   - get
   - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - persistentvolumeclaims
-  verbs:
-  - get
-  - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - ""
@@ -33,9 +24,21 @@ rules:
   - create
   - patch
 - apiGroups:
-  - snapshot.storage.k8s.io
+  - r-drbd.io
   resources:
-  - volumesnapshots
+  - pools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - r-drbd.io
+  resources:
+  - volumes
   verbs:
   - get
   - list

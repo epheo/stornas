@@ -353,7 +353,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return ctrl.Result{}, nil
 		}
 		// Wipe only on the operator's Deregistered clearance: before it,
-		// LINSTOR may still back live volumes with this VG. The operator's
+		// r-drbd may still back live volumes with this VG. The operator's
 		// status write triggers the next pass; no requeue needed.
 		if !meta.IsStatusConditionTrue(pool.Status.Conditions, storagev1alpha1.ConditionDeregistered) {
 			return ctrl.Result{}, nil

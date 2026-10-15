@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,6 +30,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
@@ -47,10 +47,11 @@ var _ = Describe("Target Controller", func() {
 				VolumeMode:  &mode,
 				PersistentVolumeSource: corev1.PersistentVolumeSource{
 					CSI: &corev1.CSIPersistentVolumeSource{
-						Driver:       "linstor.csi.linbit.com",
+						Driver:       rdrbdv1alpha1.Driver,
 						VolumeHandle: volume,
 					},
 				},
+				ClaimRef: &corev1.ObjectReference{Namespace: "default", Name: name},
 			},
 		}
 		Expect(k8sClient.Create(ctx, pv)).To(Succeed())
@@ -79,8 +80,8 @@ var _ = Describe("Target Controller", func() {
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
 
-		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1001"}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-disk0", "/dev/drbd1001", "node-a", "node-a")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "vms"}})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -92,6 +93,10 @@ var _ = Describe("Target Controller", func() {
 		Expect(got.Status.LUNs[0].Device).To(Equal("/dev/drbd1001"))
 		cond := meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
+
+		By("mapping Volume events back to the target")
+		Expect(r.volumeTargets(ctx, &rdrbdv1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "pvc-disk0"}})).To(
+			ConsistOf(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "vms"}}))
 	})
 
 	It("waits for volumes while a claim is unbound", func() {
@@ -104,7 +109,7 @@ var _ = Describe("Target Controller", func() {
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
 
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: &fakePlacer{}}
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "pending"}})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -130,8 +135,8 @@ var _ = Describe("Target Controller", func() {
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
 
-		placer := &fakePlacer{node: "node-a", fallback: "node-b", device: "/dev/drbd1002", replicas: 2}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-disk2", "/dev/drbd1002", "node-a", "node-a", "node-b")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		key := types.NamespacedName{Namespace: "default", Name: "failover"}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
@@ -170,8 +175,8 @@ var _ = Describe("Target Controller", func() {
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
 
-		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1003", replicas: 2}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-disk3", "/dev/drbd1003", "node-a", "node-a", "node-b")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "novip"}})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -182,8 +187,9 @@ var _ = Describe("Target Controller", func() {
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
 	})
 
-	It("surfaces placement errors and retries", func() {
+	It("waits on the Volume watch while no replica can serve", func() {
 		boundBlockClaim("disk1", "pvc-disk1")
+		backingVolume(ctx, "pvc-disk1", "", "", "node-a")
 		target := &storagev1alpha1.Target{
 			ObjectMeta: metav1.ObjectMeta{Name: "erring-target", Namespace: "default"},
 			Spec: storagev1alpha1.TargetSpec{
@@ -193,19 +199,16 @@ var _ = Describe("Target Controller", func() {
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
 
-		placer := &fakePlacer{err: fmt.Errorf("controller unreachable")}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "erring-target"}})
-		// Flat requeue, no error: exponential backoff would strand
-		// placement long after LINSTOR recovers.
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.RequeueAfter).To(Equal(volumeSettleInterval))
+		Expect(result.RequeueAfter).To(BeZero())
 
 		got := &storagev1alpha1.Target{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "erring-target"}, got)).To(Succeed())
 		cond := meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonLinstorError))
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForVolume))
 	})
 
 	It("holds deletion until the agent confirms teardown", func() {
@@ -220,8 +223,8 @@ var _ = Describe("Target Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 
-		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1009"}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-disk9", "/dev/drbd1009", "node-a", "node-a")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		key := types.NamespacedName{Namespace: "default", Name: "doomed"}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
@@ -259,8 +262,8 @@ var _ = Describe("Target Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, target)).To(Succeed())
 
-		placer := &fakePlacer{node: "node-a", device: "/dev/drbd1010"}
-		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Linstor: placer}
+		backingVolume(ctx, "pvc-disk10", "/dev/drbd1010", "node-a", "node-a")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		key := types.NamespacedName{Namespace: "default", Name: "orphaned"}
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())

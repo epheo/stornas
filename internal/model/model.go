@@ -21,7 +21,6 @@ type Pool struct {
 
 	Available bool   `json:"available"`
 	Reason    string `json:"reason"` // Available condition reason; explains false
-	Linstor   string `json:"linstor"`
 }
 
 // Device is one backing disk's observed state.
@@ -58,7 +57,7 @@ type Disk struct {
 
 // Volume is one PVC: the unit everything else references (LUNs, shares,
 // VM disks all point at PVCs). Resource is the bound PV name, which is
-// also the LINSTOR resource name for CSI-provisioned volumes.
+// also the r-drbd Volume name for CSI-provisioned volumes.
 type Volume struct {
 	Namespace     string       `json:"namespace"`
 	Name          string       `json:"name"`

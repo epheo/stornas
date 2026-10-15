@@ -73,7 +73,7 @@ type ShareStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// node and device are the operator's placement decision: where the
-	// backing LINSTOR resource is (or should become) primary and which
+	// backing r-drbd Volume is (or should become) primary and which
 	// block device the agent mounts there. The agent only executes.
 	// +optional
 	Node string `json:"node,omitempty"`

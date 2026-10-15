@@ -28,7 +28,6 @@ export interface Pool {
   rebuildPercent?: number /* int */;
   available: boolean;
   reason: string; // Available condition reason; explains false
-  linstor: string;
 }
 /**
  * Device is one backing disk's observed state.
@@ -68,7 +67,7 @@ export interface Disk {
 /**
  * Volume is one PVC: the unit everything else references (LUNs, shares,
  * VM disks all point at PVCs). Resource is the bound PV name, which is
- * also the LINSTOR resource name for CSI-provisioned volumes.
+ * also the r-drbd Volume name for CSI-provisioned volumes.
  */
 export interface Volume {
   namespace: string;

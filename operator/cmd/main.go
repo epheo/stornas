@@ -35,9 +35,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 	"github.com/epheo/stornas/operator/internal/controller"
-	"github.com/epheo/stornas/operator/internal/linstor"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -50,6 +50,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(storagev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(rdrbdv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -165,43 +166,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Unset means no LINSTOR: pools go Available on host state alone and
-	// carry LinstorRegistered=Unknown, so the gap stays visible in status.
-	// Typed nil interfaces would defeat the reconcilers' nil checks, so
-	// each interface variable is only assigned on success.
-	var registrar controller.LinstorRegistrar
-	var placer controller.SharePlacer
-	if u := os.Getenv("LINSTOR_URL"); u != "" {
-		r, err := linstor.NewRegistrar(u)
-		if err != nil {
-			setupLog.Error(err, "Failed to create LINSTOR registrar", "url", u)
-			os.Exit(1)
-		}
-		registrar = r
-		placer = r
-	}
-
 	if err := (&controller.StoragePoolReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Linstor:  registrar,
 		Recorder: mgr.GetEventRecorder("stornas-operator"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "StoragePool")
 		os.Exit(1)
 	}
 	if err := (&controller.TargetReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Linstor: placer,
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Target")
 		os.Exit(1)
 	}
 	if err := (&controller.ShareReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Linstor: placer,
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Share")
 		os.Exit(1)
@@ -211,13 +193,6 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "LocalUser")
-		os.Exit(1)
-	}
-	if err := (&controller.ClaimBinder{
-		Client:  mgr.GetClient(),
-		Linstor: placer,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "ClaimBinder")
 		os.Exit(1)
 	}
 	if err := (&controller.TierClasses{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {

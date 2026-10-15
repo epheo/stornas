@@ -19,15 +19,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	lapi "github.com/LINBIT/golinstor/client"
-
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/tasks"
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
@@ -37,17 +37,18 @@ var (
 	targetGVR = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "targets"}
 	userGVR   = schema.GroupVersionResource{Group: "storage.stornas.io", Version: "v1alpha1", Resource: "localusers"}
 	snapGVR   = schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshots"}
+
+	rdrbdPoolGVR   = rdrbdv1alpha1.GroupVersion.WithResource("pools")
+	rdrbdVolumeGVR = rdrbdv1alpha1.GroupVersion.WithResource("volumes")
 )
 
 // API creates appliance objects. Namespace scopes everything namespaced:
 // appliance-managed volumes and shares live in the system namespace.
-// Linstor is nil when LINSTOR_URL is unset; endpoints needing it 501.
 type API struct {
 	Dyn       dynamic.Interface
 	CS        kubernetes.Interface
 	Namespace string
 	Tasks     *tasks.Feed
-	Linstor   *lapi.Client
 }
 
 // record adds one row to the activity feed, attributed to the session
@@ -81,10 +82,9 @@ type poolRequest struct {
 	Tier    string   `json:"tier"`
 }
 
-// CreatePool refuses what only shows up later on the host or in LINSTOR:
-// a second pool of one tier on a node (one LINSTOR pool name per tier and
-// node), and a device another pool already claims (the agent reports a
-// disk as claimed only once its pool has converged).
+// CreatePool refuses a device another pool already claims: it only shows
+// up later on the host, since the agent reports a disk as claimed once its
+// pool has converged.
 func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 	var req poolRequest
 	if !decode(w, r, &req) {
@@ -100,12 +100,6 @@ func (a *API) CreatePool(w http.ResponseWriter, r *http.Request) {
 		node, _, _ := unstructured.NestedString(p.Object, "spec", "node")
 		if node != req.Node {
 			continue
-		}
-		tier, _, _ := unstructured.NestedString(p.Object, "spec", "tier")
-		if orDefault(tier, storagev1alpha1.DefaultTier) == req.Tier {
-			a.record(r, "create pool", req.Name, errInUse)
-			http.Error(w, "pool "+p.GetName()+" already holds tier "+req.Tier+" on "+node, http.StatusConflict)
-			return
 		}
 		devices, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "devices")
 		for _, d := range req.Devices {
@@ -137,44 +131,30 @@ type replaceRequest struct {
 	New string `json:"new"`
 }
 
-// ReplacePoolDevice swaps one member of spec.devices; the agent converges
-// the VG (extend, repair or evacuate, reduce). The CRD's same-size CEL
-// rule keeps this a swap, never a grow or shrink.
-// DeletePool refuses while LINSTOR still holds volumes in the pool's
-// tier on its node, which is this pool's LINSTOR registration: without
-// the check the CR hangs in terminating and the user never learns why.
-// The operator's finalizer chain (LINSTOR deregister, agent host wipe)
-// remains the real guard.
+// DeletePool refuses while the pool's r-drbd Pool still lists volumes:
+// without the check the CR hangs in terminating and the user never learns
+// why. The finalizer chain (r-drbd's Pool finalizer, the operator's, the
+// agent's host wipe) remains the real guard.
 func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	u, err := a.Dyn.Resource(poolGVR).Get(r.Context(), name, metav1.GetOptions{})
-	if err != nil {
+	if _, err := a.Dyn.Resource(poolGVR).Get(r.Context(), name, metav1.GetOptions{}); err != nil {
 		respondDelete(w, err)
 		return
 	}
-	node, _, _ := unstructured.NestedString(u.Object, "spec", "node")
-	tier, _, _ := unstructured.NestedString(u.Object, "spec", "tier")
-	linstorPool := storagev1alpha1.LinstorPoolName(tier)
-	if a.Linstor != nil {
-		// Fail closed: without the view we cannot prove the pool is idle,
+	backing, err := a.Dyn.Resource(rdrbdPoolGVR).Get(r.Context(), name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		// Never registered: nothing can live on it.
+	case err != nil:
+		// Fail closed: without the Pool we cannot prove the pool is idle,
 		// and deleting blind is the data-loss path this guard exists for.
-		view, verr := a.Linstor.Resources.GetResourceView(r.Context())
-		if verr != nil {
-			http.Error(w, "cannot verify the pool is unused, linstor: "+verr.Error(), http.StatusBadGateway)
+		http.Error(w, "cannot verify the pool is unused: "+err.Error(), http.StatusBadGateway)
+		return
+	default:
+		if vols, _, _ := unstructured.NestedStringSlice(backing.Object, "status", "volumes"); len(vols) > 0 {
+			a.record(r, "delete pool", name, errInUse)
+			http.Error(w, "pool still backs volumes ("+strings.Join(vols, ", ")+"); delete them first", http.StatusConflict)
 			return
-		}
-		for _, res := range view {
-			// A diskless replica (tiebreaker) lives in the diskless pool
-			// and holds no data here.
-			if res.NodeName != node || slices.Contains(res.Flags, "DISKLESS") {
-				continue
-			}
-			for _, v := range res.Volumes {
-				if v.StoragePoolName == linstorPool {
-					http.Error(w, "pool still backs volumes; delete them first", http.StatusConflict)
-					return
-				}
-			}
 		}
 	}
 	derr := a.Dyn.Resource(poolGVR).Delete(r.Context(), name, metav1.DeleteOptions{})
@@ -182,6 +162,9 @@ func (a *API) DeletePool(w http.ResponseWriter, r *http.Request) {
 	respondDelete(w, derr)
 }
 
+// ReplacePoolDevice swaps one member of spec.devices; the agent converges
+// the VG (extend, repair or evacuate, reduce). The CRD's same-size CEL
+// rule keeps this a swap, never a grow or shrink.
 func (a *API) ReplacePoolDevice(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var req replaceRequest
@@ -422,19 +405,14 @@ type resolveSplitRequest struct {
 	Survivor string `json:"survivor"`
 }
 
-// ResolveSplitBrain is the failure matrix's pick-survivor flow: every
-// diskful replica except the survivor is deleted from LINSTOR and
-// autoplaced back, discarding the losing side's writes and resyncing in
-// full from the survivor. DRBD cannot merge diverged data; picking is
-// the only honest resolution.
+// ResolveSplitBrain is the failure matrix's pick-survivor flow: r-drbd
+// discards every diskful replica except the survivor and resyncs them in
+// full from it, as one controller action. DRBD cannot merge diverged
+// data; picking is the only honest resolution.
 func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var req resolveSplitRequest
 	if !decode(w, r, &req) {
-		return
-	}
-	if a.Linstor == nil {
-		http.Error(w, "LINSTOR is not configured", http.StatusNotImplemented)
 		return
 	}
 	if req.Survivor == "" {
@@ -452,48 +430,25 @@ func (a *API) ResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "volume has no bound PV yet", http.StatusConflict)
 		return
 	}
-	resources, err := a.Linstor.Resources.GetAll(r.Context(), res)
+	u, err := a.Dyn.Resource(rdrbdVolumeGVR).Get(r.Context(), res, metav1.GetOptions{})
 	if err != nil {
-		http.Error(w, "linstor: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "r-drbd volume "+res+": "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	diskful := 0
-	survivorSeen := false
-	var victims []string
-	for _, rsc := range resources {
-		diskless := false
-		for _, f := range rsc.Flags {
-			if f == "DISKLESS" {
-				diskless = true
-			}
-		}
-		if diskless {
-			continue
-		}
-		diskful++
-		if rsc.NodeName == req.Survivor {
-			survivorSeen = true
-		} else {
-			victims = append(victims, rsc.NodeName)
-		}
+	var vol rdrbdv1alpha1.Volume
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &vol); err != nil {
+		http.Error(w, "r-drbd volume "+res+": "+err.Error(), http.StatusBadGateway)
+		return
 	}
-	if !survivorSeen {
+	if !vol.Diskful(req.Survivor) {
 		http.Error(w, req.Survivor+" holds no replica of "+name, http.StatusConflict)
 		return
 	}
-	for _, node := range victims {
-		if err := a.Linstor.Resources.Delete(r.Context(), res, node); err != nil {
-			a.recordIn(r, ns, "resolve split-brain", name, err)
-			http.Error(w, "delete replica on "+node+": "+err.Error(), http.StatusBadGateway)
-			return
-		}
-	}
-	aerr := a.Linstor.Resources.Autoplace(r.Context(), res, lapi.AutoPlaceRequest{
-		SelectFilter: lapi.AutoSelectFilter{PlaceCount: int32(diskful)},
-	})
-	a.recordIn(r, ns, "resolve split-brain", name, aerr)
-	if aerr != nil {
-		http.Error(w, "replicas discarded but autoplace failed, retry resolves it: "+aerr.Error(), http.StatusBadGateway)
+	patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"resolve": map[string]string{"survivor": req.Survivor}}})
+	_, perr := a.Dyn.Resource(rdrbdVolumeGVR).Patch(r.Context(), res, types.MergePatchType, patch, metav1.PatchOptions{})
+	a.recordIn(r, ns, "resolve split-brain", name, perr)
+	if perr != nil {
+		http.Error(w, "r-drbd volume "+res+": "+perr.Error(), http.StatusBadGateway)
 		return
 	}
 	respondDelete(w, nil)

@@ -32,7 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
+	"github.com/epheo/stornas/operator/internal/rdrbd"
 )
 
 // teardownFinalizer holds Target deletion open until the active agent
@@ -49,14 +51,14 @@ const teardownFinalizer = "storage.stornas.io/teardown"
 // whose primaries differ still works; promotion happens on open.
 type TargetReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Linstor SharePlacer
+	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=r-drbd.io,resources=volumes,verbs=get;list;watch
 
 func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var target storagev1alpha1.Target
@@ -84,16 +86,16 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	target.Status.IQN = storagev1alpha1.IQNPrefix + target.Name
 
-	linstorFailed := false
-	handles := make([]string, 0, len(target.Spec.LUNs))
+	unplaced := false
+	vols := make([]*rdrbdv1alpha1.Volume, 0, len(target.Spec.LUNs))
 	reason, msg := "", ""
 	for _, lun := range target.Spec.LUNs {
-		h, re, m := claimHandle(ctx, r.Client, target.Namespace, lun.ClaimName)
+		v, re, m := claimVolume(ctx, r.Client, target.Namespace, lun.ClaimName)
 		if re != "" {
 			reason, msg = re, m
 			break
 		}
-		handles = append(handles, h)
+		vols = append(vols, v)
 	}
 
 	switch {
@@ -104,27 +106,21 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			res.RequeueAfter = volumeSettleInterval
 		}
 
-	case r.Linstor == nil:
-		available.Reason = storagev1alpha1.ReasonNotConfigured
-		available.Message = "no LINSTOR controller configured"
-
 	default:
 		avoid, err := unreadyNodes(ctx, r.Client)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		luns := make([]storagev1alpha1.LUNStatus, 0, len(handles))
+		luns := make([]storagev1alpha1.LUNStatus, 0, len(vols))
 		node, replicated := "", false
-		for i, h := range handles {
-			n, device, replicas, err := r.Linstor.ResolvePlacement(ctx, h, target.Status.ActiveNode, avoid)
+		for i, v := range vols {
+			n, device, replicas, err := rdrbd.ResolvePlacement(v, target.Status.ActiveNode, avoid)
 			if err != nil {
-				// Flat requeue, not an error: LINSTOR heals on its own
-				// schedule, and exponential backoff would strand
-				// placement for minutes after it recovers.
-				available.Reason = storagev1alpha1.ReasonLinstorError
+				// No requeue: the Volume watch brings the next pass when
+				// a replica can serve again.
+				available.Reason = storagev1alpha1.ReasonWaitingForVolume
 				available.Message = err.Error()
-				res.RequeueAfter = volumeSettleInterval
-				linstorFailed = true
+				unplaced = true
 				break
 			}
 			if i == 0 {
@@ -134,7 +130,7 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			luns = append(luns, storagev1alpha1.LUNStatus{ID: target.Spec.LUNs[i].ID, Device: device})
 		}
 		switch {
-		case linstorFailed:
+		case unplaced:
 
 		case replicated && target.Spec.VIP == "":
 			// Without a VIP initiators cannot follow a failover, so a
@@ -164,7 +160,6 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				available.Reason = storagev1alpha1.ReasonWaitingForAgent
 				available.Message = "waiting for the node agent to export the target"
 			}
-			res.RequeueAfter = placementRecheckInterval
 		}
 	}
 
@@ -226,6 +221,28 @@ func (r *TargetReconciler) allTargets(ctx context.Context, _ client.Object) []re
 	return reqs
 }
 
+// volumeTargets maps a Volume event to the targets exposing its claim.
+func (r *TargetReconciler) volumeTargets(ctx context.Context, obj client.Object) []reconcile.Request {
+	claim, ok := volumeClaim(ctx, r.Client, obj)
+	if !ok {
+		return nil
+	}
+	var list storagev1alpha1.TargetList
+	if err := r.List(ctx, &list, client.InNamespace(claim.Namespace)); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, t := range list.Items {
+		for _, lun := range t.Spec.LUNs {
+			if lun.ClaimName == claim.Name {
+				reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&t)})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -234,6 +251,8 @@ func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&storagev1alpha1.Target{}).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.allTargets),
 			builder.WithPredicates(nodeReadyChanged)).
+		Watches(&rdrbdv1alpha1.Volume{}, handler.EnqueueRequestsFromMapFunc(r.volumeTargets),
+			builder.WithPredicates(volumeServingChanged)).
 		Named("target").
 		Complete(r)
 }

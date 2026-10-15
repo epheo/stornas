@@ -210,8 +210,6 @@ spec:
                 - Degraded
                 - Failed
                 type: string
-              linstorPool:
-                type: string
               rebuildPercent:
                 description: |-
                   rebuildPercent tracks an active raid repair or device evacuation;

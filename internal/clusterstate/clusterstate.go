@@ -1,6 +1,6 @@
 // Package clusterstate maintains stornas's single source of live cluster
 // truth: reflectors run ONCE under the server's ServiceAccount and keep
-// in-memory indexers of StoragePools, Nodes, and PVCs. A read is a pure
+// in-memory indexers of StoragePools, Nodes, PVCs and r-drbd Volumes. A read is a pure
 // in-memory scan of this snapshot - the cluster is never touched on the
 // read path, so any number of UI viewers cost one watch set. On any
 // mutation a reflector publishes its kind to the shared event bus; the WS
@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 
 	"github.com/epheo/stornas/internal/eventbus"
@@ -56,6 +57,12 @@ var targetGVR = schema.GroupVersionResource{
 	Resource: "targets",
 }
 
+var rdrbdVolumeGVR = schema.GroupVersionResource{
+	Group:    rdrbdv1alpha1.GroupVersion.Group,
+	Version:  rdrbdv1alpha1.GroupVersion.Version,
+	Resource: "volumes",
+}
+
 var snapshotGVR = schema.GroupVersionResource{
 	Group:    "snapshot.storage.k8s.io",
 	Version:  "v1",
@@ -70,6 +77,7 @@ type State struct {
 	inventories cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
 	targets     cache.Indexer // *unstructured.Unstructured (CRD via dynamic client)
 	snapshots   cache.Indexer // *unstructured.Unstructured (CSI snapshots via dynamic client)
+	backing     cache.Indexer // *unstructured.Unstructured (r-drbd Volumes via dynamic client)
 	nodes       cache.Indexer // *corev1.Node
 	pvcs        cache.Indexer // *corev1.PersistentVolumeClaim
 	events      cache.Indexer // *corev1.Event (Warning only)
@@ -100,6 +108,7 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 	s.inventories = newIndexer()
 	s.targets = newIndexer()
 	s.snapshots = newIndexer()
+	s.backing = newIndexer()
 	s.nodes = newIndexer()
 	s.pvcs = newIndexer()
 	s.events = newIndexer()
@@ -173,6 +182,20 @@ func New(cs kubernetes.Interface, dyn dynamic.Interface, bus *eventbus.Bus) *Sta
 				},
 				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 					return dyn.Resource(snapshotGVR).Watch(ctx, o)
+				},
+			}, &s.healthy),
+		},
+		{
+			// Replica state rides on the volume rows, so Volume moves feed
+			// VolumeChanged.
+			reflect.NewStore(s.backing, volume, nil),
+			&unstructured.Unstructured{},
+			reflect.TrackHealth(&cache.ListWatch{
+				ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+					return dyn.Resource(rdrbdVolumeGVR).List(ctx, o)
+				},
+				WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+					return dyn.Resource(rdrbdVolumeGVR).Watch(ctx, o)
 				},
 			}, &s.healthy),
 		},
@@ -300,12 +323,22 @@ func (s *State) Snapshot() model.Snapshot {
 		nm.Disks = disksByNode[n.Name]
 		snap.Nodes = append(snap.Nodes, nm)
 	}
+	replication := map[string]*model.Replication{}
+	for _, u := range reflect.List(s.backing) {
+		var v rdrbdv1alpha1.Volume
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &v); err != nil {
+			continue
+		}
+		replication[v.Name] = replicationModel(&v)
+	}
 	for _, obj := range s.pvcs.List() {
 		pvc, ok := obj.(*corev1.PersistentVolumeClaim)
 		if !ok {
 			continue
 		}
-		snap.Volumes = append(snap.Volumes, volumeModel(pvc))
+		vm := volumeModel(pvc)
+		vm.Replication = replication[vm.Resource]
+		snap.Volumes = append(snap.Volumes, vm)
 	}
 	for _, u := range reflect.List(s.shares) {
 		var share storagev1alpha1.Share
@@ -383,13 +416,12 @@ func (s *State) Snapshot() model.Snapshot {
 
 func poolModel(p *storagev1alpha1.StoragePool) model.Pool {
 	out := model.Pool{
-		Name:    p.Name,
-		Node:    p.Spec.Node,
-		Raid:    p.Spec.Raid,
-		Tier:    p.Spec.Tier,
-		VG:      p.Status.VG,
-		Health:  p.Status.Health,
-		Linstor: p.Status.LinstorPool,
+		Name:   p.Name,
+		Node:   p.Spec.Node,
+		Raid:   p.Spec.Raid,
+		Tier:   p.Spec.Tier,
+		VG:     p.Status.VG,
+		Health: p.Status.Health,
 	}
 	if out.Health == "" {
 		out.Health = "Unknown"

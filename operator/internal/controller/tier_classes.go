@@ -29,16 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// storagePoolParam is the CSI parameter naming the LINSTOR pool(s) a
-// class places on.
-const storagePoolParam = "linstor.csi.linbit.com/storagePool"
-
 // TierClasses keeps a local and a replicated StorageClass for every tier a
 // StoragePool names. They are clones of the shipped default-tier classes
-// with the LINSTOR pool swapped, so class policy lives in one manifest.
+// with the tier parameter swapped, so class policy lives in one manifest.
 // StorageClass parameters are immutable: an existing class is left as is.
 type TierClasses struct {
 	client.Client
@@ -90,7 +87,7 @@ func (r *TierClasses) ensureClone(ctx context.Context, from, name, tier string) 
 	for k, v := range base.Parameters {
 		params[k] = v
 	}
-	params[storagePoolParam] = storagev1alpha1.LinstorPoolName(tier)
+	params[rdrbdv1alpha1.ParamTier] = tier
 	sc := &storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,

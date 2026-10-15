@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,10 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
-
-// placementRecheckInterval backstops the node watch: LINSTOR primaries can
-// move without any k8s event.
-const placementRecheckInterval = time.Minute
 
 // unreadyNodes lists nodes that must not serve exports; placement avoids
 // them, which is what moves a target or share off a dead node.

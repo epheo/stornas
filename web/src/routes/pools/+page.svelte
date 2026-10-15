@@ -26,10 +26,6 @@
 			(d) => !d.claimed && !pooled.has(d.path),
 		),
 	);
-	// One pool per tier and node: LINSTOR registers the tier, not the pool.
-	const tierTaken = $derived(
-		snap.pools.some((p) => p.node === node && (p.tier || 'default') === (tier || 'default')),
-	);
 
 	// Device paths are per-node; a stale selection from another node must not survive the switch.
 	$effect(() => {
@@ -220,11 +216,6 @@
 					bind:value={tier}
 				/>
 				{#if tier && !validTier(tier)}<p class="text-xs text-amber-400">{TIER_HINT}</p>{/if}
-				{#if node && tierTaken}
-					<p class="text-xs text-amber-400">
-						{node} already has a pool in tier {tier || 'default'}.
-					</p>
-				{/if}
 				<div class="max-h-32 space-y-1 overflow-y-auto text-sm">
 					{#each freeDisks as d (d.path)}
 						<label class="flex items-center gap-2">
@@ -241,7 +232,7 @@
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
-					disabled={createBusy || tierTaken || (tier !== '' && !validTier(tier))}
+					disabled={createBusy || (tier !== '' && !validTier(tier))}
 				>
 					Create pool
 				</button>

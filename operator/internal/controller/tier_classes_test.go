@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
@@ -35,17 +36,17 @@ var _ = Describe("Tier classes", func() {
 
 	It("clones the shipped classes per tier and drops them with the tier's last pool", func() {
 		mode := storagev1.VolumeBindingWaitForFirstConsumer
-		for name, layers := range map[string]string{
-			storagev1alpha1.LocalClass:      "storage",
-			storagev1alpha1.ReplicatedClass: "drbd storage",
+		for name, replicas := range map[string]string{
+			storagev1alpha1.LocalClass:      "1",
+			storagev1alpha1.ReplicatedClass: "2",
 		} {
 			base := &storagev1.StorageClass{
 				ObjectMeta:        metav1.ObjectMeta{Name: name},
-				Provisioner:       linstorProvisioner,
+				Provisioner:       rdrbdv1alpha1.Driver,
 				VolumeBindingMode: &mode,
 				Parameters: map[string]string{
-					storagePoolParam:                   storagev1alpha1.DefaultLinstorPool,
-					"linstor.csi.linbit.com/layerList": layers,
+					rdrbdv1alpha1.ParamTier:     storagev1alpha1.DefaultTier,
+					rdrbdv1alpha1.ParamReplicas: replicas,
 				},
 			}
 			if err := k8sClient.Create(ctx, base); err != nil {
@@ -63,8 +64,9 @@ var _ = Describe("Tier classes", func() {
 		Expect(err).NotTo(HaveOccurred())
 		var sc storagev1.StorageClass
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "stornas-replicated-ssd"}, &sc)).To(Succeed())
-		Expect(sc.Parameters[storagePoolParam]).To(Equal("stornas-ssd"))
-		Expect(sc.Parameters["linstor.csi.linbit.com/layerList"]).To(Equal("drbd storage"))
+		Expect(sc.Provisioner).To(Equal(rdrbdv1alpha1.Driver))
+		Expect(sc.Parameters[rdrbdv1alpha1.ParamTier]).To(Equal("ssd"))
+		Expect(sc.Parameters[rdrbdv1alpha1.ParamReplicas]).To(Equal("2"))
 		Expect(*sc.VolumeBindingMode).To(Equal(mode))
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "stornas-local-ssd"}, &sc)).To(Succeed())
 

@@ -21,15 +21,16 @@ package v1alpha1
 // One exception: the operator resets HostReady when placement moves,
 // because the value left behind describes the losing node.
 const (
-	ConditionAvailable         = "Available"
-	ConditionHostReady         = "HostReady"
-	ConditionLinstorRegistered = "LinstorRegistered"
+	ConditionAvailable = "Available"
+	ConditionHostReady = "HostReady"
+	// Registered mirrors the r-drbd Pool's Available condition.
+	ConditionRegistered = "Registered"
 	// TornDown is the agent's confirmation that a deleting pool's host
 	// state (VG, array, signatures) is gone; it releases the operator's
 	// finalizer.
 	ConditionTornDown = "TornDown"
 	// Deregistered is the operator's clearance for the host wipe: set only
-	// once LINSTOR holds no resources on the pool, so the agent never
+	// once r-drbd released the pool's Pool, so the agent never
 	// wipes a VG that still backs volumes.
 	ConditionDeregistered = "Deregistered"
 )
@@ -41,34 +42,24 @@ const (
 	ReasonWaitingForVolume = "WaitingForVolume"
 	ReasonHostError        = "HostError"
 	ReasonNotConfigured    = "NotConfigured"
-	ReasonLinstorError     = "LinstorError"
-	ReasonTierConflict     = "TierConflict"
+	ReasonWaitingForPool   = "WaitingForPool"
+	ReasonBackendError     = "BackendError"
 )
 
-// DefaultTier keeps the shipped StorageClasses (image/manifests) and the
-// LINSTOR pool name they reference; other tiers get operator-made classes
-// labelled with TierClassLabel.
+// DefaultTier is the tier of the shipped StorageClasses (image/manifests);
+// other tiers get operator-made classes labelled with TierClassLabel.
 const (
-	DefaultTier        = "default"
-	DefaultLinstorPool = "stornas"
-	LocalClass         = "stornas-local"
-	ReplicatedClass    = "stornas-replicated"
-	TierClassLabel     = "storage.stornas.io/tier"
+	DefaultTier     = "default"
+	LocalClass      = "stornas-local"
+	ReplicatedClass = "stornas-replicated"
+	TierClassLabel  = "storage.stornas.io/tier"
 )
 
 // PoolAnnotation pins a claim to one StoragePool: the API stamps it from
-// the volume form and the ClaimBinder binds the claim to that pool's node.
-const PoolAnnotation = "storage.stornas.io/pool"
-
-// LinstorPoolName is per tier, not per pool: LINSTOR pool names are per
-// node, so one name spans every node holding the tier and a replicated
-// class can place on any two of them.
-func LinstorPoolName(tier string) string {
-	if tier == "" || tier == DefaultTier {
-		return DefaultLinstorPool
-	}
-	return DefaultLinstorPool + "-" + tier
-}
+// the volume form and r-drbd's CSI controller places the volume in the
+// r-drbd Pool of that name, which the operator keeps equal to the
+// StoragePool name.
+const PoolAnnotation = "r-drbd.io/pool"
 
 // TierClasses names the local and replicated StorageClasses of a tier.
 func TierClasses(tier string) (local, replicated string) {
@@ -76,11 +67,6 @@ func TierClasses(tier string) (local, replicated string) {
 		return LocalClass, ReplicatedClass
 	}
 	return LocalClass + "-" + tier, ReplicatedClass + "-" + tier
-}
-
-// LinstorPoolName is the LINSTOR storage pool this pool registers as.
-func (p *StoragePool) LinstorPoolName() string {
-	return LinstorPoolName(p.Spec.Tier)
 }
 
 // ThinLV is the thin pool LV inside every pool's VG.
@@ -91,10 +77,8 @@ const ThinLV = "thin"
 const IQNPrefix = "iqn.2026-08.io.stornas:"
 
 // ConsumerAnnotation declares who will consume a PVC. The stornas API
-// stamps ConsumerHost on volumes it creates (their consumer is kernel
-// nfsd or LIO, never a pod), and the ClaimBinder completes WFFC only for
-// declared or Share/Target-referenced claims; it never guesses from pod
-// absence. An undeclared claim keeps upstream WFFC semantics untouched.
+// stamps ConsumerHost on volumes it creates: their consumer is kernel
+// nfsd or LIO, never a pod.
 const (
 	ConsumerAnnotation = "storage.stornas.io/consumer"
 	ConsumerHost       = "host"

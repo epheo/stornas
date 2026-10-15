@@ -33,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -62,6 +63,8 @@ var _ = BeforeSuite(func() {
 	var err error
 	err = storagev1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
+	err = rdrbdv1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
 
@@ -69,8 +72,8 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			// External snapshot CRD stand-in for the binder's restore path.
-			filepath.Join("..", "..", "test", "crds"),
+			// The r-drbd CRDs as the image ships them.
+			filepath.Join("..", "..", "..", "image", "manifests", "r-drbd", "05-crds.yaml"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}

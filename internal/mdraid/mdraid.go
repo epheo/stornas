@@ -1,6 +1,6 @@
 // Package mdraid drives md arrays through mdadm. Raid lives here, below
 // the LVM PV (README architecture): the agent owns redundancy, LVM stays linear,
-// and LINSTOR never sees a raid-backed thin pool.
+// and r-drbd never sees a raid-backed thin pool.
 package mdraid
 
 import (

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -15,8 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
-
-	lapi "github.com/LINBIT/golinstor/client"
 )
 
 func newAPI() *API {
@@ -26,6 +23,9 @@ func newAPI() *API {
 		shareGVR:  "ShareList",
 		targetGVR: "TargetList",
 		snapGVR:   "VolumeSnapshotList",
+
+		rdrbdPoolGVR:   "PoolList",
+		rdrbdVolumeGVR: "VolumeList",
 	}
 	var nodes []runtime.Object
 	for _, n := range []string{"node1", "node2", "node3"} {
@@ -313,23 +313,20 @@ func TestReplicatedNeedsThreeNodes(t *testing.T) {
 	}
 }
 
-// One LINSTOR pool name per tier and node, and one owner per disk: both
-// are refused up front instead of surfacing later on the host.
-func TestCreatePoolRefusesTierAndDeviceReuse(t *testing.T) {
+// One owner per disk is refused up front instead of surfacing later on
+// the host; several pools of one tier on a node are fine.
+func TestCreatePoolRefusesDeviceReuse(t *testing.T) {
 	a := newAPI()
 	ok := `{"name":"fast","node":"node1","devices":["/dev/disk/by-id/a"],"raid":"none","tier":"ssd"}`
 	if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", ok, nil); w.Code != 201 {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
-	for name, body := range map[string]string{
-		"same tier":   `{"name":"fast2","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"ssd"}`,
-		"same device": `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/a"],"tier":"hdd"}`,
-	} {
-		if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", body, nil); w.Code != 409 {
-			t.Fatalf("%s: code=%d body=%s", name, w.Code, w.Body.String())
-		}
+	same := `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/a"],"tier":"hdd"}`
+	if w := doReq(t, a.CreatePool, "POST", "/api/v1/pools", same, nil); w.Code != 409 {
+		t.Fatalf("same device: code=%d body=%s", w.Code, w.Body.String())
 	}
 	for _, body := range []string{
+		`{"name":"fast2","node":"node1","devices":["/dev/disk/by-id/c"],"tier":"ssd"}`,
 		`{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`,
 		`{"name":"fast-b","node":"node2","devices":["/dev/disk/by-id/a"],"tier":"ssd"}`,
 	} {
@@ -340,7 +337,8 @@ func TestCreatePoolRefusesTierAndDeviceReuse(t *testing.T) {
 }
 
 // A pinned volume takes its pool's tier class and carries the pin for
-// the binder; replicated tier classes need three nodes like the default.
+// r-drbd's CSI controller; replicated tier classes need three nodes like
+// the default.
 func TestCreateVolumeOnPool(t *testing.T) {
 	a := newAPI()
 	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`, nil)
@@ -352,7 +350,7 @@ func TestCreateVolumeOnPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *pvc.Spec.StorageClassName != "stornas-local-hdd" || pvc.Annotations["storage.stornas.io/pool"] != "bulk" {
+	if *pvc.Spec.StorageClassName != "stornas-local-hdd" || pvc.Annotations["r-drbd.io/pool"] != "bulk" {
 		t.Fatalf("class=%s annotations=%v", *pvc.Spec.StorageClassName, pvc.Annotations)
 	}
 	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"m2","size":"1Gi","pool":"bulk","storageClass":"stornas-local"}`, sys)
@@ -368,27 +366,86 @@ func TestCreateVolumeOnPool(t *testing.T) {
 	}
 }
 
-// The delete guard keys on the pool's own LINSTOR registration: volumes
-// in another tier on the same node do not hold it.
-func TestDeletePoolGuardIsPerTier(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"name":"pvc-1","node_name":"node1","flags":[],"volumes":[{"storage_pool_name":"stornas"}]}]`))
-	}))
-	defer srv.Close()
-	u, _ := url.Parse(srv.URL)
-	c, err := lapi.NewClient(lapi.BaseURL(u))
-	if err != nil {
+func createUnstructured(t *testing.T, a *API, gvr schema.GroupVersionResource, obj map[string]any) {
+	t.Helper()
+	if _, err := a.Dyn.Resource(gvr).Create(context.Background(), &unstructured.Unstructured{Object: obj}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The delete guard keys on the pool's own r-drbd Pool: volumes in another
+// pool on the same node do not hold it.
+func TestDeletePoolGuardIsPerPool(t *testing.T) {
 	a := newAPI()
-	a.Linstor = c
 	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"main","node":"node1","devices":["/dev/disk/by-id/a"]}`, nil)
-	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"],"tier":"hdd"}`, nil)
-	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/main", "", map[string]string{"name": "main"}); w.Code != 409 {
-		t.Fatalf("busy pool deleted: code=%d", w.Code)
+	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"bulk","node":"node1","devices":["/dev/disk/by-id/b"]}`, nil)
+	for name, vols := range map[string][]any{"main": {"pvc-1"}, "bulk": nil} {
+		createUnstructured(t, a, rdrbdPoolGVR, map[string]any{
+			"apiVersion": "r-drbd.io/v1alpha1", "kind": "Pool",
+			"metadata": map[string]any{"name": name},
+			"spec":     map[string]any{"node": "node1", "tier": "default", "vg": "stornas-" + name, "thinPool": "thin"},
+			"status":   map[string]any{"volumes": vols},
+		})
+	}
+	w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/main", "", map[string]string{"name": "main"})
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "pvc-1") {
+		t.Fatalf("busy pool deleted: code=%d body=%s", w.Code, w.Body.String())
 	}
 	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/bulk", "", map[string]string{"name": "bulk"}); w.Code != 200 {
 		t.Fatalf("idle pool refused: code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// A pool the operator never registered has nothing on it.
+func TestDeletePoolWithoutBackingPool(t *testing.T) {
+	a := newAPI()
+	doReq(t, a.CreatePool, "POST", "/api/v1/pools", `{"name":"fresh","node":"node1","devices":["/dev/disk/by-id/a"]}`, nil)
+	if w := doReq(t, a.DeletePool, "DELETE", "/api/v1/pools/fresh", "", map[string]string{"name": "fresh"}); w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveSplitBrainSetsSurvivor(t *testing.T) {
+	a := newAPI()
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "stornas-system", Name: "media"},
+		Spec:       corev1.PersistentVolumeClaimSpec{VolumeName: "pvc-1"},
+	}
+	if _, err := a.CS.CoreV1().PersistentVolumeClaims("stornas-system").Create(context.Background(), pvc, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	replica := func(node, role string, id int64) any {
+		return map[string]any{"node": node, "nodeId": id, "role": role}
+	}
+	createUnstructured(t, a, rdrbdVolumeGVR, map[string]any{
+		"apiVersion": "r-drbd.io/v1alpha1", "kind": "Volume",
+		"metadata": map[string]any{"name": "pvc-1"},
+		"spec": map[string]any{
+			"sizeBytes": int64(1 << 30), "replicas": int64(2), "tier": "default",
+			"assignment": map[string]any{"replicas": []any{
+				replica("node1", "diskful", 0), replica("node2", "diskful", 1), replica("node3", "tiebreaker", 2),
+			}},
+		},
+	})
+	path := map[string]string{"namespace": "stornas-system", "name": "media"}
+
+	// The tiebreaker holds no data to keep.
+	if w := doReq(t, a.ResolveSplitBrain, "POST", "/", `{"survivor":"node3"}`, path); w.Code != 409 {
+		t.Fatalf("tiebreaker accepted: code=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := doReq(t, a.ResolveSplitBrain, "POST", "/", `{"survivor":"node2"}`, path); w.Code != 200 {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	got, err := a.Dyn.Resource(rdrbdVolumeGVR).Get(context.Background(), "pvc-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if survivor, _, _ := unstructured.NestedString(got.Object, "spec", "resolve", "survivor"); survivor != "node2" {
+		t.Fatalf("survivor = %q", survivor)
+	}
+	// The merge patch leaves the controller's assignment alone.
+	if reps, _, _ := unstructured.NestedSlice(got.Object, "spec", "assignment", "replicas"); len(reps) != 3 {
+		t.Fatalf("assignment = %v", reps)
 	}
 }
 
