@@ -1,21 +1,19 @@
 # Sourced by replication-test.sh (REPRO_SCRIPT) after the three-node
-# bring-up; v1/v2/kc/linstor_cmd/retry/log are in scope. Not a gate:
+# bring-up; v1/v2/kc/volume_replicas/retry/log are in scope. Not a gate:
 # it always exits 0 and its product is the VERDICT and GI lines plus the DRBD
 # dumps, answering why Immediate-created resources dodge split-brain
 # detection (memory: immediate-flip-blocked).
 
-log "repro: one binder-declared WFFC volume, one Immediate volume"
+log "repro: one host-declared WFFC volume, one Immediate volume"
 kc apply -f - <<'EOF'
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: repro-imm
-provisioner: linstor.csi.linbit.com
+provisioner: r-drbd.io
 parameters:
-  linstor.csi.linbit.com/storagePool: stornas
-  linstor.csi.linbit.com/layerList: drbd storage
-  linstor.csi.linbit.com/placementCount: "2"
-  property.linstor.csi.linbit.com/DrbdOptions/Net/protocol: C
+  tier: default
+  replicas: "2"
   csi.storage.k8s.io/fstype: xfs
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -55,15 +53,14 @@ RES_I=$(kc -n stornas-system get pvc repro-imm -o jsonpath='{.spec.volumeName}')
 log "repro: WFFC resource $RES_W, Immediate resource $RES_I"
 
 uptodate() {
-	[ "$(linstor_cmd -m resource list -r "$1" 2>/dev/null | grep -o UpToDate | wc -l)" -ge 2 ]
+	[ "$(volume_replicas "$1" | awk '$2 == "diskful" && $3 == "UpToDate"' | wc -l)" -ge 2 ]
 }
 retry 600 "$RES_W two UpToDate replicas" uptodate "$RES_W"
 retry 600 "$RES_I two UpToDate replicas" uptodate "$RES_I"
 
 dump() { # dump <res> - birth certificate and live state, both nodes
 	log "repro: dump $1"
-	echo "--- linstor rd properties"; linstor_cmd resource-definition list-properties "$1" 2>&1 || true
-	echo "--- linstor resource list"; linstor_cmd resource list -r "$1" 2>&1 || true
+	echo "--- r-drbd volume"; kc get volume "$1" -o yaml 2>&1 || true
 	for n in v1 v2; do
 		echo "--- $n drbdsetup show"; $n timeout 30 drbdsetup show "$1" 2>&1 || true
 		echo "--- $n drbdsetup status --verbose"; $n timeout 30 drbdsetup status "$1" --verbose --statistics 2>&1 || true

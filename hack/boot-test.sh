@@ -4,8 +4,8 @@
 # qcow2 with a root ssh key baked in, plain qemu-system boots it with
 # scratch disks, ssh rides a user-net hostfwd, and the console log is the
 # failure artifact. On top of the distro's boot checks this validates the
-# storage stack: drbd kmod, piraeus + LINSTOR, a raid1 StoragePool (md
-# below the PV, README architecture) backing LINSTOR CSI, a PVC and snapshot
+# storage stack: drbd kmod, r-drbd, a raid1 StoragePool (md below the
+# PV, README architecture) backing the r-drbd CSI driver, a PVC and snapshot
 # through it, and the UI in a real browser. The disk failure matrix row
 # runs on the same pool: a member hot-unplugged over QMP must show
 # Degraded in the UI and the dialog-driven replace must rebuild onto the
@@ -15,7 +15,7 @@
 # The guest boots with restrict=on by default: no outbound at all, only
 # the hostfwd ports in (README air gap; the distro embeds the full
 # MicroShift payload since 2026-08). AIRGAP=0 reopens outbound for
-# debugging. The pull assert stays unconditional: no stornas, piraeus,
+# debugging. The pull assert stays unconditional: no stornas, r-drbd,
 # or sig-storage image may be fetched at runtime.
 # ipv6=off matches the distro's vm-test: slirp's fec0:: RA can land
 # before the DHCPv4 lease and MicroShift then picks IPv6 single-stack,
@@ -47,32 +47,23 @@ diagnostics() {
 			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
 		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | tail -15 || true
 	done
-	log "DIAGNOSTICS: linstorcluster status"
-	kc get linstorcluster -o yaml 2>&1 | sed -n '/status:/,$p' | tail -25 || true
-	log "DIAGNOSTICS: piraeus operator log tail"
-	kc -n piraeus-datastore logs deploy/piraeus-operator-controller-manager --tail=25 2>&1 || true
-	# Binding has two owners: the stornas binder sets selected-node, then
-	# the CSI provisioner asks LINSTOR. These name which one stalled.
+	log "DIAGNOSTICS: r-drbd objects"
+	kc get pools,volumes,snapshots -A -o wide 2>&1 || true
+	kc get volumes -o yaml 2>&1 | sed -n '/^  status:/,/^- /p' | tail -60 || true
 	log "DIAGNOSTICS: claims and their events"
-	kc get pvc -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,CLASS:.spec.storageClassName,NODE:.metadata.annotations.volume\.kubernetes\.io/selected-node,CONSUMER:.metadata.annotations.storage\.stornas\.io/consumer' 2>&1 || true
+	kc get pvc -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,CLASS:.spec.storageClassName,NODE:.metadata.annotations.volume\.kubernetes\.io/selected-node,POOL:.metadata.annotations.r-drbd\.io/pool' 2>&1 || true
 	kc -n stornas-system get events --field-selector involvedObject.kind=PersistentVolumeClaim --sort-by=.lastTimestamp 2>&1 | tail -20 || true
 	log "DIAGNOSTICS: stornas operator log tail"
 	kc -n stornas-system logs deploy/stornas-operator --tail=60 2>&1 || true
-	log "DIAGNOSTICS: csi-provisioner log tail"
-	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=40 2>&1 || true
-	log "DIAGNOSTICS: linstor pools, resources, errors"
-	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor storage-pool list 2>&1 || true
-	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor resource list 2>&1 || true
-	for id in $(kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err list 2>/dev/null \
-			| grep -oE '[0-9A-F]{8}-[0-9]{5}-[0-9]{6}'); do
-		kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err show "$id" 2>&1 | head -40 || true
-	done
+	log "DIAGNOSTICS: r-drbd controller and csi-provisioner log tail"
+	kc -n r-drbd-system logs deploy/r-drbd-controller -c controller --tail=60 2>&1 || true
+	kc -n r-drbd-system logs deploy/r-drbd-controller -c csi-provisioner --tail=40 2>&1 || true
+	log "DIAGNOSTICS: r-drbd agent log tail"
+	kc -n r-drbd-system logs ds/r-drbd-agent -c agent --tail=60 2>&1 || true
 	log "DIAGNOSTICS: snapshot path"
 	kc get volumesnapshot,volumesnapshotcontent -A 2>&1 || true
 	kc -n stornas-system describe volumesnapshot boot-snap 2>&1 | sed -n '/Status:/,$p' | tail -12 || true
-	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-snapshotter --tail=20 2>&1 | tail -15 || true
-	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor snapshot list 2>&1 || true
-	kc -n piraeus-datastore exec deploy/linstor-controller -- linstor err list 2>&1 | tail -15 || true
+	kc -n r-drbd-system logs deploy/r-drbd-controller -c csi-snapshotter --tail=20 2>&1 | tail -15 || true
 	log "DIAGNOSTICS: pool and LVM state"
 	kc get storagepool test -o yaml 2>&1 | sed -n '/status:/,$p' | tail -30 || true
 	vssh sh -c 'pvs; lvs -a -o name,attr,sync_percent,devices' 2>&1 || true
@@ -136,9 +127,8 @@ PY
 }
 
 node_ready() { kc get nodes --no-headers | grep -q ' Ready'; }
-piraeus_up() { kc -n piraeus-datastore get deploy piraeus-operator-controller-manager -o jsonpath='{.status.availableReplicas}' | grep -q 1; }
-controller_up() { kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller --no-headers | grep -q Running; }
-satellite_up() { kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers | grep -q Running; }
+rdrbd_controller_up() { kc -n r-drbd-system get deploy r-drbd-controller -o jsonpath='{.status.availableReplicas}' | grep -q 1; }
+rdrbd_agent_up() { kc -n r-drbd-system get pods -l app=r-drbd-agent --no-headers | grep -q Running; }
 stornas_up() { [ "$(kc -n stornas-system get pods --no-headers | grep -c Running)" -ge 3 ]; }
 pool_available() { kc get storagepool test -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' | grep -q True; }
 pvc_bound() { kc -n stornas-system get pvc boot-test -o jsonpath='{.status.phase}' | grep -q Bound; }
@@ -218,9 +208,8 @@ vssh modprobe drbd
 vssh modinfo -F version drbd
 
 log "waiting for the storage stack"
-retry 900 "piraeus operator available" piraeus_up
-retry 900 "linstor controller up" controller_up
-retry 900 "linstor satellite up" satellite_up
+retry 900 "r-drbd controller available" rdrbd_controller_up
+retry 900 "r-drbd agent up" rdrbd_agent_up
 retry 600 "stornas operator, agent, server running" stornas_up
 
 log "UI answers and login works"
@@ -244,8 +233,8 @@ retry 600 "storage pool Available" pool_available
 
 log "creating the volume through the UI form"
 TARGET_VOL=boot-test ui_phase create-volume
-# UI volumes declare a host consumer, so the binder completes WFFC for
-# them: Bound must arrive before any pod exists, or the NAS flow is broken.
+# UI volumes are consumed by the host, never a pod: Bound must arrive
+# before any pod exists, or the NAS flow is broken.
 retry 600 "PVC Bound with no consumer" pvc_bound
 # The pod exercises workload IO on the volume; binding happened above.
 kc apply -f - <<'EOF'
@@ -297,12 +286,12 @@ code=$(http_code -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 kc -n stornas-system get pvc nope >/dev/null 2>&1 && die "refused volume was created anyway"
 
 # Several pools per node: a second pool in its own tier registers as its
-# own LINSTOR pool, takes volumes pinned to it, and deletes on its own
+# own r-drbd Pool, takes volumes pinned to it, and deletes on its own
 # while the default pool still backs a volume.
 log "a second pool on the node, in tier hdd, through the UI"
 TARGET_POOL=bulk TARGET_TIER=hdd TARGET_DISK=virtio-STORNASD ui_phase create-tier-pool
-bulk_registered() { kc get storagepool bulk -o jsonpath='{.status.linstorPool}' | grep -qx stornas-hdd; }
-retry 600 "pool bulk registered as LINSTOR pool stornas-hdd" bulk_registered
+bulk_registered() { kc get pool bulk -o jsonpath='{.spec.tier} {.status.conditions[?(@.type=="Available")].status}' | grep -qx 'hdd True'; }
+retry 600 "pool bulk registered as r-drbd Pool bulk in tier hdd" bulk_registered
 hdd_classes() { kc get storageclass stornas-local-hdd stornas-replicated-hdd >/dev/null 2>&1; }
 retry 120 "tier hdd StorageClasses created" hdd_classes
 TARGET_PLACEMENT=pool:bulk TARGET_VOL=bulk-vol ui_phase create-volume-placed
@@ -422,8 +411,8 @@ TARGET_VOL=boot-test TARGET_SNAP=boot-snap ui_phase snapshot-volume
 snap_ready() { kc -n stornas-system get volumesnapshot boot-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "snapshot ready" snap_ready
 TARGET_SNAP=boot-snap TARGET_VOL=boot-restore ui_phase restore-snapshot
-# No pod on purpose: the UI restore declares a host consumer, and the
-# binder must pin it to the snapshot's node and bind it podless.
+# No pod on purpose: the UI restore is host consumed, and r-drbd must
+# place it on the snapshot's node and bind it podless.
 restore_bound() { kc -n stornas-system get pvc boot-restore -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "restored volume Bound" restore_bound
 
@@ -515,8 +504,8 @@ retry 180 "restored volume gone" restore_gone
 log "pool delete through the UI dismantles the host state"
 kc -n stornas-system delete pod boot-test-consumer --wait
 TARGET_VOL=boot-test ui_phase delete-volume
-# PV gone means the CSI finished dropping the LINSTOR resource; only
-# then does the pool's delete guard open.
+# PV gone means the CSI finished dropping the r-drbd Volume; only then
+# does the pool's delete guard open.
 pvs_gone() { [ "$(kc get pv --no-headers 2>/dev/null | wc -l)" = 0 ]; }
 retry 300 "all PVs gone" pvs_gone
 ui_phase delete-pool
@@ -536,10 +525,7 @@ code=$(http_code -H 'Content-Type: application/json' \
 [ "$code" = 401 ] || die "retired generated password still logs in (got $code)"
 
 # The air-gap contract: every ref in the embedded manifest must come
-# from the store, never a registry. The drbd9-* loader is deliberately
-# outside the set: piraeus renders it once before the satellite patch
-# can exist (its webhook gates the config CR), the patched DaemonSet
-# replaces that pod seconds later, and the appliance never needs it.
+# from the store, never a registry.
 log "no embedded image was pulled at runtime"
 pull_lines=$(vssh journalctl -u crio --no-pager 2>/dev/null | grep 'Pulling image' || true)
 pulled=""

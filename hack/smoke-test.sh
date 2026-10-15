@@ -85,7 +85,7 @@ pexec test -x /etc/greenboot/check/required.d/50_stornas_storage_check.sh \
 	|| die "stornas greenboot check missing"
 
 log "assert: embedded images imported into cri-o"
-pexec crictl images | grep -q piraeus-server || die "piraeus-server not imported"
+pexec crictl images | grep -q 'epheo/r-drbd' || die "r-drbd image not imported"
 pexec crictl images | grep -q 'epheo/stornas' || die "stornas images not imported"
 
 node_ready() { kc get nodes --no-headers | grep -q ' Ready'; }
@@ -115,7 +115,7 @@ EOF
 pool_available() { kc get storagepool smoke -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' | grep -q True; }
 retry 600 "storage pool Available" pool_available
 
-log "provisioning and writing a PVC through LINSTOR CSI (no drbd layer)"
+log "provisioning and writing a PVC through r-drbd (no DRBD for replicas 1)"
 kc apply -f - <<'EOF'
 apiVersion: v1
 kind: PersistentVolumeClaim

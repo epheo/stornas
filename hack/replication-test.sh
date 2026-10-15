@@ -2,7 +2,7 @@
 # Three-node replication acceptance test: the first real exercise of the
 # stornas-replicated StorageClass and the DRBD kmod beyond modprobe.
 # node1 and node2 hold data; node3 holds no pool and serves only as the
-# diskless quorum tiebreaker LINSTOR places for each two-copy volume.
+# diskless quorum tiebreaker r-drbd places for each two-copy volume.
 # The join is the distro's worker role (microshift-profile worker +
 # add-node --worker); firewalld and greenboot stay in place, so this
 # also proves the stornas firewall service and the role-aware check.
@@ -73,7 +73,17 @@ v1() { nssh "$IP1" "$@"; }
 v2() { nssh "$IP2" "$@"; }
 v3() { nssh "$IP3" "$@"; }
 kc() { v1 kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
-linstor_cmd() { kc -n piraeus-datastore exec deploy/linstor-controller -- linstor "$@"; }
+# Volume status fields as one line per replica: node role diskState
+# inUse devicePath. jq-free: python3 on the runner parses it.
+volume_replicas() { # volume_replicas <volume>
+	kc get volume "$1" -o json 2>/dev/null | python3 -c '
+import json, sys
+v = json.load(sys.stdin)
+roles = {r["node"]: r["role"] for r in (v["spec"].get("assignment") or {}).get("replicas", [])}
+for r in v.get("status", {}).get("replicas", []):
+    print(r["node"], roles.get(r["node"], "-"), r.get("diskState", "-"), str(r.get("inUse", False)).lower(), r.get("devicePath", "-"))
+'
+}
 
 host_net_up() {
 	sudo ip link add "$BR" type bridge 2>/dev/null || true
@@ -134,19 +144,20 @@ diagnostics() {
 	if [ -n "${p2:-}" ]; then
 		kc -n openshift-ovn-kubernetes get pod "$p2" -o jsonpath='{.spec.containers[*].name}{"\n"}' 2>&1 || true
 		kc -n openshift-ovn-kubernetes exec "$p2" -c sbdb -- ovn-sbctl --no-leader-only show 2>&1 | head -30 || true
-		kc -n openshift-ovn-kubernetes exec "$p2" -c nbdb -- ovn-nbctl --no-leader-only lb-list 2>&1 | grep -iE 'linstor|3370' | head -6 || true
+		kc -n openshift-ovn-kubernetes exec "$p2" -c nbdb -- ovn-nbctl --no-leader-only lb-list 2>&1 | grep -iE 'stornas|8080' | head -6 || true
 	fi
 	# Each hop separately: pod IP (overlay), ClusterIP (OVN load balancer),
 	# then DNS; the first one that fails names the broken layer.
 	agent2=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-agent --field-selector spec.nodeName=node2 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
-	lc_pod=$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller -o jsonpath='{.items[0].status.podIP}' 2>/dev/null) || true
-	lc_svc=$(kc -n piraeus-datastore get svc linstor-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
-	echo "linstor-controller pod ${lc_pod:-?} service ${lc_svc:-?}; probes from node2 pod ${agent2:-?} then node2 host"
-	for u in "http://${lc_pod:-127.0.0.1}:3370/health" "http://${lc_svc:-127.0.0.1}:3370/health" "http://linstor-controller.piraeus-datastore.svc:3370/health"; do
+	# stornas-server on node1 is the probe target: r-drbd serves no HTTP.
+	lc_pod=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-server -o jsonpath='{.items[0].status.podIP}' 2>/dev/null) || true
+	lc_svc=$(kc -n stornas-system get svc stornas -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
+	echo "stornas-server pod ${lc_pod:-?} service ${lc_svc:-?}; probes from node2 pod ${agent2:-?} then node2 host"
+	for u in "http://${lc_pod:-127.0.0.1}:8080/healthz" "http://${lc_svc:-127.0.0.1}:8080/healthz" "http://stornas.stornas-system.svc:8080/healthz"; do
 		echo "--- pod: $u"
 		kc -n stornas-system exec "${agent2:-none}" -- curl -s -m5 -o /dev/null -w '%{http_code}\n' "$u" 2>&1 | tail -2 || true
 	done
-	v2 sh -c "curl -s -m5 -o /dev/null -w 'host->pod %{http_code}\n' http://${lc_pod:-127.0.0.1}:3370/health; curl -s -m5 -o /dev/null -w 'host->svc %{http_code}\n' http://${lc_svc:-127.0.0.1}:3370/health; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
+	v2 sh -c "curl -s -m5 -o /dev/null -w 'host->pod %{http_code}\n' http://${lc_pod:-127.0.0.1}:8080/healthz; curl -s -m5 -o /dev/null -w 'host->svc %{http_code}\n' http://${lc_svc:-127.0.0.1}:8080/healthz; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
 	log "DIAGNOSTICS: tunnels, routes, firewall on the data nodes"
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ovs-vsctl --columns=name,options find interface type=geneve 2>/dev/null; ip route show 2>/dev/null; firewall-cmd --list-all 2>/dev/null | grep -E "interfaces|services|ports|target"; ss -unl 2>/dev/null | grep 6081' 2>&1 || true
@@ -194,11 +205,20 @@ diagnostics() {
 		| grep -iE 'error|fail|wait|timed|zone|transit|gateway|encap' | tail -25 || true
 	log "DIAGNOSTICS: node2 microshift journal errors"
 	v2 sh -c 'journalctl -u microshift --no-pager -p err -n 20' 2>&1 || true
-	log "DIAGNOSTICS: linstor state"
-	linstor_cmd node list 2>&1 || true
-	linstor_cmd storage-pool list 2>&1 || true
-	linstor_cmd resource list 2>&1 || true
-	linstor_cmd err list 2>&1 | tail -12 || true
+	log "DIAGNOSTICS: r-drbd state"
+	kc get pools,volumes,snapshots -A -o wide 2>&1 || true
+	for vol in $(kc get volumes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+		echo "--- $vol"
+		volume_replicas "$vol" 2>&1 || true
+		kc get volume "$vol" -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' 2>&1 || true
+	done
+	kc -n r-drbd-system get pods -o wide 2>&1 || true
+	kc -n r-drbd-system logs deploy/r-drbd-controller -c controller --tail=40 2>&1 || true
+	for n in node1 node2 node3; do
+		a=$(kc -n r-drbd-system get pods -l app=r-drbd-agent --field-selector "spec.nodeName=$n" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || continue
+		echo "--- agent $n"
+		kc -n r-drbd-system logs "$a" -c agent --tail=25 2>&1 || true
+	done
 	log "DIAGNOSTICS: DRBD kernel view per node"
 	for fn in v1 v2 v3; do
 		$fn sh -c 'hostname; drbdsetup status --verbose 2>/dev/null; dmesg | grep -i drbd | tail -25' 2>&1 || true
@@ -206,7 +226,7 @@ diagnostics() {
 	log "DIAGNOSTICS: CSI capacity view"
 	kc get csistoragecapacities -A 2>&1 || true
 	kc -n stornas-system describe pvc repl-test 2>&1 | sed -n '/Events:/,$p' | tail -8 || true
-	kc -n piraeus-datastore logs deploy/linstor-csi-controller -c csi-provisioner --tail=25 2>&1 \
+	kc -n r-drbd-system logs deploy/r-drbd-controller -c csi-provisioner --tail=25 2>&1 \
 		| grep -iE 'error|fail|capacity' | tail -12 || true
 	log "DIAGNOSTICS: failover placement and host state"
 	kc -n stornas-system get target,share failover -o yaml 2>&1 | grep -A30 'status:' | tail -80 || true
@@ -218,7 +238,7 @@ diagnostics() {
 	done
 	log "DIAGNOSTICS: stornas control plane placement and operator log"
 	kc -n stornas-system get pods -o wide 2>&1 || true
-	# The LINSTOR client's DEBUG lines would bury every reconcile message.
+	# DEBUG lines would bury every reconcile message.
 	kc -n stornas-system logs deploy/stornas-operator --tail=400 2>&1 | grep -v '^\[DEBUG\]' | tail -40 || true
 	log "DIAGNOSTICS: NFS server view on node1"
 	v1 sh -c 'cat /var/lib/nfs/etab 2>/dev/null; cat /proc/fs/nfsd/versions 2>/dev/null; ls -Z /var/lib/stornas/shares 2>/dev/null' 2>&1 || true
@@ -418,8 +438,10 @@ n1_to_n2() { v1 ping -c1 -W2 "$MP2"; }
 retry 120 "overlay: node2 reaches node1 management port $MP1" n2_to_n1
 retry 120 "overlay: node1 reaches node2 management port $MP2" n1_to_n2
 
-satellites_up() { [ "$(kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-satellite --no-headers 2>/dev/null | grep -c Running)" -eq 3 ]; }
-retry 900 "three linstor satellites Running" satellites_up
+rdrbd_controller_up() { kc -n r-drbd-system get deploy r-drbd-controller -o jsonpath='{.status.availableReplicas}' 2>/dev/null | grep -q 1; }
+retry 900 "r-drbd controller available" rdrbd_controller_up
+agents_up() { [ "$(kc -n r-drbd-system get pods -l app=r-drbd-agent --no-headers 2>/dev/null | grep -c Running)" -eq 3 ]; }
+retry 900 "three r-drbd agents Running" agents_up
 
 log "creating a StoragePool on each data node; node3 stays diskless"
 for n in 1 2; do
@@ -439,13 +461,12 @@ pools_available() {
 }
 retry 600 "both storage pools Available" pools_available
 
-# The scheduler's CSI capacity check sits between pool and PVC; assert
-# the raw LINSTOR view first so a capacity failure names itself.
+# Placement reads the agents' pushed capacity; assert it first so a
+# capacity failure names itself.
 pools_have_capacity() {
-	out=$(linstor_cmd -m storage-pool list -s stornas 2>/dev/null) || return 1
-	[ "$(grep -oE '"free_capacity": *[1-9][0-9]*' <<<"$out" | wc -l)" -ge 2 ]
+	[ "$(kc get pool pool-node1 pool-node2 -o jsonpath='{range .items[*]}{.status.freeBytes}{"\n"}{end}' 2>/dev/null | grep -c '^[1-9]')" -eq 2 ]
 }
-retry 600 "LINSTOR reports free capacity on both pools" pools_have_capacity
+retry 600 "r-drbd reports free capacity on both pools" pools_have_capacity
 
 # A repro harness reuses the three-node bring-up: with REPRO_SCRIPT set
 # the gate stops here and the sourced steps own the cluster.
@@ -501,15 +522,13 @@ consumer_up() { kc -n stornas-system get pod repl-consumer -o jsonpath='{.status
 retry 600 "replicated PVC Bound" pvc_bound
 retry 300 "consumer Running on node1" consumer_up
 
-replicas_uptodate() {
-	[ "$(linstor_cmd -m resource list 2>/dev/null | grep -o UpToDate | wc -l)" -ge 2 ]
-}
-retry 300 "two UpToDate DRBD replicas" replicas_uptodate
-# The class's quorum setting is what earns the third vote: without it
-# LINSTOR places no tiebreaker and a partition can diverge.
 REPL_RES=$(kc -n stornas-system get pvc repl-test -o jsonpath='{.spec.volumeName}')
-# The table prints the tiebreaker as Diskless; only the flag names it.
-tiebreaker_on_node3() { linstor_cmd -m resource list -r "$REPL_RES" -n node3 2>/dev/null | grep -q TIE_BREAKER; }
+replicas_uptodate() {
+	[ "$(volume_replicas "$REPL_RES" | awk '$2 == "diskful" && $3 == "UpToDate"' | wc -l)" -eq 2 ]
+}
+retry 300 "two UpToDate diskful replicas" replicas_uptodate
+# The third quorum vote: without it a partition can diverge.
+tiebreaker_on_node3() { volume_replicas "$REPL_RES" | grep -q '^node3 tiebreaker '; }
 retry 120 "diskless tiebreaker on node3" tiebreaker_on_node3
 
 log "writing through the replicated volume"
@@ -542,7 +561,7 @@ ui_phase() { # ui_phase <phase>
 }
 
 # Tiers across nodes: a second pool on each data node in tier fast
-# registers as LINSTOR pool stornas-fast on both, and the form's
+# registers as an r-drbd Pool in tier fast on both, and the form's
 # replicated tier option places both copies there.
 log "replicated volume in tier fast through the UI"
 for n in 1 2; do
@@ -550,7 +569,7 @@ for n in 1 2; do
 		>/dev/null || die "pool fast-node$n create through the API failed"
 done
 fast_registered() {
-	[ "$(kc get storagepool fast-node1 fast-node2 -o jsonpath='{.items[*].status.linstorPool}')" = "stornas-fast stornas-fast" ]
+	[ "$(kc get pool fast-node1 fast-node2 -o jsonpath='{range .items[*]}{.spec.tier}={.status.conditions[?(@.type=="Available")].status}{" "}{end}')" = "fast=True fast=True " ]
 }
 retry 600 "tier fast registered on both data nodes" fast_registered
 fast_class() { kc get storageclass stornas-replicated-fast >/dev/null 2>&1; }
@@ -560,7 +579,7 @@ fast_bound() { kc -n stornas-system get pvc fast-vol -o jsonpath='{.status.phase
 retry 600 "tier fast volume Bound" fast_bound
 FAST_RES=$(kc -n stornas-system get pvc fast-vol -o jsonpath='{.spec.volumeName}')
 fast_placed() {
-	[ "$(linstor_cmd -m resource list -r "$FAST_RES" 2>/dev/null | grep -oE '"storage_pool_name": ?"stornas-fast"' | wc -l)" -eq 2 ]
+	[ "$(kc get volume "$FAST_RES" -o jsonpath='{range .spec.assignment.replicas[?(@.role=="diskful")]}{.pool}{"\n"}{end}' 2>/dev/null | sort | tr '\n' ' ')" = "fast-node1 fast-node2 " ]
 }
 retry 300 "both copies of fast-vol in tier fast" fast_placed
 TARGET_VOL=fast-vol ui_phase delete-volume
@@ -737,7 +756,7 @@ kc -n stornas-system exec reattach-consumer -- sh -c 'echo before-node-loss > /d
 steered() { # steered <pvc>
 	h=$(kc -n stornas-system get pvc "$1" -o jsonpath='{.spec.volumeName}' 2>/dev/null) || return 1
 	[ -n "$h" ] || return 1
-	linstor_cmd resource list -r "$h" 2>/dev/null | grep node2 | grep -q InUse
+	kc get volume "$h" -o jsonpath='{.status.replicas[?(@.node=="node2")].inUse}' 2>/dev/null | grep -qx true
 }
 lun0_steered() { steered lun0; }
 share0_steered() { steered share0; }
@@ -795,8 +814,8 @@ ui_phase node-down
 
 # The k8s non-graceful shutdown flow: the pod object on the dead node is
 # force-removed and the out-of-service taint releases its attachments;
-# only then can the survivor mount the replicated volume. With quorum,
-# piraeus's HA controller may have evicted the pod already.
+# only then can the survivor mount the replicated volume. Taint eviction
+# may have removed the pod already.
 log "consumer reattaches on the survivor with its data"
 kc -n stornas-system delete pod reattach-consumer --force --grace-period=0 --wait=false --ignore-not-found
 kc taint node node2 node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
@@ -841,8 +860,8 @@ boot_vm 2 "$DISK2" STORNAS2 "$MAC2" tap-stornas2 "$VM_MEM2" 2
 retry 600 "node2 ssh back" v2 true
 retry 600 "all nodes Ready again" all_ready
 resynced() {
-	out=$(linstor_cmd -m resource list 2>/dev/null) || return 1
-	[ "$(grep -o UpToDate <<<"$out" | wc -l)" -ge 2 ] && ! grep -q Inconsistent <<<"$out"
+	out=$(kc get volumes -o jsonpath='{range .items[*].status.replicas[*]}{.diskState}{"\n"}{end}' 2>/dev/null) || return 1
+	[ "$(grep -c '^UpToDate$' <<<"$out")" -ge 2 ] && ! grep -qE '^(Inconsistent|Outdated|SyncTarget)$' <<<"$out"
 }
 retry 900 "replicas resynced to UpToDate" resynced
 
@@ -976,8 +995,8 @@ TARGET_VOL=repl-test TARGET_SNAP=repl-snap ui_phase snapshot-volume
 repl_snap_ready() { kc -n stornas-system get volumesnapshot repl-snap -o jsonpath='{.status.readyToUse}' | grep -q true; }
 retry 300 "replicated snapshot ready" repl_snap_ready
 TARGET_SNAP=repl-snap TARGET_VOL=repl-restore ui_phase restore-snapshot
-# The UI restore declares a host consumer, so the binder pins it to a
-# diskful node; the replicated volume attaches on node1 either way.
+# r-drbd restores a replicated volume on every node holding the
+# snapshot; it attaches on node1 either way.
 # The podless restore assert is boot-test's row.
 kc apply -f - <<'EOF'
 apiVersion: v1
@@ -1066,8 +1085,8 @@ EOF
 minority_steered() { steered minority; }
 retry 600 "minority primary on node2" minority_steered
 MIN_RES=$(kc -n stornas-system get pvc minority -o jsonpath='{.spec.volumeName}')
-# drbdsetup, never drbdadm: LINSTOR keeps its res files out of
-# /etc/drbd.d, so only kernel-direct commands see these resources.
+# drbdsetup, never drbdadm: kernel-direct commands keep the test off
+# r-drbd's res file layout.
 drbd_minor() { # drbd_minor <vssh-fn> <resource>
 	$1 sh -c "drbdsetup status $2 --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1"
 }
@@ -1104,8 +1123,8 @@ partition on
 partition_effective() { ! v1 ping -c 1 -W 1 "$IP2" && ! v3 ping -c 1 -W 1 "$IP2"; }
 retry 60 "node2 cut off from both peers" partition_effective
 v1 ping -c 1 -W 2 "$IP3" >/dev/null || die "the partition also cut node1 from node3"
-# The class's quorum and piraeus's on-no-quorum: suspend-io, observed
-# where they act.
+# r-drbd's quorum majority and on-no-quorum suspend-io, observed where
+# they act.
 min_suspended() { v2 sh -c "drbdsetup status $MIN_RES | grep -q 'suspended:.*quorum'"; }
 retry 120 "node2 lost quorum and suspended the minority's IO" min_suspended
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
@@ -1139,8 +1158,8 @@ retry 300 "the minority's held write completed on heal" min_resumed
 v2 sh -c "dd if=$MIN_DEV bs=4096 skip=1 count=1 iflag=direct status=none | cmp - /root/min-probe" \
 	|| die "the minority's held write did not land"
 # The assert is the product's own verdict, not a kernel log string: the
-# poller flags splitBrain on a StandAlone connection and the UI resolve
-# flow keys on it. dmesg wording is DRBD's business (CLAUDE.md: kernel
+# server mirrors r-drbd's SplitBrain condition into splitBrain and the UI
+# resolve flow keys on it. dmesg wording is DRBD's business (CLAUDE.md: kernel
 # internals are never the test subject).
 volume_split() { # volume_split <pvc>
 	curl -fsS -m 15 -b "$WORKDIR/cookies" "http://$IP1:30080/api/v1/state" \
@@ -1159,20 +1178,19 @@ retry 900 "replicas resynced after pick-survivor" resynced
 kc -n stornas-system exec repl-consumer -- cat /data/marker | grep -q during-split \
 	|| die "survivor lost its writes"
 log "ok: survivor kept its writes, loser was discarded"
-# The HA controller evicts it during the partition: its volume lost quorum.
+# Its IO resumed with the heal; the pod may be gone to taint eviction.
 kc -n stornas-system delete pod minority-holder --wait --ignore-not-found
 kc -n stornas-system delete pvc minority --wait
 
-# Failure matrix: LINSTOR controller down. The piraeus operator would
-# undo the scale-down, so it goes first.
-log "LINSTOR controller down: IO continues, provisioning blocks"
-kc -n piraeus-datastore scale deploy piraeus-operator-controller-manager --replicas=0
-kc -n piraeus-datastore scale deploy linstor-controller --replicas=0
-controller_up() { kc -n piraeus-datastore get pods -l app.kubernetes.io/component=linstor-controller --no-headers 2>/dev/null | grep -q Running; }
+# Failure matrix: r-drbd controller down. The CSI sidecars share its
+# pod, so provisioning stops with it.
+log "r-drbd controller down: IO continues, provisioning blocks"
+kc -n r-drbd-system scale deploy r-drbd-controller --replicas=0
+controller_up() { kc -n r-drbd-system get pods -l app=r-drbd-controller --no-headers 2>/dev/null | grep -q Running; }
 controller_gone() { ! controller_up; }
 retry 120 "controller stopped" controller_gone
 kc -n stornas-system exec repl-consumer -- sh -c 'echo no-controller >> /data/marker && sync' \
-	|| die "IO blocked without the LINSTOR controller"
+	|| die "IO blocked without the r-drbd controller"
 kc apply -f - <<'EOF'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -1212,8 +1230,7 @@ sleep 45
 log "ok: IO continued, provisioning blocked"
 
 log "controller returns: blocked PVC must bind"
-kc -n piraeus-datastore scale deploy piraeus-operator-controller-manager --replicas=1
-kc -n piraeus-datastore scale deploy linstor-controller --replicas=1
+kc -n r-drbd-system scale deploy r-drbd-controller --replicas=1
 retry 300 "controller Running again" controller_up
 blocked_bound() { kc -n stornas-system get pvc blocked -o jsonpath='{.status.phase}' | grep -q Bound; }
 retry 300 "blocked PVC Bound" blocked_bound
@@ -1428,7 +1445,7 @@ TARGET_SNAP=repl-snap ui_phase delete-snapshot
 repl_snap_gone() { ! kc -n stornas-system get volumesnapshot repl-snap >/dev/null 2>&1; }
 retry 120 "replicated snapshot gone" repl_snap_gone
 # pvc-protection holds claimed volumes; the consumers go first.
-# The HA controller may have evicted repl-consumer while node1 was dead.
+# Taint eviction may have removed repl-consumer while node1 was dead.
 kc -n stornas-system delete pod repl-restore-consumer repl-consumer --wait --ignore-not-found
 TARGET_VOL=repl-restore ui_phase delete-volume
 TARGET_VOL=repl-test ui_phase delete-volume
