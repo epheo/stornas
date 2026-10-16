@@ -1,0 +1,3 @@
+kubelet:
+  shutdownGracePeriod: 90s
+  shutdownGracePeriodCriticalPods: 30s

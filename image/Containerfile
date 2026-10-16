@@ -68,6 +68,12 @@ RUN rpm -e microshift-topolvm microshift-topolvm-release-info
 # The host must never scan DRBD devices or LVs: they may hold guest VGs.
 COPY files/lvmlocal.conf /etc/lvm/lvmlocal.conf
 
+# Kubelet's graceful node shutdown (off by default) stops pods and unmounts
+# their volumes before systemd stops drbd-utils' shutdown units. Without
+# it, drbd-graceful-disconnect disconnects a Primary still in use, DRBD
+# outdates the peers and the volume cannot fail over until the node is back.
+COPY files/40-graceful-shutdown.yaml /etc/microshift/config.d/
+
 # Greenboot gates on the stornas stack instead.
 COPY files/50_stornas_storage_check.sh /etc/greenboot/check/required.d/
 
