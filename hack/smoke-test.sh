@@ -84,6 +84,12 @@ pexec test ! -e /etc/greenboot/check/required.d/50_microshift_topolvm_check.sh \
 pexec test -x /etc/greenboot/check/required.d/50_stornas_storage_check.sh \
 	|| die "stornas greenboot check missing"
 
+log "assert: host LVM never scans DRBD devices or LVs"
+pexec lvmconfig --typeconfig full devices/scan_lvs | grep -qx 'scan_lvs=0' \
+	|| die "host LVM scans LVs"
+pexec lvmconfig --typeconfig full devices/global_filter | grep -qF 'r|^/dev/drbd|' \
+	|| die "host LVM global_filter accepts /dev/drbd"
+
 log "assert: embedded images imported into cri-o"
 pexec crictl images | grep -q 'epheo/r-drbd' || die "r-drbd image not imported"
 pexec crictl images | grep -q 'epheo/stornas' || die "stornas images not imported"

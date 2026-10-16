@@ -20,6 +20,14 @@ is fetched at runtime.
 Each StoragePool gets an r-drbd Pool of the same name (VG
 `stornas-<pool>`, thin pool `thin`); StorageClasses select by the
 `tier` parameter, so they stay node agnostic.
+Pools keep r-drbd's capacity defaults: no thin overcommit, 5% reserve.
+A pool name's length plus its dashes stays within 21: a snapshot's
+device-mapper name carries the VG name, where each dash counts twice.
+
+DRBD replicates over 11000-11999/tcp between nodes, opened by the
+`stornas` firewalld service. Host LVM never scans DRBD devices or LVs
+(`/etc/lvm/lvmlocal.conf`), so a guest VG inside a volume stays the
+guest's.
 
 The external snapshot-controller ships with MicroShift, not here;
 these manifests add only the VolumeSnapshotClass and the
