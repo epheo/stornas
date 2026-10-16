@@ -125,8 +125,11 @@ var _ = Describe("StoragePool Controller", func() {
 		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		pool, err := reconcileOnce(r, "registered")
 		Expect(err).NotTo(HaveOccurred())
+		// The API server fills r-drbd's capacity defaults: no overcommit.
+		over, reserve := int32(100), int32(5)
 		Expect(getBackend("registered").Spec).To(Equal(rdrbdv1alpha1.PoolSpec{
 			Node: "node-a", Tier: storagev1alpha1.DefaultTier, VG: "stornas-registered", ThinPool: storagev1alpha1.ThinLV,
+			OvercommitPercent: &over, ReservePercent: &reserve,
 		}))
 		available := meta.FindStatusCondition(pool.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(available.Status).To(Equal(metav1.ConditionFalse))

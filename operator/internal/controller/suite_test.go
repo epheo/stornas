@@ -26,12 +26,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/yaml"
 
 	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
@@ -60,8 +62,7 @@ var _ = BeforeSuite(func() {
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
-	var err error
-	err = storagev1alpha1.AddToScheme(scheme.Scheme)
+	err := storagev1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 	err = rdrbdv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
@@ -69,12 +70,21 @@ var _ = BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
+	// The r-drbd CRDs as the image ships them: `r-drbd crds` prints one v1
+	// List, which kustomize expands but envtest's file reader skips.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "image", "manifests", "r-drbd", "05-crds.yaml"))
+	Expect(err).NotTo(HaveOccurred())
+	var rdrbdCRDs struct {
+		Items []*apiextensionsv1.CustomResourceDefinition `json:"items"`
+	}
+	Expect(yaml.Unmarshal(raw, &rdrbdCRDs)).To(Succeed())
+	Expect(rdrbdCRDs.Items).NotTo(BeEmpty())
+
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
-			// The r-drbd CRDs as the image ships them.
-			filepath.Join("..", "..", "..", "image", "manifests", "r-drbd", "05-crds.yaml"),
 		},
+		CRDs:                  rdrbdCRDs.Items,
 		ErrorIfCRDPathMissing: true,
 	}
 

@@ -45,6 +45,16 @@
                 "type": "integer"
               },
               {
+                "jsonPath": ".status.committedBytes",
+                "name": "Committed",
+                "type": "integer"
+              },
+              {
+                "jsonPath": ".status.placeableBytes",
+                "name": "Placeable",
+                "type": "integer"
+              },
+              {
                 "jsonPath": ".status.conditions[?(@.type==\"Available\")].status",
                 "name": "Available",
                 "type": "string"
@@ -61,7 +71,7 @@
                 "description": "Auto-generated derived type for PoolSpec via `CustomResource`",
                 "properties": {
                   "spec": {
-                    "description": "Spec fields are immutable: a pool is a fixed place on a fixed node.",
+                    "description": "Location fields are immutable: a pool is a fixed place on a fixed node.\nThe capacity policy may change at any time; it only gates new placements.",
                     "properties": {
                       "node": {
                         "maxLength": 253,
@@ -73,6 +83,22 @@
                             "rule": "self == oldSelf"
                           }
                         ]
+                      },
+                      "overcommitPercent": {
+                        "default": 100,
+                        "description": "Committed volume sizes may reach this percent of the pool size less\nthe reserve. 100 never promises more than the pool holds.",
+                        "format": "uint32",
+                        "maximum": 1000.0,
+                        "minimum": 100.0,
+                        "type": "integer"
+                      },
+                      "reservePercent": {
+                        "default": 5,
+                        "description": "Percent of the pool size that placement never plans to use.",
+                        "format": "uint32",
+                        "maximum": 50.0,
+                        "minimum": 0.0,
+                        "type": "integer"
                       },
                       "thinPool": {
                         "maxLength": 127,
@@ -128,11 +154,18 @@
                     "type": "object"
                   },
                   "status": {
-                    "description": "Capacity and Available come from the agent; `volumes` from the controller.",
+                    "description": "Capacity and Available come from the agent; `volumes`, `committedBytes`\nand `placeableBytes` from the controller.",
                     "nullable": true,
                     "properties": {
                       "chunkBytes": {
                         "description": "Thin pool chunk size; feeds rs-discard-granularity.",
+                        "format": "uint64",
+                        "minimum": 0.0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "committedBytes": {
+                        "description": "Sum of the sizes of the Volumes with a diskful replica here.",
                         "format": "uint64",
                         "minimum": 0.0,
                         "nullable": true,
@@ -193,6 +226,13 @@
                       },
                       "observedGeneration": {
                         "format": "int64",
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "placeableBytes": {
+                        "description": "Largest new volume placement accepts here now.",
+                        "format": "uint64",
+                        "minimum": 0.0,
                         "nullable": true,
                         "type": "integer"
                       },
@@ -305,20 +345,8 @@
                         "description": "Written once by the controller; only diskless entries come and go\nwith attachments.",
                         "nullable": true,
                         "properties": {
-                          "gi": {
-                            "description": "Day-0 generation id, uppercase hex, lowest bit cleared, not 0 or 4;\nthe initial sync is skipped because every replica starts from it.",
-                            "maxLength": 16,
-                            "nullable": true,
-                            "type": "string",
-                            "x-kubernetes-validations": [
-                              {
-                                "message": "gi is immutable",
-                                "rule": "self == oldSelf"
-                              }
-                            ]
-                          },
                           "initialUpToDateNode": {
-                            "description": "The node whose metadata is marked UpToDate first.",
+                            "description": "The node that makes the first data current: it starts the volume\nwithout a sync, or, for a restore, is the sync source.",
                             "maxLength": 253,
                             "nullable": true,
                             "type": "string",
@@ -395,7 +423,7 @@
                             "x-kubernetes-list-type": "map"
                           },
                           "secret": {
-                            "description": "Shared secret, 15 random bytes in Base64; absent for replicas 1.",
+                            "description": "Shared secret, 32 random bytes in Base64; absent for replicas 1.",
                             "maxLength": 64,
                             "nullable": true,
                             "type": "string",
@@ -456,7 +484,7 @@
                         ]
                       },
                       "resolve": {
-                        "description": "Split-brain resolution (phase 6): every diskful replica except the\nsurvivor is discarded and resynced from it.",
+                        "description": "Split-brain resolution: every diskful replica except the\nsurvivor is discarded and resynced from it.",
                         "nullable": true,
                         "properties": {
                           "survivor": {
@@ -583,13 +611,13 @@
                         "x-kubernetes-list-type": "map"
                       },
                       "fileSystem": {
-                        "description": "File system the node plugin created (or inherited from a snapshot),\nwritten before the first mount. A signature on the device without\nthis marker is a mkfs that was cut short and is redone.",
+                        "description": "File system the node plugin created (or inherited from a snapshot),\nwritten before the first mount. An XFS signature without this\nmarker is adopted, never formatted, unless it still carries the\nmkfs-time label, which proves a format that was cut short.",
                         "maxLength": 16,
                         "nullable": true,
                         "type": "string"
                       },
                       "initializedAt": {
-                        "description": "Set by the controller the first time the volume is Ready (every\ndiskful replica UpToDate and connected), which is before any consumer\ncould write. From then on a replica created on any node (a lost LV, a\nnode from spec.evict) gets just-created DRBD metadata and a full sync\nfrom its peers; nobody mints a fresh current generation id.",
+                        "description": "Set by the controller the first time the volume is Ready (every\ndiskful replica UpToDate and connected), which is before any consumer\ncould write. From then on a replica created on any node (a lost LV, a\nnode from spec.evict) gets just-created DRBD metadata and a full sync\nfrom its peers; the initial-node start-up never runs again.",
                         "format": "date-time",
                         "nullable": true,
                         "type": "string"

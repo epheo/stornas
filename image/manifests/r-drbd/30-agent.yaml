@@ -14,8 +14,8 @@ spec:
     spec:
       serviceAccountName: r-drbd-agent
       priorityClassName: system-node-critical
-      # The agent drains a running pass and in-flight CSI calls for up to 60 s each.
-      terminationGracePeriodSeconds: 90
+      # Above the agent's shutdown (60 s drain, 90 s LVM change wait, 5 s CSI); the only hard stop for a stuck LVM change.
+      terminationGracePeriodSeconds: 200
       hostNetwork: true
       hostPID: true
       dnsPolicy: ClusterFirstWithHostNet
@@ -30,7 +30,7 @@ spec:
             privileged: true
           env:
             # Every external command re-execs the binary into the host mount
-            # namespace (ADR-013); the agent itself stays in the container
+            # namespace, so the host tools match the kernel module; the agent itself stays in the container
             # and reads host paths through the mounts below.
             - name: R_DRBD_HOST_NS
               value: /proc/1/ns
@@ -44,7 +44,7 @@ spec:
               value: info
           # No memory limit: the page cache of mkfs and lvm writes by the
           # host tools is charged to this cgroup, and an OOM kill mid mkfs
-          # leaves a half-made file system (seen on da2 at 96Mi).
+          # leaves a half-made file system (seen at 96Mi).
           resources:
             requests: {cpu: 20m, memory: 24Mi}
           volumeMounts:

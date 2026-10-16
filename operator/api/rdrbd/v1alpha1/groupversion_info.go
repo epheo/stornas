@@ -53,5 +53,7 @@ const (
 	ConditionDegraded   = "Degraded"
 	ConditionQuorumLost = "QuorumLost"
 	ConditionSplitBrain = "SplitBrain"
-	ConditionAvailable  = "Available"
+	// PeerUnreachable reasons: Firewall, NotListening, Timeout, Unknown.
+	ConditionPeerUnreachable = "PeerUnreachable"
+	ConditionAvailable       = "Available"
 )

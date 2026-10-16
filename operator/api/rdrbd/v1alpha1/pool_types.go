@@ -20,12 +20,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PoolSpec is immutable: a pool is a fixed thin pool on a fixed node.
+// PoolSpec location fields (node, tier, vg, thinPool) are immutable; the
+// capacity policy may change and only gates new placements.
 type PoolSpec struct {
 	Node     string `json:"node"`
 	Tier     string `json:"tier"`
 	VG       string `json:"vg"`
 	ThinPool string `json:"thinPool"`
+	// +optional
+	OvercommitPercent *int32 `json:"overcommitPercent,omitempty"`
+	// +optional
+	ReservePercent *int32 `json:"reservePercent,omitempty"`
 }
 
 type PoolStatus struct {
@@ -37,6 +42,10 @@ type PoolStatus struct {
 	// deletion while it is non-empty.
 	// +optional
 	Volumes []string `json:"volumes,omitempty"`
+	// +optional
+	CommittedBytes *int64 `json:"committedBytes,omitempty"`
+	// +optional
+	PlaceableBytes *int64 `json:"placeableBytes,omitempty"`
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

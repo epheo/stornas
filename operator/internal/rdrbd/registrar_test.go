@@ -75,8 +75,24 @@ func TestEnsurePoolCreatesWhenAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := rdrbdv1alpha1.PoolSpec{Node: "node-a", Tier: "ssd", VG: "stornas-tank", ThinPool: "thin"}
-	if got.Spec != want {
+	if !sameLocation(got.Spec, want) || got.Spec.OvercommitPercent != nil || got.Spec.ReservePercent != nil {
 		t.Fatalf("spec = %+v", got.Spec)
+	}
+}
+
+// The API server fills the capacity policy and an admin may tune it; the
+// Pool is still ours.
+func TestEnsurePoolAdoptsTunedPolicy(t *testing.T) {
+	spec := PoolSpec(storagePool())
+	over, reserve := int32(150), int32(10)
+	spec.OvercommitPercent, spec.ReservePercent = &over, &reserve
+	c := newClient(t, pool(spec, &metav1.Condition{Status: metav1.ConditionTrue}))
+	ready, msg, err := EnsurePool(context.Background(), c, storagePool())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatalf("ready=%v msg=%q", ready, msg)
 	}
 }
 

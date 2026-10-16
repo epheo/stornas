@@ -40,12 +40,20 @@ func PoolSpec(sp *storagev1alpha1.StoragePool) rdrbdv1alpha1.PoolSpec {
 	if tier == "" {
 		tier = storagev1alpha1.DefaultTier
 	}
+	// No capacity policy: r-drbd's defaults (no overcommit, 5% reserve)
+	// keep a thin pool that also holds snapshots from filling under a volume.
 	return rdrbdv1alpha1.PoolSpec{
 		Node:     sp.Spec.Node,
 		Tier:     tier,
 		VG:       sp.VGName(),
 		ThinPool: storagev1alpha1.ThinLV,
 	}
+}
+
+// sameLocation compares the immutable fields only: the API server fills
+// the capacity policy defaults, and an admin may tune them on the Pool.
+func sameLocation(a, b rdrbdv1alpha1.PoolSpec) bool {
+	return a.Node == b.Node && a.Tier == b.Tier && a.VG == b.VG && a.ThinPool == b.ThinPool
 }
 
 // EnsurePool creates sp's Pool when absent and reports ready once the
@@ -65,9 +73,9 @@ func EnsurePool(ctx context.Context, c client.Client, sp *storagev1alpha1.Storag
 	if err != nil {
 		return false, "", fmt.Errorf("get r-drbd pool %s: %w", sp.Name, err)
 	}
-	// Spec fields are immutable in r-drbd; a mismatch is a Pool someone
+	// Location fields are immutable in r-drbd; a mismatch is a Pool someone
 	// made by hand, and adopting it would hand its volumes to this VG.
-	if pool.Spec != want {
+	if !sameLocation(pool.Spec, want) {
 		return false, fmt.Sprintf("r-drbd pool %s exists for %s/%s on %s in tier %s, not %s/%s on %s in tier %s",
 			sp.Name, pool.Spec.VG, pool.Spec.ThinPool, pool.Spec.Node, pool.Spec.Tier,
 			want.VG, want.ThinPool, want.Node, want.Tier), nil
