@@ -65,6 +65,12 @@
 				text: `Volume ${v.name}: split brain, pick a survivor on the volumes page`,
 				href: '/volumes',
 			})),
+		...snap.volumes
+			.filter((v) => v.replication?.peerUnreachable)
+			.map((v) => ({
+				text: `Volume ${v.name}: replica peer unreachable (${v.replication?.peerUnreachable?.reason}): ${v.replication?.peerUnreachable?.message}`,
+				href: '/volumes',
+			})),
 		...strandedVolumes.map((v) => ({
 			text: `Volume ${v.name} is unavailable: its node is down`,
 			href: '/volumes',

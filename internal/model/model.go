@@ -73,8 +73,17 @@ type Volume struct {
 // or unresolved volumes. SplitBrain flags replicas that refuse to
 // reconnect after a partition; the UI owns the pick-survivor flow.
 type Replication struct {
-	Replicas   []Replica `json:"replicas"`
-	SplitBrain bool      `json:"splitBrain"`
+	Replicas        []Replica        `json:"replicas"`
+	SplitBrain      bool             `json:"splitBrain"`
+	PeerUnreachable *PeerUnreachable `json:"peerUnreachable"`
+}
+
+// PeerUnreachable is r-drbd's diagnosis of a replica link that never
+// connects. Message names the nodes, address and port, which is what the
+// admin needs to fix a firewall; it is passed through verbatim.
+type PeerUnreachable struct {
+	Reason  string `json:"reason"` // Firewall | NotListening | Timeout | Unknown
+	Message string `json:"message"`
 }
 
 // Replica is one node's copy: disk state (UpToDate, Inconsistent,

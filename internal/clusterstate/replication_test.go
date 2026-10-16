@@ -65,6 +65,24 @@ func TestReplicationSplitBrainFollowsCondition(t *testing.T) {
 	}
 }
 
+// The admin fixes a firewall from the message, so it passes through whole.
+func TestReplicationPeerUnreachableFollowsCondition(t *testing.T) {
+	v := &rdrbdv1alpha1.Volume{}
+	if replicationModel(v).PeerUnreachable != nil {
+		t.Fatal("peer unreachable without the condition")
+	}
+	msg := "node-a cannot reach node-b at 192.0.2.2:11000"
+	v.Status.Conditions = []metav1.Condition{{Type: rdrbdv1alpha1.ConditionPeerUnreachable, Status: metav1.ConditionFalse, Reason: "Connected"}}
+	if replicationModel(v).PeerUnreachable != nil {
+		t.Fatal("False condition reflected")
+	}
+	v.Status.Conditions[0] = metav1.Condition{Type: rdrbdv1alpha1.ConditionPeerUnreachable, Status: metav1.ConditionTrue, Reason: "Firewall", Message: msg}
+	got := replicationModel(v).PeerUnreachable
+	if got == nil || got.Reason != "Firewall" || got.Message != msg {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 // Volumes join PVC rows by PV name, which is the Volume name.
 func TestSnapshotDecoratesVolumes(t *testing.T) {
 	s := stateWith(t, nil, nil, []*corev1.PersistentVolumeClaim{

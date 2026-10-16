@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	rdrbdv1alpha1 "github.com/epheo/stornas/operator/api/rdrbd/v1alpha1"
 
@@ -16,6 +17,9 @@ func replicationModel(v *rdrbdv1alpha1.Volume) *model.Replication {
 	out := &model.Replication{
 		Replicas:   make([]model.Replica, 0, len(v.Status.Replicas)),
 		SplitBrain: meta.IsStatusConditionTrue(v.Status.Conditions, rdrbdv1alpha1.ConditionSplitBrain),
+	}
+	if c := meta.FindStatusCondition(v.Status.Conditions, rdrbdv1alpha1.ConditionPeerUnreachable); c != nil && c.Status == metav1.ConditionTrue {
+		out.PeerUnreachable = &model.PeerUnreachable{Reason: c.Reason, Message: c.Message}
 	}
 	for _, r := range v.Status.Replicas {
 		rep := model.Replica{Node: r.Node, DiskState: r.DiskState, InUse: r.InUse}

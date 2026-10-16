@@ -87,6 +87,16 @@ export interface Volume {
 export interface Replication {
   replicas: Replica[];
   splitBrain: boolean;
+  peerUnreachable?: PeerUnreachable;
+}
+/**
+ * PeerUnreachable is r-drbd's diagnosis of a replica link that never
+ * connects. Message names the nodes, address and port, which is what the
+ * admin needs to fix a firewall; it is passed through verbatim.
+ */
+export interface PeerUnreachable {
+  reason: string; // Firewall | NotListening | Timeout | Unknown
+  message: string;
 }
 /**
  * Replica is one node's copy: disk state (UpToDate, Inconsistent,
