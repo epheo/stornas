@@ -10,4 +10,4 @@ resources:
 # pin lives here and in image/embedded-images.txt.
 images:
   - name: ghcr.io/epheo/r-drbd
-    newTag: sha-a96db7d
+    newTag: sha-292b0d4

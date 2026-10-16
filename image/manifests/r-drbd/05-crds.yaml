@@ -719,6 +719,78 @@
                               "minimum": 0.0,
                               "nullable": true,
                               "type": "integer"
+                            },
+                            "unreachablePeers": {
+                              "description": "Peers whose DRBD connection has stayed out of Connected for a while,\nwith what a TCP connect to their DRBD port found.",
+                              "items": {
+                                "description": "One stuck connection seen from the reporting replica.",
+                                "properties": {
+                                  "address": {
+                                    "description": "The peer's DRBD address and port, as probed.",
+                                    "maxLength": 45,
+                                    "type": "string"
+                                  },
+                                  "error": {
+                                    "description": "The OS error of a Failed probe.",
+                                    "maxLength": 256,
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "node": {
+                                    "maxLength": 253,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "peerRun": {
+                                    "description": "The peer agent run (its Lease acquireTime) the prober saw; a result\ncounts only while that run holds the Lease.",
+                                    "format": "date-time",
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "format": "uint16",
+                                    "maximum": 65535.0,
+                                    "minimum": 0.0,
+                                    "type": "integer"
+                                  },
+                                  "probedAt": {
+                                    "description": "Time is a wrapper around time.Time which supports correct marshaling to YAML and JSON.  Wrappers are provided for many of the factory methods that the time package offers.",
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "result": {
+                                    "description": "What a TCP connect to a peer's DRBD port found.",
+                                    "enum": [
+                                      "Failed",
+                                      "Refused",
+                                      "Filtered",
+                                      "TimedOut",
+                                      "Accepted"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "since": {
+                                    "description": "When this agent saw the connection leave Connected.",
+                                    "format": "date-time",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "address",
+                                  "node",
+                                  "port",
+                                  "probedAt",
+                                  "result",
+                                  "since"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 32,
+                              "type": "array",
+                              "x-kubernetes-list-map-keys": [
+                                "node"
+                              ],
+                              "x-kubernetes-list-type": "map"
                             }
                           },
                           "required": [
