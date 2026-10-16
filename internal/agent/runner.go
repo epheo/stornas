@@ -2,9 +2,10 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/epheo/stornas/internal/lvm"
 )
 
 // Runner extends lvm.Runner with stdin support (smbpasswd reads the
@@ -34,9 +35,5 @@ func hostExec(ctx context.Context, stdin, name string, args ...string) ([]byte, 
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
+	return lvm.Exec(cmd, name, args)
 }

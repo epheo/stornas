@@ -3,6 +3,7 @@
 package lvm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"strings"
 )
 
-// Runner executes one host command and returns its combined output.
+// Runner executes one host command. On success it returns stdout only,
+// so a warning on stderr cannot corrupt what callers parse; on failure
+// stdout and stderr together, which callers match against.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -19,11 +22,19 @@ type Runner interface {
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
-	if err != nil {
+	return Exec(exec.CommandContext(ctx, name, args...), name, args)
+}
+
+// Exec runs cmd with the Runner output contract.
+func Exec(cmd *exec.Cmd, name string, args []string) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		out := append(stdout.Bytes(), stderr.Bytes()...)
 		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
 
 type LVM struct {
