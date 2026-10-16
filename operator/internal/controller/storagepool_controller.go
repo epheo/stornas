@@ -40,10 +40,6 @@ import (
 // may only wipe the VG after that.
 const poolFinalizer = "storage.stornas.io/deregister"
 
-// legacyPoolFinalizer is released on delete only to unblock pools left by
-// a LINSTOR build; no data migration is implied.
-const legacyPoolFinalizer = "storage.stornas.io/linstor-deregister"
-
 // StoragePoolReconciler owns every StoragePool condition except HostReady,
 // which belongs to the node agent (internal/agent in the root module).
 type StoragePoolReconciler struct {
@@ -67,9 +63,6 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if !pool.DeletionTimestamp.IsZero() {
 		if !controllerutil.ContainsFinalizer(&pool, poolFinalizer) {
-			if controllerutil.RemoveFinalizer(&pool, legacyPoolFinalizer) {
-				return ctrl.Result{}, client.IgnoreNotFound(r.Update(ctx, &pool))
-			}
 			return ctrl.Result{}, nil
 		}
 		gone, msg, err := rdrbd.DeletePool(ctx, r.Client, &pool)
@@ -122,7 +115,6 @@ func (r *StoragePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 		}
 		controllerutil.RemoveFinalizer(&pool, poolFinalizer)
-		controllerutil.RemoveFinalizer(&pool, legacyPoolFinalizer)
 		if err := r.Update(ctx, &pool); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}

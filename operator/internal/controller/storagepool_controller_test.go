@@ -273,40 +273,6 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("releases the legacy LINSTOR finalizer on delete", func() {
-		setNode(ctx, "node-a", true)
-		r := &StoragePoolReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
-
-		By("a pool carrying only the legacy finalizer")
-		legacy := newPool("legacy-only", "none", "/dev/sda")
-		legacy.Finalizers = []string{legacyPoolFinalizer}
-		Expect(k8sClient.Create(ctx, legacy)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, legacy)).To(Succeed())
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "legacy-only"}})
-		Expect(err).NotTo(HaveOccurred())
-		err = k8sClient.Get(ctx, types.NamespacedName{Name: "legacy-only"}, &storagev1alpha1.StoragePool{})
-		Expect(apierrors.IsNotFound(err)).To(BeTrue())
-
-		By("a pool carrying both finalizers, released with the current one")
-		both := newPool("legacy-both", "none", "/dev/sda")
-		both.Finalizers = []string{poolFinalizer, legacyPoolFinalizer}
-		Expect(k8sClient.Create(ctx, both)).To(Succeed())
-		got := &storagev1alpha1.StoragePool{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "legacy-both"}, got)).To(Succeed())
-		meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
-			Type: storagev1alpha1.ConditionDeregistered, Status: metav1.ConditionTrue, Reason: storagev1alpha1.ReasonReady,
-		})
-		meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
-			Type: storagev1alpha1.ConditionTornDown, Status: metav1.ConditionTrue, Reason: storagev1alpha1.ReasonReady,
-		})
-		Expect(k8sClient.Status().Update(ctx, got)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
-		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "legacy-both"}})
-		Expect(err).NotTo(HaveOccurred())
-		err = k8sClient.Get(ctx, types.NamespacedName{Name: "legacy-both"}, &storagev1alpha1.StoragePool{})
-		Expect(apierrors.IsNotFound(err)).To(BeTrue())
-	})
-
 	It("emits a warning event when the pool degrades", func() {
 		Expect(k8sClient.Create(ctx, newPool("hurting", "raid1", "/dev/sda", "/dev/sdb"))).To(Succeed())
 		defer deletePool("hurting")
