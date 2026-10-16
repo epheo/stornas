@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sizeBytes, validName } from './validate';
+import { sizeBytes, validName, validPoolName } from './validate';
 
 describe('validName', () => {
 	it('accepts DNS-shaped names', () => {
@@ -14,6 +14,16 @@ describe('validName', () => {
 		expect(validName('media-')).toBe(false);
 		expect(validName('a'.repeat(64))).toBe(false);
 		expect(validName('a'.repeat(63))).toBe(true);
+	});
+});
+
+describe('validPoolName', () => {
+	it('counts dashes twice', () => {
+		expect(validPoolName('a'.repeat(21))).toBe(true);
+		expect(validPoolName('a'.repeat(22))).toBe(false);
+		expect(validPoolName('ssd-pool-node-a')).toBe(true);
+		expect(validPoolName('a-b-c-d-e-f-g-h')).toBe(false);
+		expect(validPoolName('Tank')).toBe(false);
 	});
 });
 

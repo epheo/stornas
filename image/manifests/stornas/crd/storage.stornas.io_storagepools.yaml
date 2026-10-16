@@ -222,6 +222,11 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: 'name too long: its length plus its dashes must not exceed 21'
+          optionalOldSelf: true
+          rule: oldSelf.hasValue() || self.metadata.name.replace('-', '--').size()
+            <= 21
     served: true
     storage: true
     subresources:

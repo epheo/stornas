@@ -115,6 +115,15 @@ var _ = Describe("StoragePool Controller", func() {
 		Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
 	}
 
+	// Every snapshot in a pool past this would fail on its device-mapper name.
+	It("refuses a name whose VG leaves snapshots no device-mapper room", func() {
+		err := k8sClient.Create(ctx, newPool("a-b-c-d-e-f-g-h", "none", "/dev/sda"))
+		Expect(err).To(MatchError(ContainSubstring("name too long")))
+		ok := newPool("aaaaaaaaaaaaaaaaaa-b", "none", "/dev/sda")
+		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
+		deletePool(ok.Name)
+	})
+
 	It("registers the VG as an r-drbd Pool once the host is ready", func() {
 		registered := newPool("registered", "none", "/dev/sda")
 		registered.Spec.Tier = ""

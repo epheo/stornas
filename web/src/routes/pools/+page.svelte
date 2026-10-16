@@ -3,7 +3,7 @@
 	import { formatBytes } from '#lib/stream.js';
 	import { post, del } from '#lib/api.js';
 	import { toasts } from '#lib/toast.svelte.js';
-	import { validTier, TIER_HINT } from '#lib/validate.js';
+	import { validTier, TIER_HINT, validPoolName, POOL_NAME_HINT } from '#lib/validate.js';
 	import Meter from '#lib/ui/Meter.svelte';
 	import StatusBadge from '#lib/ui/StatusBadge.svelte';
 	import Modal from '#lib/ui/Modal.svelte';
@@ -197,6 +197,9 @@
 					placeholder="Name"
 					bind:value={name}
 				/>
+				{#if name && !validPoolName(name)}<p class="text-xs text-amber-400">
+						{POOL_NAME_HINT}
+					</p>{/if}
 				<select
 					class="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm focus:border-sky-500 focus:outline-none"
 					bind:value={node}
@@ -232,7 +235,9 @@
 				<button
 					class="w-full rounded-md bg-sky-600 px-2 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
 					type="submit"
-					disabled={createBusy || (tier !== '' && !validTier(tier))}
+					disabled={createBusy ||
+						(name !== '' && !validPoolName(name)) ||
+						(tier !== '' && !validTier(tier))}
 				>
 					Create pool
 				</button>

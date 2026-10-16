@@ -105,6 +105,10 @@ type StoragePoolStatus struct {
 // +kubebuilder:printcolumn:name="Health",type=string,JSONPath=`.status.health`
 // +kubebuilder:printcolumn:name="Capacity",type=string,JSONPath=`.status.capacity`
 // +kubebuilder:printcolumn:name="Free",type=string,JSONPath=`.status.free`
+// A snapshot LV of CSI-named volumes leaves its VG, stornas-<name>, 30
+// device-mapper bytes, where every dash counts twice; past it every
+// snapshot in the pool fails. optionalOldSelf spares pools made before.
+// +kubebuilder:validation:XValidation:rule="oldSelf.hasValue() || self.metadata.name.replace('-', '--').size() <= 21",message="name too long: its length plus its dashes must not exceed 21",optionalOldSelf=true
 
 // StoragePool is the Schema for the storagepools API
 type StoragePool struct {

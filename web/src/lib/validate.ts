@@ -6,6 +6,12 @@ export function validName(n: string): boolean {
 	return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(n);
 }
 
+// Pools name their VG, and snapshot device-mapper names count each dash twice.
+export const POOL_NAME_HINT = 'lowercase letters, digits, dashes; length plus dashes at most 21';
+export function validPoolName(n: string): boolean {
+	return validName(n) && n.length + (n.match(/-/g) ?? []).length <= 21;
+}
+
 export const TIER_HINT = 'lowercase letters, digits, dashes; starts with a letter; max 24 chars';
 export function validTier(t: string): boolean {
 	return /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/.test(t);
