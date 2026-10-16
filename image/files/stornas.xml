@@ -6,5 +6,5 @@
   <port protocol="tcp" port="3260"/>
   <port protocol="tcp" port="445"/>
   <port protocol="tcp" port="2049"/>
-  <port protocol="tcp" port="7000-7999"/>
+  <port protocol="tcp" port="11000-11999"/>
 </service>
