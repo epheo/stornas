@@ -30,12 +30,10 @@ latest_tag() { # latest_tag <repo-url> <tag-prefix> [version-prefix]: stable onl
 		| sort -V | tail -1 | sed "s|^|${3:-}|"
 }
 
-# DRBD kmod and utils, built in-tree.
+# DRBD kmod, built in-tree; drbd-utils come with the r-drbd image.
 kmod=image/kmod/Containerfile
 check drbd "$(sed -n 's/^ARG DRBD_VERSION=//p' $kmod)" \
 	"$(latest_tag https://github.com/LINBIT/drbd drbd-)"
-check drbd-utils "$(sed -n 's/^ARG DRBD_UTILS_VERSION=//p' $kmod)" \
-	"$(latest_tag https://github.com/LINBIT/drbd-utils v)"
 
 # Build tools pinned in the operator Makefile and the lint plugin config.
 mk=operator/Makefile

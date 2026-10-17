@@ -73,6 +73,30 @@
                   "spec": {
                     "description": "Location fields are immutable: a pool is a fixed place on a fixed node.\nThe capacity policy may change at any time; it only gates new placements.",
                     "properties": {
+                      "chunkSize": {
+                        "description": "Thin pool chunk size, devices mode only, fixed at creation.\nAbsent: 64Ki, set by the agent.",
+                        "nullable": true,
+                        "x-kubernetes-int-or-string": true,
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "chunkSize must be a power of two from 64Ki to 1Gi",
+                            "rule": "isQuantity(string(self)) && quantity(string(self)).isInteger() && quantity(string(self)).asInteger() in [65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824]"
+                          }
+                        ]
+                      },
+                      "devices": {
+                        "description": "Blank whole disks the agent builds `vg` and `thinPool` from.\nAbsent: `vg` and `thinPool` already exist on the node.\nby-id paths only: kernel names like sdb change between boots.",
+                        "items": {
+                          "maxLength": 300,
+                          "pattern": "^/dev/disk/by-id/[^/]+$",
+                          "type": "string"
+                        },
+                        "maxItems": 64,
+                        "minItems": 1,
+                        "nullable": true,
+                        "type": "array",
+                        "x-kubernetes-list-type": "set"
+                      },
                       "node": {
                         "maxLength": 253,
                         "minLength": 1,
@@ -91,6 +115,15 @@
                         "maximum": 1000.0,
                         "minimum": 100.0,
                         "type": "integer"
+                      },
+                      "reclaimPolicy": {
+                        "description": "What deleting the Pool does to the VG, devices mode only.\nAbsent: Retain.",
+                        "enum": [
+                          "Retain",
+                          "Delete"
+                        ],
+                        "nullable": true,
+                        "type": "string"
                       },
                       "reservePercent": {
                         "default": 5,
@@ -151,10 +184,32 @@
                       "tier",
                       "vg"
                     ],
-                    "type": "object"
+                    "type": "object",
+                    "x-kubernetes-validations": [
+                      {
+                        "message": "devices mode is fixed at creation",
+                        "rule": "has(self.devices) == has(oldSelf.devices)"
+                      },
+                      {
+                        "message": "devices is append only: removing a disk is not supported",
+                        "rule": "!has(self.devices) || !has(oldSelf.devices) || oldSelf.devices.all(d, d in self.devices)"
+                      },
+                      {
+                        "message": "chunkSize needs devices",
+                        "rule": "!has(self.chunkSize) || has(self.devices)"
+                      },
+                      {
+                        "message": "reclaimPolicy needs devices",
+                        "rule": "!has(self.reclaimPolicy) || has(self.devices)"
+                      },
+                      {
+                        "message": "chunkSize is immutable",
+                        "rule": "has(self.chunkSize) == has(oldSelf.chunkSize) && (!has(self.chunkSize) || string(self.chunkSize) == string(oldSelf.chunkSize))"
+                      }
+                    ]
                   },
                   "status": {
-                    "description": "Capacity and Available come from the agent; `volumes`, `committedBytes`\nand `placeableBytes` from the controller.",
+                    "description": "Capacity, Available, Released and devices come from the agent; `volumes`, `committedBytes`\nand `placeableBytes` from the controller.",
                     "nullable": true,
                     "properties": {
                       "chunkBytes": {
@@ -215,6 +270,56 @@
                         "type": "array",
                         "x-kubernetes-list-map-keys": [
                           "type"
+                        ],
+                        "x-kubernetes-list-type": "map"
+                      },
+                      "devices": {
+                        "description": "One row per `spec.devices` path, from the agent.",
+                        "items": {
+                          "properties": {
+                            "message": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "model": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "serial": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "sizeBytes": {
+                              "format": "uint64",
+                              "minimum": 0.0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "state": {
+                              "description": "What the agent found on one listed device.",
+                              "enum": [
+                                "Missing",
+                                "NotADisk",
+                                "Member",
+                                "Busy",
+                                "NotEmpty",
+                                "Blank"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "state"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "x-kubernetes-list-map-keys": [
+                          "path"
                         ],
                         "x-kubernetes-list-type": "map"
                       },
@@ -1051,6 +1156,162 @@
                   "spec"
                 ],
                 "title": "Snapshot",
+                "type": "object"
+              }
+            },
+            "served": true,
+            "storage": true,
+            "subresources": {
+              "status": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "apiextensions.k8s.io/v1",
+      "kind": "CustomResourceDefinition",
+      "metadata": {
+        "name": "nodedisks.r-drbd.io"
+      },
+      "spec": {
+        "group": "r-drbd.io",
+        "names": {
+          "kind": "NodeDisks",
+          "plural": "nodedisks",
+          "shortNames": [
+            "nd"
+          ],
+          "singular": "nodedisks"
+        },
+        "scope": "Cluster",
+        "versions": [
+          {
+            "additionalPrinterColumns": [
+              {
+                "jsonPath": ".status.blank",
+                "name": "Blank",
+                "type": "integer"
+              },
+              {
+                "jsonPath": ".metadata.creationTimestamp",
+                "name": "Age",
+                "type": "date"
+              }
+            ],
+            "name": "v1alpha1",
+            "schema": {
+              "openAPIV3Schema": {
+                "description": "Auto-generated derived type for NodeDisksSpec via `CustomResource`",
+                "properties": {
+                  "spec": {
+                    "description": "Empty: the agent of the node writes the status only.",
+                    "type": "object"
+                  },
+                  "status": {
+                    "nullable": true,
+                    "properties": {
+                      "blank": {
+                        "description": "Disks in state Blank; a printer column cannot count.",
+                        "format": "uint32",
+                        "minimum": 0.0,
+                        "type": "integer"
+                      },
+                      "disks": {
+                        "default": [],
+                        "items": {
+                          "description": "One whole disk of the node.",
+                          "properties": {
+                            "links": {
+                              "default": [],
+                              "description": "Every by-id link of the disk.",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "message": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "model": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "name": {
+                              "description": "Kernel name; it may change at the next boot.",
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "The path a Pool lists: the `wwn-` by-id link, else the bus one;\n`/dev/<name>` when the disk has no by-id link.",
+                              "type": "string"
+                            },
+                            "pool": {
+                              "description": "The Pool whose VG holds the disk, for `Member`.",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "serial": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "sizeBytes": {
+                              "format": "uint64",
+                              "minimum": 0.0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "state": {
+                              "description": "What the agent found on one listed device.",
+                              "enum": [
+                                "Missing",
+                                "NotADisk",
+                                "Member",
+                                "Busy",
+                                "NotEmpty",
+                                "Blank"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "path",
+                            "state"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array",
+                        "x-kubernetes-list-map-keys": [
+                          "path"
+                        ],
+                        "x-kubernetes-list-type": "map"
+                      },
+                      "message": {
+                        "description": "Set when the list is incomplete: rows capped, or the scan ran out\nof time before every disk was checked.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "watch": {
+                        "description": "How the agent learns of disk changes.",
+                        "enum": [
+                          "uevent",
+                          "poll"
+                        ],
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blank"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "spec"
+                ],
+                "title": "NodeDisks",
                 "type": "object"
               }
             },

@@ -62,8 +62,8 @@ dump() { # dump <res> - birth certificate and live state, both nodes
 	log "repro: dump $1"
 	echo "--- r-drbd volume"; kc get volume "$1" -o yaml 2>&1 || true
 	for n in v1 v2; do
-		echo "--- $n drbdsetup show"; $n timeout 30 drbdsetup show "$1" 2>&1 || true
-		echo "--- $n drbdsetup status --verbose"; $n timeout 30 drbdsetup status "$1" --verbose --statistics 2>&1 || true
+		echo "--- $n drbdsetup show"; drbd "$n" show "$1" 2>&1 || true
+		echo "--- $n drbdsetup status --verbose"; drbd "$n" status "$1" --verbose --statistics 2>&1 || true
 		echo "--- $n dmesg for $1 (uuid/handshake lines)"
 		$n sh -c "dmesg | grep '$1' | grep -Ei 'uuid|handshake|bitmap|sync|split' | tail -30" 2>&1 || true
 	done
@@ -72,7 +72,7 @@ dump "$RES_W"
 dump "$RES_I"
 
 minor_of() { # minor_of <node-fn> <res>
-	"$1" sh -c "drbdsetup status $2 --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1"
+	drbd "$1" status "$2" --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1
 }
 
 # The gate's accident, replayed per resource: node1 writes as primary
@@ -101,8 +101,8 @@ NFT
 gi() { # gi <node-fn> <res>
 	local peer
 	# node3 is the diskless tiebreaker; the data peer is the other one.
-	peer=$("$1" sh -c "drbdsetup status $2 --verbose | grep -v '^  node3 ' | sed -n 's/^  [^ ]* node-id:\([0-9]*\).*/\1/p' | head -1")
-	"$1" timeout 30 drbdsetup get-gi "$2" "$peer" 0 2>&1 || echo unknown
+	peer=$(drbd "$1" status "$2" --verbose | grep -v '^  node3 ' | sed -n 's/^  [^ ]* node-id:\([0-9]*\).*/\1/p' | head -1)
+	drbd "$1" get-gi "$2" "$peer" 0 2>&1 || echo unknown
 }
 report_gi() { # report_gi <when> <res>
 	echo "GI $2 $1: node1 $(gi v1 "$2") node2 $(gi v2 "$2")"
@@ -115,17 +115,17 @@ diverge() { # diverge <res>
 	# The partition cuts every resource, so an earlier cycle can reset
 	# this one's slots; record the state this cycle really starts from.
 	report_gi before-divergence "$res"
-	v1 drbdsetup primary "$res" || { echo "VERDICT $res: node1 promote failed"; return; }
+	drbd v1 primary "$res" || { echo "VERDICT $res: node1 promote failed"; return; }
 	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=16 oflag=direct conv=fsync" 2>/dev/null || echo "NOTE $res: node1 write failed"
 	partition on
 	cut() { ! v1 ping -c 1 -W 1 "$IP2"; }
 	retry 60 "traffic cut for $res" cut
-	lost() { v1 sh -c "drbdsetup status $res | grep -q Connecting"; }
+	lost() { drbd v1 status "$res" | grep -q Connecting; }
 	retry 120 "peer lost for $res" lost
 	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=16 seek=64 oflag=direct conv=fsync" 2>/dev/null || echo "NOTE $res: node1 divergent write failed"
-	v2 sh -c "drbdsetup primary --force $res \
-		&& dd if=/dev/urandom of=/dev/drbd$m2 bs=4k count=16 seek=128 oflag=direct conv=fsync \
-		&& drbdsetup secondary $res" 2>/dev/null \
+	{ drbd v2 primary --force "$res" \
+		&& v2 sh -c "dd if=/dev/urandom of=/dev/drbd$m2 bs=4k count=16 seek=128 oflag=direct conv=fsync" \
+		&& drbd v2 secondary "$res"; } 2>/dev/null \
 		|| echo "NOTE $res: stale-side divergence incomplete"
 	partition off
 	# Observe with a plain loop, never die: the asymmetry between the two
@@ -146,7 +146,7 @@ diverge() { # diverge <res>
 		echo "VERDICT $res: NO DETECTION after 120s"
 	fi
 	report_gi after-divergence "$res"
-	v1 timeout 30 drbdsetup secondary "$res" 2>/dev/null || true
+	drbd v1 secondary "$res" 2>/dev/null || true
 }
 
 # Round 2: fresh resources detect split-brain on both paths (run
@@ -158,19 +158,19 @@ history() { # history <res> <pvc>
 	local res=$1 pvc=$2 m1
 	m1=$(minor_of v1 "$res")
 	log "repro: history for $res: IO, peer-loss resync, resize"
-	v1 drbdsetup primary "$res" 2>/dev/null || echo "NOTE $res: history promote failed"
+	drbd v1 primary "$res" 2>/dev/null || echo "NOTE $res: history promote failed"
 	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=32 oflag=direct conv=fsync" 2>/dev/null \
 		|| echo "NOTE $res: history write failed"
 	partition on
 	hcut() { ! v1 ping -c 1 -W 1 "$IP2"; }
 	retry 60 "history cut for $res" hcut
-	hlost() { v1 sh -c "drbdsetup status $res | grep -q Connecting"; }
+	hlost() { drbd v1 status "$res" | grep -q Connecting; }
 	retry 120 "history peer lost for $res" hlost
 	v1 sh -c "dd if=/dev/urandom of=/dev/drbd$m1 bs=4k count=32 seek=32 oflag=direct conv=fsync" 2>/dev/null \
 		|| echo "NOTE $res: lone-primary write failed"
 	partition off
 	retry 300 "$res resynced UpToDate" uptodate "$res"
-	v1 timeout 30 drbdsetup secondary "$res" 2>/dev/null || true
+	drbd v1 secondary "$res" 2>/dev/null || true
 	kc -n stornas-system patch pvc "$pvc" --type merge \
 		-p '{"spec":{"resources":{"requests":{"storage":"2Gi"}}}}' \
 		|| echo "NOTE $res: resize request refused"

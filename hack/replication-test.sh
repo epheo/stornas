@@ -73,6 +73,13 @@ v1() { nssh "$IP1" "$@"; }
 v2() { nssh "$IP2" "$@"; }
 v3() { nssh "$IP3" "$@"; }
 kc() { v1 kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
+# drbdsetup lives in the r-drbd agent image, not on the host. The node runs
+# it in its own agent container through CRI-O, so a partitioned node still
+# answers over ssh; the image has no shell, so pipes stay on this side.
+drbd() { # drbd <vssh-fn> <drbdsetup args...>
+	local fn=$1; shift
+	"$fn" sh -c 'timeout 60 crictl exec "$(crictl ps -q --name agent --label io.kubernetes.pod.namespace=r-drbd-system | head -1)" drbdsetup "$@"' drbd "$@"
+}
 # Volume status fields as one line per replica: node role diskState
 # inUse devicePath. jq-free: python3 on the runner parses it.
 volume_replicas() { # volume_replicas <volume>
@@ -221,7 +228,9 @@ diagnostics() {
 	done
 	log "DIAGNOSTICS: DRBD kernel view per node"
 	for fn in v1 v2 v3; do
-		$fn sh -c 'hostname; drbdsetup status --verbose 2>/dev/null; dmesg | grep -i drbd | tail -25' 2>&1 || true
+		$fn hostname 2>&1 || true
+		drbd $fn status --verbose 2>&1 || true
+		$fn sh -c 'dmesg | grep -i drbd | tail -25' 2>&1 || true
 	done
 	log "DIAGNOSTICS: CSI capacity view"
 	kc get csistoragecapacities -A 2>&1 || true
@@ -1088,7 +1097,7 @@ MIN_RES=$(kc -n stornas-system get pvc minority -o jsonpath='{.spec.volumeName}'
 # drbdsetup, never drbdadm: kernel-direct commands keep the test off
 # r-drbd's res file layout.
 drbd_minor() { # drbd_minor <vssh-fn> <resource>
-	$1 sh -c "drbdsetup status $2 --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1"
+	drbd "$1" status "$2" --verbose | sed -n 's/.*minor:\([0-9]*\).*/\1/p' | head -1
 }
 MIN_DEV=/dev/drbd$(drbd_minor v2 "$MIN_RES")
 [ "$MIN_DEV" != /dev/drbd ] || die "no DRBD minor for $MIN_RES on node2"
@@ -1125,7 +1134,7 @@ retry 60 "node2 cut off from both peers" partition_effective
 v1 ping -c 1 -W 2 "$IP3" >/dev/null || die "the partition also cut node1 from node3"
 # r-drbd's quorum majority and on-no-quorum suspend-io, observed where
 # they act.
-min_suspended() { v2 sh -c "drbdsetup status $MIN_RES | grep -q 'suspended:.*quorum'"; }
+min_suspended() { drbd v2 status "$MIN_RES" | grep -q 'suspended:.*quorum'; }
 retry 120 "node2 lost quorum and suspended the minority's IO" min_suspended
 kc -n stornas-system exec repl-consumer -- sh -c 'echo during-split >> /data/marker && sync' \
 	|| die "IO blocked on the majority during the partition"
@@ -1140,15 +1149,14 @@ log "ok: the minority's write is held, not diverging"
 # Both sides must see the cut first: DRBD rides out a dead TCP session
 # until its ping cycle expires, and the force-promote is refused while
 # node2 still believes in a connected primary peer.
-peer_lost() { v1 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
+peer_lost() { drbd v1 status "$REPL_RES" | grep -q Connecting; }
 retry 300 "DRBD peer connection lost" peer_lost
-peer_lost_node2() { v2 sh -c "drbdsetup status $REPL_RES | grep -q Connecting"; }
+peer_lost_node2() { drbd v2 status "$REPL_RES" | grep -q Connecting; }
 retry 120 "node2 sees the partition" peer_lost_node2
 REPL_DEV=/dev/drbd$(drbd_minor v2 "$REPL_RES")
-v2 sh -c "drbdsetup primary --force $REPL_RES \
-	&& mount $REPL_DEV /mnt \
-	&& echo divergent > /mnt/divergent && umount /mnt \
-	&& drbdsetup secondary $REPL_RES" \
+drbd v2 primary --force "$REPL_RES" \
+	&& v2 sh -c "mount $REPL_DEV /mnt && echo divergent > /mnt/divergent && umount /mnt" \
+	&& drbd v2 secondary "$REPL_RES" \
 	|| die "could not force-promote the stale side"
 
 log "healing the partition"
@@ -1452,7 +1460,7 @@ TARGET_VOL=repl-test ui_phase delete-volume
 pvc_gone() { ! kc -n stornas-system get pvc "$1" >/dev/null 2>&1; }
 retry 180 "repl-restore PVC gone" pvc_gone repl-restore
 retry 180 "repl-test PVC gone" pvc_gone repl-test
-res_gone() { ! $1 sh -c "drbdsetup status $REPL_RES" >/dev/null 2>&1; }
+res_gone() { ! drbd "$1" status "$REPL_RES" >/dev/null 2>&1; }
 retry 180 "DRBD resource gone from node1" res_gone v1
 retry 180 "DRBD resource gone from node2" res_gone v2
 retry 180 "DRBD tiebreaker gone from node3" res_gone v3

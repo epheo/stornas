@@ -13,17 +13,11 @@ RUN dnf install -y /tmp/kernel/*.rpm && dnf clean all \
 		= "$(rpm -qp --qf '%{VERSION}-%{RELEASE}.%{ARCH}' /tmp/kernel/kernel-core-*.rpm)" ] \
 	&& rm -rf /tmp/kernel
 
-# drbd-utils and the drbd9 kmod are not in CentOS repos; they come from
-# the kmod build stage (image/kmod) matched to this image's kernel.
-# Utils land as a file tree (no rpm target upstream); the kmod as RPMs.
+# The drbd9 kmod is not in CentOS repos; it comes from the kmod build
+# stage (image/kmod) matched to this image's kernel. No drbd-utils on the
+# host: the r-drbd agent image carries its own, and the package's units
+# would disconnect r-drbd's resources at shutdown.
 COPY --from=kmod /out/rpms /tmp/drbd-rpms
-COPY --from=kmod /out/utils/ /
-# A tree copied onto / can replace a usr-merge symlink with a directory;
-# nss-altfiles and kmod then read an empty /lib and the host boots with
-# neither system users nor modules. Fail the build, not the boot.
-RUN for l in /bin /sbin /lib /lib64 /var/run; do \
-		[ -L "$l" ] || { echo "$l is not a symlink" >&2; exit 1; }; \
-	done
 
 # iputils: arping sends the gratuitous ARP on VIP failover.
 # iscsi-initiator-utils: admin debugging of exports, and the e2e client.
@@ -69,9 +63,9 @@ RUN rpm -e microshift-topolvm microshift-topolvm-release-info
 COPY files/lvmlocal.conf /etc/lvm/lvmlocal.conf
 
 # Kubelet's graceful node shutdown (off by default) stops pods and unmounts
-# their volumes before systemd stops drbd-utils' shutdown units. Without
-# it, drbd-graceful-disconnect disconnects a Primary still in use, DRBD
-# outdates the peers and the volume cannot fail over until the node is back.
+# their volumes before the node goes down, so the r-drbd agent, stopped
+# last, holds no Primary. Without it a volume in use leaves its peers
+# Outdated until the node is back.
 COPY files/40-graceful-shutdown.yaml /etc/microshift/config.d/
 
 # Greenboot gates on the stornas stack instead.
