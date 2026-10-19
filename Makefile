@@ -56,9 +56,11 @@ sync-manifests: generate
 # Registry archives are named by pinned ref and reused when present: CI
 # restores this dir from a cache keyed on image/embedded-images.txt, so
 # gates stop depending on registries. .part keeps a failed copy out.
+# The staging dir starts empty: a bumped pin would leave its old tar.
 REGISTRY_ARCHIVES := .cache/registry-images
 
 embed: images
+	rm -rf image/build/embedded-images
 	mkdir -p image/build/embedded-images
 	: > image/build/embedded-images/manifest.stornas
 	for img in ghcr.io/epheo/stornas ghcr.io/epheo/stornas-operator ghcr.io/epheo/stornas-agent; do \
