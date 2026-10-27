@@ -941,12 +941,42 @@ smb_io() {
 		&& grep -q smb-io /tmp/smb-back"
 }
 retry 300 "SMB client wrote and read back" smb_io
-v2 sh -c "smbclient //$IP1/failover -U e2esmb%wrongpass -c exit" \
-	&& die "SMB login succeeded with a wrong password"
+# smb_refused <password>: the session setup fails with the auth refusal,
+# not any failure (ssh, an unreachable smbd).
+smb_refused() {
+	local out
+	out=$(v2 sh -c "smbclient //$IP1/failover -U e2esmb%$1 -c exit 2>&1") && return 1
+	[[ $out == *NT_STATUS_LOGON_FAILURE* ]]
+}
+smb_refused wrongpass || die "SMB wrong password not refused"
+
+# Losing the password Secret revokes; recreating it restores. Both ride
+# the operator's Secret watch, which restamps the LocalUser status and
+# wakes every agent: one passdb write plus login retries fit in 60s.
+# A live session must end too: samba never re-checks an authenticated
+# one. smbclient holds it, fed through a fifo; the timeouts keep a dead
+# reader from blocking the fifo open.
+log "SMB password Secret deleted: login refused, live session ended"
+v2 sh -c "rm -f /tmp/smb-held.in /tmp/smb-held.out && mkfifo /tmp/smb-held.in \
+	&& { setsid sleep 600 >/tmp/smb-held.in 2>/dev/null </dev/null & } \
+	&& { setsid stdbuf -o0 -e0 smbclient //$IP1/failover -U e2esmb%e2esmbpass123 \
+		</tmp/smb-held.in >/tmp/smb-held.out 2>&1 & }"
+held_says() { # held_says <text>: one ls through the held session, then grep its output
+	v2 sh -c "timeout 5 sh -c 'echo ls >/tmp/smb-held.in' && sleep 1 && grep -q '$1' /tmp/smb-held.out"
+}
+retry 30 "held SMB session lists the share" held_says 'blocks available'
+kc -n stornas-system delete secret e2esmb-password
+retry 60 "SMB login refused with the Secret gone" smb_refused e2esmbpass123
+retry 30 "held SMB session ended" held_says NT_STATUS_CONNECTION_DISCONNECTED
+v2 timeout 5 sh -c 'echo exit >/tmp/smb-held.in' || true
+log "SMB password Secret recreated: login comes back"
+kc -n stornas-system create secret generic e2esmb-password --from-literal=password=e2esmbpass456
+smb_restored() { v2 sh -c "smbclient //$IP1/failover -U e2esmb%e2esmbpass456 -c exit"; }
+retry 60 "SMB login with the recreated Secret" smb_restored
+
 api DELETE /users/e2esmb >/dev/null || die "user delete through the API failed"
-smb_revoked() { ! v2 sh -c "smbclient //$IP1/failover -U e2esmb%e2esmbpass123 -c exit"; }
-retry 120 "SMB access revoked after user delete" smb_revoked
-log "ok: SMB IO, wrong-password refusal, and revocation on delete"
+retry 120 "SMB access revoked after user delete" smb_refused e2esmbpass456
+log "ok: SMB IO, wrong-password refusal, revocation on Secret loss and user delete"
 
 log "iSCSI client login with CHAP from node2 via the VIP"
 TIQN=iqn.2026-08.io.stornas:failover

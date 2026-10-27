@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -181,12 +182,79 @@ func EnsureSMBUser(ctx context.Context, run Runner, user, password string) error
 	return err
 }
 
-// RemoveSMBUser revokes SMB access. The unix account stays: files keep
-// their owner and a recreate reuses the uid. An absent passdb entry is
-// the converged case (nodes that never provisioned the user).
-func RemoveSMBUser(ctx context.Context, run Runner, user string) {
+// RemoveSMBUser revokes SMB access. Without a passdb entry every password
+// gets NT_STATUS_LOGON_FAILURE, the same answer as an unknown user (map to
+// guest = Never). Disabling the entry instead (smbpasswd -d) would keep
+// the old hash and answer NT_STATUS_ACCOUNT_DISABLED to the right
+// password only, so the old password stays verifiable. The unix account
+// stays: files keep their owner and a recreate reuses the uid. An absent
+// passdb entry is the converged case (nodes that never provisioned the
+// user).
+func RemoveSMBUser(ctx context.Context, run Runner, user string) error {
 	out, err := run.Run(ctx, "smbpasswd", "-x", user)
 	if err != nil && !strings.Contains(err.Error()+string(out), "find") {
-		fmt.Printf("smbpasswd -x %s: %v\n", user, err)
+		return err
 	}
+	return endSMBSessions(ctx, run, user)
+}
+
+// endSMBSessions shuts down the smbd processes serving user's sessions:
+// samba never re-checks an authenticated session, so they outlive the
+// passdb entry. Samba has no per-session logoff, so another user sharing
+// one of those connections drops too; that client reconnects with its
+// own credentials.
+func endSMBSessions(ctx context.Context, run Runner, user string) error {
+	pids, err := smbSessionPIDs(ctx, run, user)
+	if err != nil {
+		return err
+	}
+	failed := false
+	for _, pid := range pids {
+		if _, err := run.Run(ctx, "smbcontrol", pid, "shutdown"); err != nil {
+			failed = true
+		}
+	}
+	if !failed {
+		return nil
+	}
+	// smbcontrol also fails for a process that exited meanwhile; only a
+	// session still listed is a failed revocation.
+	left, err := smbSessionPIDs(ctx, run, user)
+	if err != nil {
+		return err
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("smb sessions of %s still served by smbd %s", user, strings.Join(left, " "))
+	}
+	return nil
+}
+
+func smbSessionPIDs(ctx context.Context, run Runner, user string) ([]string, error) {
+	out, err := run.Run(ctx, "smbstatus", "--processes", "--user", user, "--json")
+	if err != nil {
+		return nil, err
+	}
+	var status struct {
+		Sessions map[string]struct {
+			Username string `json:"username"`
+			ServerID struct {
+				PID string `json:"pid"`
+			} `json:"server_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return nil, fmt.Errorf("smbstatus: %w", err)
+	}
+	seen := map[string]bool{}
+	var pids []string
+	for _, sess := range status.Sessions {
+		// --user matches by uid; the name check keeps a reused uid out.
+		if sess.Username != user || seen[sess.ServerID.PID] {
+			continue
+		}
+		seen[sess.ServerID.PID] = true
+		pids = append(pids, sess.ServerID.PID)
+	}
+	sort.Strings(pids)
+	return pids, nil
 }

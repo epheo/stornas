@@ -59,6 +59,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: user.Namespace, Name: user.Spec.PasswordSecretRef}, &secret)
+	_, usable := storagev1alpha1.LocalUserPassword(secret.Data)
 	version := ""
 	switch {
 	case apierrors.IsNotFound(err):
@@ -67,7 +68,7 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " not found"
 	case err != nil:
 		return ctrl.Result{}, err
-	case len(secret.Data["password"]) == 0:
+	case !usable:
 		available.Status = metav1.ConditionFalse
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " has no password key"

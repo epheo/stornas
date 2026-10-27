@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -73,5 +75,85 @@ func TestUserAgentSkipsPassdbWhenSecretUnchanged(t *testing.T) {
 	}
 	if f.stdins["smbpasswd -s -a alice"] != "rotated\nrotated\n" {
 		t.Fatalf("stdin = %q", f.stdins["smbpasswd -s -a alice"])
+	}
+}
+
+// A deleted or emptied password Secret must revoke the user, once per
+// change, without touching other users; recreating it must restore them.
+func TestUserAgentRevokesOnSecretLoss(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	user := &storagev1alpha1.LocalUser{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "stornas-system"},
+		Spec:       storagev1alpha1.LocalUserSpec{SMB: true, PasswordSecretRef: "alice-pw"},
+	}
+	secret := func(pw string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "alice-pw", Namespace: "stornas-system"},
+			Data:       map[string][]byte{"password": []byte(pw)},
+		}
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(user, secret("hunter2")).Build()
+
+	f := &fakeRunner{results: map[string]result{
+		"id -u alice":                               {out: "1001"},
+		"smbpasswd -s -a alice":                     {},
+		"smbpasswd -x alice":                        {},
+		"smbstatus --processes --user alice --json": {out: `{"sessions": {}}`},
+	}}
+	r := &UserAgentReconciler{Client: c, Secrets: c, Run: f}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "alice"}}
+	ctx := context.Background()
+	reconcile := func() []string {
+		t.Helper()
+		f.calls = nil
+		if _, err := r.Reconcile(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		return f.calls
+	}
+
+	reconcile()
+	if err := c.Delete(ctx, secret("")); err != nil {
+		t.Fatal(err)
+	}
+	if calls := reconcile(); !slices.Contains(calls, "smbpasswd -x alice") {
+		t.Fatalf("deleted Secret left the passdb entry: %v", calls)
+	}
+	if calls := reconcile(); len(calls) != 0 {
+		t.Fatalf("status echo repeated the revocation: %v", calls)
+	}
+
+	if err := c.Create(ctx, secret("rotated")); err != nil {
+		t.Fatal(err)
+	}
+	if calls := reconcile(); !slices.Contains(calls, "smbpasswd -s -a alice") {
+		t.Fatalf("recreated Secret never restored the user: %v", calls)
+	}
+	if f.stdins["smbpasswd -s -a alice"] != "rotated\nrotated\n" {
+		t.Fatalf("stdin = %q", f.stdins["smbpasswd -s -a alice"])
+	}
+
+	emptied := &corev1.Secret{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "stornas-system", Name: "alice-pw"}, emptied); err != nil {
+		t.Fatal(err)
+	}
+	delete(emptied.Data, "password")
+	if err := c.Update(ctx, emptied); err != nil {
+		t.Fatal(err)
+	}
+	calls := reconcile()
+	if !slices.Contains(calls, "smbpasswd -x alice") {
+		t.Fatalf("emptied Secret left the passdb entry: %v", calls)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "smbpasswd") && !strings.HasSuffix(call, " alice") {
+			t.Fatalf("revocation touched another user: %s", call)
+		}
 	}
 }
