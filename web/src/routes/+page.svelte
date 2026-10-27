@@ -9,7 +9,7 @@
 		CircleCheck,
 		Circle,
 		TriangleAlert,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { app } from '#lib/state.svelte.js';
 	import { formatBytes } from '#lib/stream.js';
 	import StatTile from '#lib/ui/StatTile.svelte';

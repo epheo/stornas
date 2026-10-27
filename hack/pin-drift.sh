@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fails when a pinned input is behind its latest stable release.
+# Fails when a pinned input is behind its latest stable release, or when a
+# pinned npm version is deprecated.
 # Policy (CLAUDE.md): latest stable everywhere, pinned, bumped on purpose.
 # Lines in hack/pin-drift-holds name a component that may lag, with the
 # reason; held drift is printed but does not fail.
@@ -20,6 +21,19 @@ check() { # check <name> <pinned> <latest>
 		echo "HELD $name: pinned $pinned, latest $latest (${reason#"$name "})"
 	else
 		echo "DRIFT $name: pinned $pinned, latest $latest"
+		drift=1
+	fi
+}
+
+# Held by <name>@<pinned>, not <name>: a lag hold must not hide a
+# deprecation, and a deprecation hold lapses with the next bump.
+deprecated() { # deprecated <name> <pinned> <message>
+	local name=$1@$2 msg=$3
+	[ -n "$msg" ] || return 0
+	if reason=$(grep -m1 "^$name " "$holds" 2>/dev/null); then
+		echo "HELD $name: deprecated: $msg (${reason#"$name "})"
+	else
+		echo "DEPRECATED $name: $msg"
 		drift=1
 	fi
 }
@@ -85,6 +99,7 @@ done < <(grep -rhoE 'node-version: [0-9]+' .github/workflows | sort -u)
 # Web dependencies, pinned exact in package.json.
 while read -r pkg ver; do
 	check "npm:$pkg" "$ver" "$(npm view "$pkg" version 2>/dev/null || true)"
+	deprecated "npm:$pkg" "$ver" "$(npm view "$pkg@$ver" deprecated 2>/dev/null || true)"
 done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 
 exit $drift
