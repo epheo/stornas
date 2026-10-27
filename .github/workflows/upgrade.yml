@@ -29,8 +29,12 @@ jobs:
           # The azure apt mirror can stall for hours; pin the main
           # archive and bound every apt call so a bad mirror fails the
           # step fast instead of eating the whole job timeout.
-          sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources || true
+          # Runner sources may take their URIs from apt-mirrors.txt.
+          # A file still naming the azure mirror means the pin missed.
+          src="/etc/apt/sources.list /etc/apt/sources.list.d/*.list
+            /etc/apt/sources.list.d/*.sources /etc/apt/apt-mirrors.txt"
+          sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' $src || true
+          if grep -qs azure.archive.ubuntu.com $src; then echo 'apt pin missed' >&2; exit 1; fi
           sudo timeout 120 apt-get update
           sudo timeout 600 apt-get install -y qemu-system-x86 ovmf
       - uses: actions/setup-go@v7.0.0
