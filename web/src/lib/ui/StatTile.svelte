@@ -1,7 +1,5 @@
 <script lang="ts">
-	// lucide-svelte still exports legacy component classes; ComponentType
-	// is the type that accepts them.
-	import type { ComponentType } from 'svelte';
+	import type { LucideIcon } from '@lucide/svelte';
 
 	let {
 		label,
@@ -15,7 +13,7 @@
 		value: string | number;
 		note?: string;
 		noteTone?: 'ok' | 'warn' | 'bad' | 'neutral';
-		icon: ComponentType;
+		icon: LucideIcon;
 		href: string;
 	} = $props();
 

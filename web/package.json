@@ -29,7 +29,7 @@
 		"vitest": "5.0.5"
 	},
 	"dependencies": {
-		"lucide-svelte": "1.0.1"
+		"@lucide/svelte": "1.62.0"
 	},
 	"imports": {
 		"#lib/*": "./src/lib/*"
