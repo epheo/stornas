@@ -79,11 +79,26 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 		}
 	}
 	auth := "0"
+	granted := map[string]bool{}
 	for _, ini := range t.Spec.Initiators {
+		if ini.ChapSecretRef != "" {
+			auth = "1"
+		}
+		cred, ok := chap[ini.IQN]
+		if ini.ChapSecretRef != "" && !ok {
+			// No usable credential: no ACL, the same revocation as an
+			// initiator dropped from the spec. LIO refuses an initiator
+			// without an ACL before any authentication, and deleting the
+			// ACL ends its live sessions. Clearing the ACL's CHAP pair
+			// instead would keep those sessions and rest on CHAP being
+			// required for that ACL.
+			continue
+		}
 		if err := m.ensure(ctx, "/iscsi/"+iqn+"/tpg1/acls", "create", ini.IQN); err != nil {
 			return err
 		}
-		if cred, ok := chap[ini.IQN]; ok {
+		granted[ini.IQN] = true
+		if ok {
 			// targetcli takes the password only as an argument, so a
 			// failure echoes it back through hostExec's error; scrub it
 			// before it can reach Target status, events, or logs. The
@@ -95,9 +110,6 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 				return errors.New(strings.ReplaceAll(err.Error(), cred.Password, "<redacted>"))
 			}
 		}
-		if ini.ChapSecretRef != "" {
-			auth = "1"
-		}
 	}
 	// LIO enforces CHAP per TPG, not per ACL: at authentication=0 the
 	// target only offers AuthMethod=None and CHAP initiators cannot log
@@ -105,13 +117,18 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 	// on spec, not resolved secrets: a missing secret must fail closed,
 	// never drop the target to no-auth). Mixed CHAP and no-CHAP
 	// initiators on one target are not supportable.
+	// generate_node_acls=0 is what makes a missing ACL a refusal: LIO
+	// mints no ACL at login. Pinned so revocation never rests on a default.
 	if _, err := m.Run.Run(ctx, "targetcli", "/iscsi/"+iqn+"/tpg1",
-		"set", "attribute", "authentication="+auth); err != nil {
+		"set", "attribute", "authentication="+auth, "generate_node_acls=0"); err != nil {
 		return err
 	}
-	// The spec is authoritative: entries it dropped are revocations and
-	// must leave the host, not linger until CR deletion.
-	m.pruneACLs(ctx, t)
+	// The spec is authoritative: entries it dropped, and CHAP initiators
+	// without a usable credential, are revocations and must leave the
+	// host, not linger until CR deletion.
+	if err := m.pruneACLs(ctx, t, granted); err != nil {
+		return err
+	}
 	m.pruneLUNs(ctx, t)
 	if t.Spec.VIP != "" {
 		if err := m.ensureVIP(ctx, t.Name, t.Spec.VIP); err != nil {
@@ -122,20 +139,25 @@ func (m *LIOManager) EnsureTarget(ctx context.Context, t *storagev1alpha1.Target
 	return err
 }
 
-func (m *LIOManager) pruneACLs(ctx context.Context, t *storagev1alpha1.Target) {
-	want := map[string]bool{}
-	for _, ini := range t.Spec.Initiators {
-		want[ini.IQN] = true
-	}
-	out, err := m.Run.Run(ctx, "targetcli", "ls", "/iscsi/"+t.Status.IQN+"/tpg1/acls", "1")
+// pruneACLs deletes every ACL outside granted. Its failures surface: a
+// revocation lost here would leave the initiator logging in behind a
+// green status, with no later pass to retry it.
+func (m *LIOManager) pruneACLs(ctx context.Context, t *storagev1alpha1.Target, granted map[string]bool) error {
+	acls := "/iscsi/" + t.Status.IQN + "/tpg1/acls"
+	out, err := m.Run.Run(ctx, "targetcli", "ls", acls, "1")
 	if err != nil {
-		return
+		return err
 	}
 	for _, f := range strings.Fields(string(out)) {
-		if strings.HasPrefix(f, "iqn.") && !want[f] {
-			m.remove(ctx, "/iscsi/"+t.Status.IQN+"/tpg1/acls", "delete", f)
+		if !strings.HasPrefix(f, "iqn.") || granted[f] {
+			continue
+		}
+		if out, err := m.Run.Run(ctx, "targetcli", acls, "delete", f); err != nil &&
+			!strings.Contains(err.Error()+string(out), "No such") {
+			return err
 		}
 	}
+	return nil
 }
 
 func (m *LIOManager) pruneLUNs(ctx context.Context, t *storagev1alpha1.Target) {

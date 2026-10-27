@@ -247,6 +247,7 @@ func chapSecrets(ctx context.Context, c client.Client, target *storagev1alpha1.T
 		seen[ref] = true
 		var secret corev1.Secret
 		err := c.Get(ctx, types.NamespacedName{Namespace: target.Namespace, Name: ref}, &secret)
+		_, _, usable := storagev1alpha1.ChapCredentials(secret.Data)
 		switch {
 		case apierrors.IsNotFound(err):
 			if problem == "" {
@@ -254,7 +255,7 @@ func chapSecrets(ctx context.Context, c client.Client, target *storagev1alpha1.T
 			}
 		case err != nil:
 			return nil, "", err
-		case len(secret.Data["username"]) == 0 || len(secret.Data["password"]) == 0:
+		case !usable:
 			if problem == "" {
 				problem = "chap secret " + ref + " has no username or password key"
 			}

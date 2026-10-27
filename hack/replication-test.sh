@@ -979,22 +979,41 @@ v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
 
-# Rotation is event-driven: the operator's Secret watch restamps the
-# Target status, which wakes the agent. One targetcli walk plus login
-# retries fit in 60s; a regression to polling does not. The old
-# password must die.
+# chap_login <password>: one login, logged out again on success. Returns
+# iscsiadm's status: 24 is LIO's refusal, whether CHAP failed or the
+# initiator has no ACL left.
+chap_login() {
+	v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" -o update -n node.session.auth.password -v "$1" || return
+	v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --login || return
+	v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
+}
+# Any other failure (ssh, an unreachable portal) proves nothing.
+chap_refused() {
+	local rc=0
+	chap_login "$1" >/dev/null 2>&1 || rc=$?
+	[ "$rc" -eq 24 ]
+}
+
+# Rotation, revocation and restore are event-driven: the operator's
+# Secret watch restamps the Target status, which wakes the agent. One
+# targetcli walk plus login retries fit in 60s; a regression to polling
+# does not.
 log "CHAP rotation: new secret lands, old one stops working"
 kc -n stornas-system patch secret e2e-chap --type merge \
 	-p '{"stringData":{"password":"rotatedchappass1"}}'
-iscsi_login_rotated() {
-	v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v rotatedchappass1 \
-		&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login"
-}
-retry 60 "iSCSI login with the rotated CHAP secret" iscsi_login_rotated
-v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
-v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v e2echappass123 \
-	&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login" \
-	&& die "retired CHAP secret still accepted"
+chap_rotated() { chap_login rotatedchappass1; }
+retry 60 "iSCSI login with the rotated CHAP secret" chap_rotated
+chap_refused e2echappass123 || die "retired CHAP secret still accepted"
+
+log "CHAP secret deleted: the initiator is refused with any password"
+kc -n stornas-system delete secret e2e-chap
+chap_revoked() { chap_refused rotatedchappass1 && chap_refused e2echappass123; }
+retry 60 "rotated and original CHAP passwords both refused" chap_revoked
+log "CHAP secret recreated: login comes back"
+kc -n stornas-system create secret generic e2e-chap \
+	--from-literal=username=e2e --from-literal=password=recreatedchap1
+chap_restored() { chap_login recreatedchap1; }
+retry 60 "iSCSI login with the recreated CHAP secret" chap_restored
 
 log "resize, snapshot, restore on the replicated volume through the UI dialogs"
 TARGET_VOL=repl-test TARGET_SIZE=2Gi ui_phase resize-volume
