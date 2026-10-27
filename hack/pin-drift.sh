@@ -35,14 +35,12 @@ kmod=image/kmod/Containerfile
 check drbd "$(sed -n 's/^ARG DRBD_VERSION=//p' $kmod)" \
 	"$(latest_tag https://github.com/LINBIT/drbd drbd-)"
 
-# Build tools pinned in the operator Makefile and the lint plugin config.
+# Build tools pinned in the Makefiles.
 mk=operator/Makefile
 check golangci-lint "$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' $mk)" \
 	"$(latest_tag https://github.com/golangci/golangci-lint v v)"
 check kustomize "$(sed -n 's/^KUSTOMIZE_VERSION ?= //p' $mk)" \
 	"$(latest_tag https://github.com/kubernetes-sigs/kustomize kustomize/v v)"
-check logcheck "$(awk '/logtools/{f=1} f && /version:/{print $2; exit}' operator/.custom-gcl.yml)" \
-	"$(latest_tag https://github.com/kubernetes-sigs/logtools v v)"
 check tygo "$(grep -o 'tygo@v[0-9.]*' Makefile | head -1 | sed 's/tygo@//')" \
 	"$(latest_tag https://github.com/gzuidhof/tygo v v)"
 
