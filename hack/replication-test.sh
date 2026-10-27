@@ -979,8 +979,10 @@ v2 sh -c "dd if=/dev/urandom of=/tmp/probe bs=512 count=1 2>/dev/null \
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 log "ok: iSCSI client wrote and read back through the VIP"
 
-# Rotation is timer-based (nothing watches Secrets); the new password
-# must land within secretRefreshInterval and the old one must die.
+# Rotation is event-driven: the operator's Secret watch restamps the
+# Target status, which wakes the agent. One targetcli walk plus login
+# retries fit in 60s; a regression to polling does not. The old
+# password must die.
 log "CHAP rotation: new secret lands, old one stops working"
 kc -n stornas-system patch secret e2e-chap --type merge \
 	-p '{"stringData":{"password":"rotatedchappass1"}}'
@@ -988,7 +990,7 @@ iscsi_login_rotated() {
 	v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v rotatedchappass1 \
 		&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login"
 }
-retry 400 "iSCSI login with the rotated CHAP secret" iscsi_login_rotated
+retry 60 "iSCSI login with the rotated CHAP secret" iscsi_login_rotated
 v2 iscsiadm -m node -T "$TIQN" -p "$VIP:3260" --logout
 v2 sh -c "iscsiadm -m node -T $TIQN -p $VIP:3260 -o update -n node.session.auth.password -v e2echappass123 \
 	&& iscsiadm -m node -T $TIQN -p $VIP:3260 --login" \

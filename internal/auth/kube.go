@@ -97,8 +97,9 @@ func (s *KubeSource) MustChange(ctx context.Context, username string) bool {
 	return u.GetAnnotations()[annotGenerated] == "true"
 }
 
-// UpdatePassword rotates the referenced Secret in place (the agent's smb
-// reconciler watches it) and clears the generated-password mark.
+// UpdatePassword rotates the referenced Secret in place (the operator's
+// Secret watch carries it to the agent's smb reconciler) and clears the
+// generated-password mark.
 func (s *KubeSource) UpdatePassword(ctx context.Context, username, password string) error {
 	u, err := s.Dyn.Resource(localUserGVR).Namespace(s.Namespace).Get(ctx, username, metav1.GetOptions{})
 	if err != nil {

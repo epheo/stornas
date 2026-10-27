@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -23,9 +24,9 @@ type TargetAgentReconciler struct {
 	Node    string
 	LIO     *LIOManager
 
-	// applied remembers the converged input per target so quiet
-	// secretRefreshInterval ticks skip the targetcli walk (a dozen
-	// ~1s python spawns plus a saveconfig rewrite, per target, forever).
+	// applied remembers the converged input per target so the status
+	// writes that echo every change skip the targetcli walk (a dozen ~1s
+	// python spawns plus a saveconfig rewrite).
 	// In-memory on purpose: an agent restart reconverges everything,
 	// which is also what repairs hand-edited host state after a reboot.
 	// Single controller goroutine, so no lock.
@@ -68,7 +69,10 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	chap := map[string]ChapCred{}
 	// key captures every EnsureTarget input: spec (generation), placement
-	// (LUN devices resolve from status), and secret rotation (RVs).
+	// (LUN devices resolve from status), and secret rotation (RVs, read
+	// live). The operator's status.chapSecretVersions stamp only wakes
+	// this reconcile: it can land after the spec, and keying on it would
+	// walk once without the credentials and again with them.
 	key := fmt.Sprintf("g%d", target.Generation)
 	for _, lun := range target.Status.LUNs {
 		key += fmt.Sprintf("|%d:%s", lun.ID, lun.Device)
@@ -79,8 +83,12 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		var secret corev1.Secret
 		if err := r.Secrets.Get(ctx, types.NamespacedName{Namespace: target.Namespace, Name: ini.ChapSecretRef}, &secret); err != nil {
+			if !apierrors.IsNotFound(err) {
+				// No poll follows: only an error return retries a failed read.
+				return ctrl.Result{}, err
+			}
 			key += "|" + ini.ChapSecretRef + ":absent"
-			continue // the operator's condition surface owns missing-secret reporting
+			continue // the operator's Available condition reports the missing Secret
 		}
 		key += "|" + ini.ChapSecretRef + ":" + secret.ResourceVersion
 		chap[ini.IQN] = ChapCred{
@@ -89,9 +97,7 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 	if r.applied[req.NamespacedName] == key {
-		// Converged and nothing moved: the tick only had to re-read the
-		// secrets above.
-		return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
+		return ctrl.Result{}, nil
 	}
 
 	ensureErr := r.LIO.EnsureTarget(ctx, &target, chap)
@@ -120,8 +126,7 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.applied = map[types.NamespacedName]string{}
 	}
 	r.applied[req.NamespacedName] = key
-	// Re-read CHAP secrets on a timer: rotation does not touch the Target.
-	return ctrl.Result{RequeueAfter: secretRefreshInterval}, nil
+	return ctrl.Result{}, nil
 }
 
 func (r *TargetAgentReconciler) SetupWithManager(mgr ctrl.Manager) error {

@@ -15,8 +15,8 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
-// A quiet refresh tick must not rewrite the passdb: smbpasswd re-derives
-// NT hashes per user per node forever. A rotated secret must.
+// A status echo must not rewrite the passdb: smbpasswd re-derives NT
+// hashes per user per node. A rotated secret must.
 func TestUserAgentSkipsPassdbWhenSecretUnchanged(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
@@ -53,7 +53,7 @@ func TestUserAgentSkipsPassdbWhenSecretUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(f.calls) != converged {
-		t.Fatalf("quiet tick rewrote the passdb: %v", f.calls[converged:])
+		t.Fatalf("status echo rewrote the passdb: %v", f.calls[converged:])
 	}
 
 	// Rotation (a new resourceVersion) must reach the passdb.

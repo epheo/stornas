@@ -58,6 +58,7 @@ type TargetReconciler struct {
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=targets/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=r-drbd.io,resources=volumes,verbs=get;list;watch
 
 func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -85,6 +86,11 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	res := ctrl.Result{}
 
 	target.Status.IQN = storagev1alpha1.IQNPrefix + target.Name
+	versions, secretProblem, err := chapSecrets(ctx, r.Client, &target)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	target.Status.ChapSecretVersions = versions
 
 	unplaced := false
 	vols := make([]*rdrbdv1alpha1.Volume, 0, len(target.Spec.LUNs))
@@ -153,10 +159,16 @@ func (r *TargetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 					ObservedGeneration: target.Generation,
 				})
 			}
-			if meta.IsStatusConditionTrue(target.Status.Conditions, storagev1alpha1.ConditionHostReady) {
+			switch {
+			case secretProblem != "":
+				// Placement still stands: one broken Secret must not cut
+				// off the other initiators.
+				available.Reason = storagev1alpha1.ReasonInvalidSpec
+				available.Message = secretProblem
+			case meta.IsStatusConditionTrue(target.Status.Conditions, storagev1alpha1.ConditionHostReady):
 				available.Status = metav1.ConditionTrue
 				available.Reason = storagev1alpha1.ReasonReady
-			} else {
+			default:
 				available.Reason = storagev1alpha1.ReasonWaitingForAgent
 				available.Message = "waiting for the node agent to export the target"
 			}
@@ -221,6 +233,57 @@ func (r *TargetReconciler) allTargets(ctx context.Context, _ client.Object) []re
 	return reqs
 }
 
+// chapSecrets returns the versions of the usable CHAP Secrets the
+// initiators reference, and what is wrong with the first unusable one.
+func chapSecrets(ctx context.Context, c client.Client, target *storagev1alpha1.Target) ([]storagev1alpha1.SecretVersion, string, error) {
+	var versions []storagev1alpha1.SecretVersion
+	problem := ""
+	seen := map[string]bool{}
+	for _, ini := range target.Spec.Initiators {
+		ref := ini.ChapSecretRef
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		var secret corev1.Secret
+		err := c.Get(ctx, types.NamespacedName{Namespace: target.Namespace, Name: ref}, &secret)
+		switch {
+		case apierrors.IsNotFound(err):
+			if problem == "" {
+				problem = "chap secret " + ref + " not found"
+			}
+		case err != nil:
+			return nil, "", err
+		case len(secret.Data["username"]) == 0 || len(secret.Data["password"]) == 0:
+			if problem == "" {
+				problem = "chap secret " + ref + " has no username or password key"
+			}
+		default:
+			versions = append(versions, storagev1alpha1.SecretVersion{Name: ref, ResourceVersion: secret.ResourceVersion})
+		}
+	}
+	return versions, problem, nil
+}
+
+// secretTargets maps a Secret event to the targets whose initiators
+// reference it.
+func (r *TargetReconciler) secretTargets(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list storagev1alpha1.TargetList
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, t := range list.Items {
+		for _, ini := range t.Spec.Initiators {
+			if ini.ChapSecretRef == obj.GetName() {
+				reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&t)})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
 // volumeTargets maps a Volume event to the targets exposing its claim.
 func (r *TargetReconciler) volumeTargets(ctx context.Context, obj client.Object) []reconcile.Request {
 	claim, ok := volumeClaim(ctx, r.Client, obj)
@@ -253,6 +316,7 @@ func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(nodeReadyChanged)).
 		Watches(&rdrbdv1alpha1.Volume{}, handler.EnqueueRequestsFromMapFunc(r.volumeTargets),
 			builder.WithPredicates(volumeServingChanged)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretTargets)).
 		Named("target").
 		Complete(r)
 }

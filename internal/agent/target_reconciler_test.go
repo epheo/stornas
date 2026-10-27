@@ -4,12 +4,16 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
@@ -121,8 +125,8 @@ func TestTargetAgentRemovesOnDeletion(t *testing.T) {
 	}
 }
 
-// A quiet refresh tick (same generation, placement, secrets) must skip
-// the targetcli walk: it is a dozen ~1s python spawns per target that
+// A status echo (same generation, placement, secrets) must skip the
+// targetcli walk: it is a dozen ~1s python spawns per target that
 // reconverge an already-converged state.
 func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -164,7 +168,81 @@ func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(f.calls) != converged {
-		t.Fatalf("quiet tick reran the walk: %v", f.calls[converged:])
+		t.Fatalf("status echo reran the walk: %v", f.calls[converged:])
+	}
+}
+
+// A rotated CHAP secret must reach LIO on the reconcile the operator's
+// status stamp triggers, with no timer behind it.
+func TestTargetAgentAppliesRotatedSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	iqn := "iqn.2026-08.io.stornas:vms"
+	ini := "iqn.2026-08.test:client"
+	target := &storagev1alpha1.Target{
+		ObjectMeta: metav1.ObjectMeta{Name: "vms", Namespace: "stornas-system"},
+		Spec: storagev1alpha1.TargetSpec{
+			Initiators: []storagev1alpha1.Initiator{{IQN: ini, ChapSecretRef: "vms-chap"}},
+		},
+		Status: storagev1alpha1.TargetStatus{
+			IQN:        iqn,
+			ActiveNode: "node-a",
+			LUNs:       []storagev1alpha1.LUNStatus{{ID: 0, Device: "/dev/drbd1000"}},
+		},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "vms-chap", Namespace: "stornas-system"},
+		Data:       map[string][]byte{"username": []byte("u"), "password": []byte("first-pass")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(target, secret).WithStatusSubresource(target).Build()
+
+	acl := "targetcli /iscsi/" + iqn + "/tpg1/acls/" + ini + " set auth userid=u password="
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi create " + iqn:                                                   {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
+		"targetcli /iscsi/" + iqn + "/tpg1/acls create " + ini:                             {},
+		acl + "first-pass":  {},
+		acl + "second-pass": {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1": {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                      {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                      {},
+		"targetcli saveconfig":                                             {},
+	}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
+	ctx := context.Background()
+
+	res, err := r.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequeueAfter != 0 {
+		t.Fatalf("requeue after %v: rotation must not depend on a poll", res.RequeueAfter)
+	}
+	if !slices.Contains(f.calls, acl+"first-pass") {
+		t.Fatalf("credentials never set: %v", f.calls)
+	}
+
+	got := &corev1.Secret{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(secret), got); err != nil {
+		t.Fatal(err)
+	}
+	got.Data["password"] = []byte("second-pass")
+	if err := c.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, acl+"second-pass") {
+		t.Fatalf("rotated credentials never set: %v", f.calls)
 	}
 }
 

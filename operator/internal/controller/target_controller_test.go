@@ -99,6 +99,62 @@ var _ = Describe("Target Controller", func() {
 			ConsistOf(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "vms"}}))
 	})
 
+	It("flags a missing CHAP secret and stamps usable ones", func() {
+		boundBlockClaim("disk4", "pvc-disk4")
+		target := &storagev1alpha1.Target{
+			ObjectMeta: metav1.ObjectMeta{Name: "chap", Namespace: "default"},
+			Spec: storagev1alpha1.TargetSpec{
+				LUNs: []storagev1alpha1.LUN{{ID: 0, ClaimName: "disk4"}},
+				Initiators: []storagev1alpha1.Initiator{
+					{IQN: "iqn.2026-08.test:a", ChapSecretRef: "chap-a"},
+					{IQN: "iqn.2026-08.test:b", ChapSecretRef: "chap-a"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, target)).To(Succeed())
+		defer func() { Expect(k8sClient.Delete(ctx, target)).To(Succeed()) }()
+
+		backingVolume(ctx, "pvc-disk4", "/dev/drbd1004", "node-a", "node-a")
+		r := &TargetReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		key := types.NamespacedName{Namespace: "default", Name: "chap"}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		got := &storagev1alpha1.Target{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		// A broken secret must not block the export for other initiators.
+		Expect(got.Status.ActiveNode).To(Equal("node-a"))
+		Expect(got.Status.ChapSecretVersions).To(BeEmpty())
+		cond := meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
+		Expect(cond.Message).To(ContainSubstring("chap-a not found"))
+
+		By("stamping the secret once it carries credentials")
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "chap-a", Namespace: "default"},
+			Data:       map[string][]byte{"username": []byte("u"), "password": []byte("p1")},
+		}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		defer func() { Expect(k8sClient.Delete(ctx, secret)).To(Succeed()) }()
+		Expect(r.secretTargets(ctx, secret)).To(ConsistOf(reconcile.Request{NamespacedName: key}))
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Status.ChapSecretVersions).To(Equal([]storagev1alpha1.SecretVersion{
+			{Name: "chap-a", ResourceVersion: secret.ResourceVersion},
+		}))
+		cond = meta.FindStatusCondition(got.Status.Conditions, storagev1alpha1.ConditionAvailable)
+		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonWaitingForAgent))
+
+		By("restamping on rotation, which is what wakes the agent")
+		secret.Data["password"] = []byte("p2")
+		Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Status.ChapSecretVersions[0].ResourceVersion).To(Equal(secret.ResourceVersion))
+	})
+
 	It("waits for volumes while a claim is unbound", func() {
 		target := &storagev1alpha1.Target{
 			ObjectMeta: metav1.ObjectMeta{Name: "pending", Namespace: "default"},
