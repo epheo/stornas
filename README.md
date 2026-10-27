@@ -61,7 +61,8 @@ Nothing is documented here before its flow is green.
 
 **SAN (iSCSI)**
 - Targets with per-initiator CHAP; credentials live in Secrets and
-  rotate without recreating the target.
+  rotate without recreating the target. Deleting the Secret locks its
+  initiator out until it is recreated.
 - Replicated LUNs carry a VIP; on node loss the target re-places to the
   peer, the VIP moves with gratuitous ARP, and initiators reconnect.
   Active/passive in v1.

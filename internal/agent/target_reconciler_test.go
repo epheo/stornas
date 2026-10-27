@@ -146,13 +146,13 @@ func TestTargetAgentSkipsWalkWhenUnchanged(t *testing.T) {
 		WithObjects(target).WithStatusSubresource(target).Build()
 
 	f := &fakeRunner{results: map[string]result{
-		"targetcli /iscsi create " + iqn:                                                   {},
-		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
-		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
-		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=0":                 {},
-		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                                      {},
-		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                                      {},
-		"targetcli saveconfig":                                                             {},
+		"targetcli /iscsi create " + iqn:                                                        {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":            {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0":      {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=0 generate_node_acls=0": {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                                           {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                                           {},
+		"targetcli saveconfig": {},
 	}}
 	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
@@ -210,10 +210,10 @@ func TestTargetAgentAppliesRotatedSecret(t *testing.T) {
 		"targetcli /iscsi/" + iqn + "/tpg1/acls create " + ini:                             {},
 		acl + "first-pass":  {},
 		acl + "second-pass": {},
-		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1": {},
-		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                      {},
-		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                      {},
-		"targetcli saveconfig":                                             {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1 generate_node_acls=0": {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                                           {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1":                                           {},
+		"targetcli saveconfig": {},
 	}}
 	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
@@ -243,6 +243,113 @@ func TestTargetAgentAppliesRotatedSecret(t *testing.T) {
 	}
 	if !slices.Contains(f.calls, acl+"second-pass") {
 		t.Fatalf("rotated credentials never set: %v", f.calls)
+	}
+}
+
+// Deleting one initiator's CHAP Secret, or dropping its password key,
+// must revoke that initiator on the reconcile the operator's status stamp
+// triggers and leave its neighbour alone; recreating it must restore it.
+func TestTargetAgentRevokesOnSecretDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := storagev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	iqn := "iqn.2026-08.io.stornas:vms"
+	a, b := "iqn.2026-08.test:a", "iqn.2026-08.test:b"
+	target := &storagev1alpha1.Target{
+		ObjectMeta: metav1.ObjectMeta{Name: "vms", Namespace: "stornas-system"},
+		Spec: storagev1alpha1.TargetSpec{
+			Initiators: []storagev1alpha1.Initiator{{IQN: a, ChapSecretRef: "a-chap"}, {IQN: b, ChapSecretRef: "b-chap"}},
+		},
+		Status: storagev1alpha1.TargetStatus{
+			IQN:        iqn,
+			ActiveNode: "node-a",
+			LUNs:       []storagev1alpha1.LUNStatus{{ID: 0, Device: "/dev/drbd1000"}},
+		},
+	}
+	chapSecret := func(name, pw string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "stornas-system"},
+			Data:       map[string][]byte{"username": []byte("u"), "password": []byte(pw)},
+		}
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(target, chapSecret("a-chap", "a-pass"), chapSecret("b-chap", "b-pass")).
+		WithStatusSubresource(target).Build()
+
+	acls := "targetcli /iscsi/" + iqn + "/tpg1/acls"
+	f := &fakeRunner{results: map[string]result{
+		"targetcli /iscsi create " + iqn:                                                   {},
+		"targetcli /backstores/block create name=stornas-vms-lun0 dev=/dev/drbd1000":       {},
+		"targetcli /iscsi/" + iqn + "/tpg1/luns create /backstores/block/stornas-vms-lun0": {},
+		acls + " create " + a: {},
+		acls + " create " + b: {},
+		acls + "/" + a + " set auth userid=u password=a-pass":                                   {},
+		acls + "/" + a + " set auth userid=u password=a-new":                                    {},
+		acls + "/" + b + " set auth userid=u password=b-pass":                                   {},
+		"targetcli /iscsi/" + iqn + "/tpg1 set attribute authentication=1 generate_node_acls=0": {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/acls 1":                                           {out: "o- acls\n  o- " + a + " [x]\n  o- " + b + " [x]\n"},
+		acls + " delete " + a:                         {},
+		"targetcli ls /iscsi/" + iqn + "/tpg1/luns 1": {},
+		"targetcli saveconfig":                        {},
+	}}
+	r := &TargetAgentReconciler{Client: c, Secrets: c, Node: "node-a", LIO: &LIOManager{Run: f, Root: t.TempDir()}}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "stornas-system", Name: "vms"}}
+	ctx := context.Background()
+
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(f.calls, acls+" delete "+a) {
+		t.Fatalf("credentialed initiator revoked: %v", f.calls)
+	}
+
+	if err := c.Delete(ctx, chapSecret("a-chap", "")); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, acls+" delete "+a) {
+		t.Fatalf("deleted Secret left its initiator an ACL: %v", f.calls)
+	}
+	for _, call := range f.calls {
+		if call == acls+" create "+a || call == acls+" delete "+b {
+			t.Fatalf("revocation touched the wrong ACL: %s", call)
+		}
+	}
+
+	if err := c.Create(ctx, chapSecret("a-chap", "a-new")); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, acls+"/"+a+" set auth userid=u password=a-new") {
+		t.Fatalf("recreated Secret never restored the initiator: %v", f.calls)
+	}
+
+	// A Secret that loses its password key revokes like a deleted one.
+	keyless := &corev1.Secret{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "stornas-system", Name: "b-chap"}, keyless); err != nil {
+		t.Fatal(err)
+	}
+	delete(keyless.Data, "password")
+	if err := c.Update(ctx, keyless); err != nil {
+		t.Fatal(err)
+	}
+	f.results[acls+" delete "+b] = result{}
+	f.calls = nil
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, acls+" delete "+b) {
+		t.Fatalf("keyless Secret left its initiator an ACL: %v", f.calls)
 	}
 }
 

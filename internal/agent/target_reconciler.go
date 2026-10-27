@@ -91,10 +91,11 @@ func (r *TargetAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			continue // the operator's Available condition reports the missing Secret
 		}
 		key += "|" + ini.ChapSecretRef + ":" + secret.ResourceVersion
-		chap[ini.IQN] = ChapCred{
-			User:     string(secret.Data["username"]),
-			Password: string(secret.Data["password"]),
+		user, password, ok := storagev1alpha1.ChapCredentials(secret.Data)
+		if !ok {
+			continue // a keyless Secret revokes like a missing one
 		}
+		chap[ini.IQN] = ChapCred{User: user, Password: password}
 	}
 	if r.applied[req.NamespacedName] == key {
 		return ctrl.Result{}, nil

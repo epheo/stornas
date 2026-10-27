@@ -72,6 +72,14 @@ type LUNStatus struct {
 	Device string `json:"device,omitempty"`
 }
 
+// ChapCredentials returns the CHAP pair a Secret's data holds; ok is false
+// unless both keys are set. The operator reports and the agent revokes on
+// this one rule.
+func ChapCredentials(data map[string][]byte) (user, password string, ok bool) {
+	user, password = string(data["username"]), string(data["password"])
+	return user, password, user != "" && password != ""
+}
+
 // SecretVersion is the resourceVersion the operator last saw on a
 // referenced Secret.
 type SecretVersion struct {
