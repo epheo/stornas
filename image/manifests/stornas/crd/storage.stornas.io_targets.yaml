@@ -103,6 +103,28 @@ spec:
             properties:
               activeNode:
                 type: string
+              chapSecretVersions:
+                description: |-
+                  chapSecretVersions lists the usable CHAP Secrets the initiators
+                  reference. Only the operator watches Secrets (the agent may only get
+                  them), so a rotation reaches the agent as a change here.
+                items:
+                  description: |-
+                    SecretVersion is the resourceVersion the operator last saw on a
+                    referenced Secret.
+                  properties:
+                    name:
+                      type: string
+                    resourceVersion:
+                      type: string
+                  required:
+                  - name
+                  - resourceVersion
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

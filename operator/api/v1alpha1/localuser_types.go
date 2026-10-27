@@ -44,6 +44,13 @@ type LocalUserStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// passwordSecretVersion is the resourceVersion of the password Secret
+	// once it holds a password. Only the operator watches Secrets (the
+	// agent may only get them), so a rotation reaches the agent as a
+	// change here.
+	// +optional
+	PasswordSecretVersion string `json:"passwordSecretVersion,omitempty"`
 }
 
 // +kubebuilder:object:root=true

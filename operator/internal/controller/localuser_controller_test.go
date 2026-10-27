@@ -50,7 +50,7 @@ var _ = Describe("LocalUser Controller", func() {
 		}
 	}
 
-	It("flags a missing or empty password secret", func() {
+	It("flags a missing or empty password secret and stamps a usable one", func() {
 		Expect(k8sClient.Create(ctx, newUser("alice", "alice-password"))).To(Succeed())
 		defer func() {
 			Expect(k8sClient.Delete(ctx, newUser("alice", "alice-password"))).To(Succeed())
@@ -60,27 +60,37 @@ var _ = Describe("LocalUser Controller", func() {
 		cond := meta.FindStatusCondition(user.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(storagev1alpha1.ReasonInvalidSpec))
-		// Nothing watches Secrets, so the invalid state must self-requeue
-		// or a later fix would never be seen.
-		Expect(res.RequeueAfter).To(Equal(secretSettleInterval))
+		Expect(user.Status.PasswordSecretVersion).To(BeEmpty())
+		// The Secret watch brings the fix; no poll.
+		Expect(res.RequeueAfter).To(BeZero())
 
 		By("still invalid while the secret has no password key")
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "alice-password", Namespace: "default"},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		defer func() { Expect(k8sClient.Delete(ctx, secret)).To(Succeed()) }()
+		r := &LocalUserReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		Expect(r.secretUsers(ctx, secret)).To(
+			ConsistOf(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "alice"}}))
 
-		user, res = reconcileOnce("alice")
+		user, _ = reconcileOnce("alice")
 		cond = meta.FindStatusCondition(user.Status.Conditions, storagev1alpha1.ConditionAvailable)
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(res.RequeueAfter).To(Equal(secretSettleInterval))
+		Expect(user.Status.PasswordSecretVersion).To(BeEmpty())
 
 		By("going available once the secret carries a password")
 		secret.Data = map[string][]byte{"password": []byte("hunter2")}
 		Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 
-		user, res = reconcileOnce("alice")
+		user, _ = reconcileOnce("alice")
 		Expect(meta.IsStatusConditionTrue(user.Status.Conditions, storagev1alpha1.ConditionAvailable)).To(BeTrue())
-		Expect(res.RequeueAfter).To(BeZero())
+		Expect(user.Status.PasswordSecretVersion).To(Equal(secret.ResourceVersion))
+
+		By("restamping on rotation, which is what wakes the agents")
+		secret.Data["password"] = []byte("rotated1")
+		Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+		user, _ = reconcileOnce("alice")
+		Expect(user.Status.PasswordSecretVersion).To(Equal(secret.ResourceVersion))
 	})
 })

@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
@@ -38,11 +39,6 @@ type LocalUserReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
-
-// secretSettleInterval paces re-checks of a missing or empty password
-// Secret: nothing watches Secrets, so a fix would otherwise go unseen
-// until the LocalUser itself is touched.
-const secretSettleInterval = 15 * time.Second
 
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.stornas.io,resources=localusers/status,verbs=get;update;patch
@@ -61,22 +57,25 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Reason:             storagev1alpha1.ReasonReady,
 		ObservedGeneration: user.Generation,
 	}
-	res := ctrl.Result{}
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: user.Namespace, Name: user.Spec.PasswordSecretRef}, &secret)
+	version := ""
 	switch {
-	case err != nil:
+	case apierrors.IsNotFound(err):
 		available.Status = metav1.ConditionFalse
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " not found"
-		res.RequeueAfter = secretSettleInterval
+	case err != nil:
+		return ctrl.Result{}, err
 	case len(secret.Data["password"]) == 0:
 		available.Status = metav1.ConditionFalse
 		available.Reason = storagev1alpha1.ReasonInvalidSpec
 		available.Message = "password secret " + user.Spec.PasswordSecretRef + " has no password key"
-		res.RequeueAfter = secretSettleInterval
+	default:
+		version = secret.ResourceVersion
 	}
 
+	user.Status.PasswordSecretVersion = version
 	meta.SetStatusCondition(&user.Status.Conditions, available)
 	if err := r.Status().Update(ctx, &user); err != nil {
 		if apierrors.IsConflict(err) {
@@ -84,7 +83,22 @@ func (r *LocalUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		return ctrl.Result{}, err
 	}
-	return res, nil
+	return ctrl.Result{}, nil
+}
+
+// secretUsers maps a Secret event to the users whose password it holds.
+func (r *LocalUserReconciler) secretUsers(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list storagev1alpha1.LocalUserList
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, u := range list.Items {
+		if u.Spec.PasswordSecretRef == obj.GetName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&u)})
+		}
+	}
+	return reqs
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -93,6 +107,7 @@ func (r *LocalUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Unfiltered on purpose: an update conflict returns without requeue
 		// and relies on the competing write's event to reconcile again.
 		For(&storagev1alpha1.LocalUser{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretUsers)).
 		Named("localuser").
 		Complete(r)
 }

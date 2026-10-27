@@ -72,6 +72,15 @@ type LUNStatus struct {
 	Device string `json:"device,omitempty"`
 }
 
+// SecretVersion is the resourceVersion the operator last saw on a
+// referenced Secret.
+type SecretVersion struct {
+	// +required
+	Name string `json:"name"`
+	// +required
+	ResourceVersion string `json:"resourceVersion"`
+}
+
 // TargetStatus defines the observed state of Target.
 type TargetStatus struct {
 	// +listType=map
@@ -87,6 +96,13 @@ type TargetStatus struct {
 	// +listType=map
 	// +listMapKey=id
 	LUNs []LUNStatus `json:"luns,omitempty"`
+	// chapSecretVersions lists the usable CHAP Secrets the initiators
+	// reference. Only the operator watches Secrets (the agent may only get
+	// them), so a rotation reaches the agent as a change here.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ChapSecretVersions []SecretVersion `json:"chapSecretVersions,omitempty"`
 	// +optional
 	Sessions int32 `json:"sessions,omitempty"`
 	// Removed is the agent's teardown confirmation on a deleting target;
