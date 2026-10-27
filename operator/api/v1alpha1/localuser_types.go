@@ -38,6 +38,14 @@ type LocalUserSpec struct {
 	PasswordSecretRef string `json:"passwordSecretRef"`
 }
 
+// LocalUserPassword returns the password a Secret's data holds; ok is
+// false when it is empty. The operator reports and the agent revokes on
+// this one rule.
+func LocalUserPassword(data map[string][]byte) (password string, ok bool) {
+	password = string(data["password"])
+	return password, password != ""
+}
+
 // LocalUserStatus defines the observed state of LocalUser.
 type LocalUserStatus struct {
 	// +listType=map

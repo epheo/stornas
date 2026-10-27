@@ -76,7 +76,8 @@ Nothing is documented here before its flow is green.
   the share every user acts as one owner (`force user = root`), matching
   NFS's `no_root_squash` default.
 - One user object feeds both UI login and the samba passdb; deleting the
-  user revokes both.
+  user revokes both. Deleting its password Secret locks the user out of
+  SMB and ends its open sessions until the Secret is recreated.
 
 **Failover and recovery**
 - Node death: replicated volumes keep serving from the peer, exports and

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -267,10 +268,82 @@ func TestEnsureSMBUserCreatesMissingUnixAccount(t *testing.T) {
 
 func TestRemoveSMBUserToleratesAbsentEntry(t *testing.T) {
 	f := &fakeRunner{results: map[string]result{
-		"smbpasswd -x ghost": {out: "Failed to find entry for user ghost.", err: errExit},
+		"smbpasswd -x ghost":                        {out: "Failed to find entry for user ghost.", err: errExit},
+		"smbstatus --processes --user ghost --json": {out: `{"sessions": {}}`},
 	}}
-	RemoveSMBUser(context.Background(), f, "ghost")
-	if len(f.calls) != 1 {
-		t.Fatalf("calls = %v", f.calls)
+	if err := RemoveSMBUser(context.Background(), f, "ghost"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Samba never re-checks an authenticated session, so revocation must end
+// the user's live ones, after the passdb entry is gone so none reopens.
+func TestRemoveSMBUserEndsLiveSessions(t *testing.T) {
+	status := `{"sessions": {
+		"1": {"username": "alice", "server_id": {"pid": "155"}},
+		"2": {"username": "alice", "server_id": {"pid": "155"}},
+		"3": {"username": "bob", "server_id": {"pid": "200"}}}}`
+	f := &fakeRunner{results: map[string]result{
+		"smbpasswd -x alice":                        {},
+		"smbstatus --processes --user alice --json": {out: status},
+		"smbcontrol 155 shutdown":                   {},
+	}}
+	if err := RemoveSMBUser(context.Background(), f, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"smbpasswd -x alice", "smbstatus --processes --user alice --json", "smbcontrol 155 shutdown"}
+	if !slices.Equal(f.calls, want) {
+		t.Fatalf("calls = %v, want %v", f.calls, want)
+	}
+}
+
+// A session that outlives the shutdown is a failed revocation, so the
+// reconcile retries it; a process that exited meanwhile is not.
+func TestRemoveSMBUserFailsWhileSessionsRemain(t *testing.T) {
+	live := `{"sessions": {"1": {"username": "alice", "server_id": {"pid": "155"}}}}`
+	f := &fakeRunner{results: map[string]result{
+		"smbpasswd -x alice":                        {},
+		"smbstatus --processes --user alice --json": {out: live},
+		"smbcontrol 155 shutdown":                   {err: errExit},
+	}}
+	if err := RemoveSMBUser(context.Background(), f, "alice"); err == nil {
+		t.Fatal("revocation converged with a session still open")
+	}
+
+	gone := &listedOnce{fakeRunner: &fakeRunner{results: map[string]result{
+		"smbpasswd -x alice":                        {},
+		"smbstatus --processes --user alice --json": {out: live},
+		"smbcontrol 155 shutdown":                   {err: errExit},
+	}}}
+	if err := RemoveSMBUser(context.Background(), gone, "alice"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// listedOnce answers smbstatus from its results once, then with no
+// sessions: a process that exited between the list and the shutdown.
+type listedOnce struct {
+	*fakeRunner
+	listed bool
+}
+
+func (l *listedOnce) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if name == "smbstatus" {
+		if l.listed {
+			return []byte(`{"sessions": {}}`), nil
+		}
+		l.listed = true
+	}
+	return l.fakeRunner.Run(ctx, name, args...)
+}
+
+// Only an absent entry is converged; any other passdb failure must fail
+// the revocation instead of leaving the old password working.
+func TestRemoveSMBUserSurfacesPassdbFailure(t *testing.T) {
+	f := &fakeRunner{results: map[string]result{
+		"smbpasswd -x alice": {out: "tdb locked", err: errExit},
+	}}
+	if err := RemoveSMBUser(context.Background(), f, "alice"); err == nil {
+		t.Fatal("passdb failure swallowed")
 	}
 }
