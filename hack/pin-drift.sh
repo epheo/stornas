@@ -44,11 +44,6 @@ latest_tag() { # latest_tag <repo-url> <tag-prefix> [version-prefix]: stable onl
 		| sort -V | tail -1 | sed "s|^|${3:-}|"
 }
 
-# DRBD kmod, built in-tree; drbd-utils come with the r-drbd image.
-kmod=image/kmod/Containerfile
-check drbd "$(sed -n 's/^ARG DRBD_VERSION=//p' $kmod)" \
-	"$(latest_tag https://github.com/LINBIT/drbd drbd-)"
-
 # Build tools pinned in the Makefiles.
 mk=operator/Makefile
 check golangci-lint "$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' $mk)" \

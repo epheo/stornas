@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package v1alpha1 mirrors the subset of the r-drbd.io API stornas reads
-// and writes. r-drbd owns the CRDs (image/manifests/r-drbd/05-crds.yaml);
+// and writes. r-drbd owns the CRDs (shipped by the epheo/microshift base image);
 // fields stornas does not use are left out, so these types are only ever
 // created whole (Pool) or merge-patched (Volume), never updated.
 // +kubebuilder:object:generate=true

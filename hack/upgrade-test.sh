@@ -7,7 +7,7 @@
 # greenboot check fails: greenboot must go red and the boot counter
 # must fall the host back to the good deployment, data still intact.
 # The kmod-mismatch matrix row collapses to this: a mismatch fails the
-# storage check, and the same machinery must recover the appliance.
+# distro's r-drbd check, and the same machinery must recover the appliance.
 #
 # Needs a root-capable podman (PODMAN='sudo podman' in CI),
 # qemu-system-x86_64, and OVMF. KVM when present.

@@ -70,9 +70,9 @@ var _ = BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
-	// The r-drbd CRDs as the image ships them: `r-drbd crds` prints one v1
-	// List, which kustomize expands but envtest's file reader skips.
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "image", "manifests", "r-drbd", "05-crds.yaml"))
+	// `r-drbd crds` prints one v1 List, which kustomize expands but
+	// envtest's file reader skips.
+	raw, err := os.ReadFile(filepath.Join("testdata", "rdrbd-crds.yaml"))
 	Expect(err).NotTo(HaveOccurred())
 	var rdrbdCRDs struct {
 		Items []*apiextensionsv1.CustomResourceDefinition `json:"items"`

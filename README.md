@@ -122,6 +122,8 @@ Pool of the same name; volumes, replica state and split brain are
 Volume objects stornas watches. Replicated volumes run DRBD 9 with
 protocol C, quorum majority, suspend-io on quorum loss and a diskless
 tiebreaker on a third node. stornas never drives DRBD directly.
+The distro ships r-drbd, its DRBD module, and their host setup; stornas
+adds only its own workloads, protocols, and raid on top.
 
 Raid lives in mdadm below the LVM PV: each layer has one owner, and
 r-drbd only ever sees a thin pool on a plain device.
@@ -196,9 +198,8 @@ make replication-test  # three nodes: replication, failover, clients, partition
 make upgrade-test      # air-gapped upgrade and poisoned-image rollback
 ```
 
-`make image` replaces the base image's kernel with the newest CentOS
-Stream 10 kernel and builds the DRBD kmod against it, so every gate runs
-on the current kernel.
+`make image` layers stornas on the newest epheo/microshift image and
+keeps its kernel, DRBD module, and r-drbd version.
 The gates boot real VMs with qemu and drive the UI with playwright.
 The rule they enforce: a feature exists once its UI/UX flow passes e2e;
 kernel, mdadm, and DRBD internals are never the test subject, only
