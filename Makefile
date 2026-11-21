@@ -72,7 +72,7 @@ image: sync-manifests embed
 # Operator envtest loads a copy of the base image's r-drbd CRDs.
 RDRBD_CRDS := operator/internal/controller/testdata/rdrbd-crds.yaml
 check-rdrbd-crds:
-	$(PODMAN) run --rm --pull=newer --entrypoint cat $(BASE_IMAGE) \
+	$(PODMAN) run --rm --pull=always --entrypoint cat $(BASE_IMAGE) \
 		/usr/lib/microshift/manifests.d/000-r-drbd/base/crds.yaml | diff -u $(RDRBD_CRDS) -
 
 # Runtime gates, same harness shapes as the distro's smoke-test and

@@ -91,7 +91,10 @@ greenboot_green() {
 }
 ssh_down() { ! vssh true; }
 # bootc switch exits 0 without staging when the spec is unchanged.
-staged() { ! vssh bootc status | grep -qE '^ *staged: null'; }
+staged() { # staged <oci-archive path>
+	vssh bootc status --format yaml | sed -n '/^  staged:/,/^  [a-z]/p' \
+		| grep -F "image: $1" >/dev/null
+}
 
 mkdir -p "$WORKDIR/output"
 
@@ -239,7 +242,7 @@ retry 300 "greenboot green on A" greenboot_green
 log "switching to the good image (oci-archive over ssh, no registry)"
 vscp "$WORKDIR/good.tar" /var/tmp/next.tar
 vssh bootc switch --transport oci-archive /var/tmp/next.tar
-staged || die "bootc staged nothing for the good image"
+staged /var/tmp/next.tar || die "bootc staged nothing for the good image"
 vssh systemctl reboot || true
 retry 120 "VM rebooting" ssh_down
 retry 600 "ssh back after upgrade" vssh true
@@ -256,7 +259,7 @@ log "switching to the poisoned image: greenboot must fall back"
 # Its own path: the same oci-archive spec as the good image stages nothing.
 vscp "$WORKDIR/bad.tar" /var/tmp/bad.tar
 vssh bootc switch --transport oci-archive /var/tmp/bad.tar
-staged || die "bootc staged nothing for the poisoned image"
+staged /var/tmp/bad.tar || die "bootc staged nothing for the poisoned image"
 vssh systemctl reboot || true
 retry 120 "VM rebooting into the poison" ssh_down
 # Red boots cycle on their own; the recovered state is the one where
@@ -270,9 +273,10 @@ retry 600 "storage pool Available after rollback" pool_available
 retry 600 "consumer back after rollback" consumer_ready
 retry 120 "data intact after rollback" data_intact
 retry 600 "greenboot green after rollback" greenboot_green
-# The poisoned deployment survives as the rollback entry: proof it booted
-# and greenboot fell back from it, not a reboot of the good image.
-vssh bootc status | sed -n '/^  rollback:/,/^  [a-z]/p' | grep -q /var/tmp/bad.tar \
+# With rolled_back, the poisoned deployment left as the rollback entry
+# shows the poison was deployed and the good image came back after it.
+vssh bootc status --format yaml | sed -n '/^  rollback:/,/^  [a-z]/p' \
+	| grep -F "image: /var/tmp/bad.tar" >/dev/null \
 	|| die "the poisoned image is not the rollback deployment"
 
 log "UPGRADE AND ROLLBACK TEST PASSED"

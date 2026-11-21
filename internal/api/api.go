@@ -230,7 +230,7 @@ func (a *API) replicatedClass(ctx context.Context, class string) (bool, error) {
 		return false, nil
 	}
 	// r-drbd defaults replicas to 1 and refuses a class it cannot parse.
-	n, err := strconv.Atoi(strings.TrimSpace(sc.Parameters["replicas"]))
+	n, err := strconv.Atoi(strings.TrimSpace(sc.Parameters[rdrbdv1alpha1.ParamReplicas]))
 	return err == nil && n > 1, nil
 }
 
