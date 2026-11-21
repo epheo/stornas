@@ -1,4 +1,3 @@
-# r-drbd's CRDs as the epheo/microshift base image ships them (src/r-drbd/base/crds.yaml); refresh on a distro r-drbd bump.
 {
   "apiVersion": "v1",
   "items": [

@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed image smoke vm-test replication-test upgrade-test clean
+.PHONY: ci build generate types lint test web images sync-manifests embed image check-rdrbd-crds smoke vm-test replication-test upgrade-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets
 # and the same stale-generated-files check. The diff is scoped to generated
@@ -68,6 +68,12 @@ image: sync-manifests embed
 		--label org.opencontainers.image.source=https://github.com/epheo/stornas \
 		--label org.opencontainers.image.version=$(VERSION) \
 		-f image/Containerfile -t stornas-os:$(VERSION) image
+
+# Operator envtest loads a copy of the base image's r-drbd CRDs.
+RDRBD_CRDS := operator/internal/controller/testdata/rdrbd-crds.yaml
+check-rdrbd-crds:
+	$(PODMAN) run --rm --entrypoint cat $(BASE_IMAGE) \
+		/usr/lib/microshift/manifests.d/000-r-drbd/base/crds.yaml | diff -u $(RDRBD_CRDS) -
 
 # Runtime gates, same harness shapes as the distro's smoke-test and
 # vm-test. Both need a root-capable podman (PODMAN='sudo podman');

@@ -68,3 +68,4 @@ jobs:
       - run: npm ci
         working-directory: web
       - run: make image
+      - run: make check-rdrbd-crds
