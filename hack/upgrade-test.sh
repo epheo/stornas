@@ -34,6 +34,15 @@ diagnostics() {
 	vssh grub2-editenv list 2>&1 || true
 	log "DIAGNOSTICS: pods"
 	kc get pods -A -o wide 2>&1 | tail -20 || true
+	log "DIAGNOSTICS: not-running pod events"
+	for p in $(kc get pods -A --no-headers 2>/dev/null \
+			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
+		echo "--- ${p}"
+		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
+	done
+	log "DIAGNOSTICS: crio and microshift errors, this boot"
+	vssh journalctl -b -u crio -p warning --no-pager 2>&1 | tail -30 || true
+	vssh journalctl -b -u microshift -p err --no-pager 2>&1 | tail -30 || true
 	log "DIAGNOSTICS: pool"
 	kc get storagepool test -o yaml 2>&1 | sed -n '/status:/,$p' | tail -20 || true
 }
@@ -81,6 +90,8 @@ greenboot_green() {
 	vssh journalctl -b -u greenboot-healthcheck 2>/dev/null | grep -qiE 'GREEN|health-check passed'
 }
 ssh_down() { ! vssh true; }
+# bootc switch exits 0 without staging when the spec is unchanged.
+staged() { ! vssh bootc status | grep -qE '^ *staged: null'; }
 
 mkdir -p "$WORKDIR/output"
 
@@ -228,6 +239,7 @@ retry 300 "greenboot green on A" greenboot_green
 log "switching to the good image (oci-archive over ssh, no registry)"
 vscp "$WORKDIR/good.tar" /var/tmp/next.tar
 vssh bootc switch --transport oci-archive /var/tmp/next.tar
+staged || die "bootc staged nothing for the good image"
 vssh systemctl reboot || true
 retry 120 "VM rebooting" ssh_down
 retry 600 "ssh back after upgrade" vssh true
@@ -241,8 +253,10 @@ retry 600 "greenboot green on the good image" greenboot_green
 vssh rm -f /var/tmp/next.tar
 
 log "switching to the poisoned image: greenboot must fall back"
-vscp "$WORKDIR/bad.tar" /var/tmp/next.tar
-vssh bootc switch --transport oci-archive /var/tmp/next.tar
+# Its own path: the same oci-archive spec as the good image stages nothing.
+vscp "$WORKDIR/bad.tar" /var/tmp/bad.tar
+vssh bootc switch --transport oci-archive /var/tmp/bad.tar
+staged || die "bootc staged nothing for the poisoned image"
 vssh systemctl reboot || true
 retry 120 "VM rebooting into the poison" ssh_down
 # Red boots cycle on their own; the recovered state is the one where
@@ -256,6 +270,9 @@ retry 600 "storage pool Available after rollback" pool_available
 retry 600 "consumer back after rollback" consumer_ready
 retry 120 "data intact after rollback" data_intact
 retry 600 "greenboot green after rollback" greenboot_green
-vssh bootc status | grep -qi rollback || true
+# The poisoned deployment survives as the rollback entry: proof it booted
+# and greenboot fell back from it, not a reboot of the good image.
+vssh bootc status | sed -n '/^  rollback:/,/^  [a-z]/p' | grep -q /var/tmp/bad.tar \
+	|| die "the poisoned image is not the rollback deployment"
 
 log "UPGRADE AND ROLLBACK TEST PASSED"
