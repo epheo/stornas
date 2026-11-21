@@ -112,10 +112,13 @@ spec:
       # a worker loss must not take the UI with it.
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
+      priorityClassName: system-cluster-critical
       containers:
         - name: server
           image: ghcr.io/epheo/stornas:latest
           imagePullPolicy: Never # embedded via /usr/lib/embedded-images
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
           env:
             - name: STORNAS_WEB
               value: /usr/share/stornas/web
