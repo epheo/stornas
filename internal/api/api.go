@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,9 +226,12 @@ func (a *API) replicatedClass(ctx context.Context, class string) (bool, error) {
 	case err != nil:
 		return false, err
 	}
-	// r-drbd defaults replicas to 1.
-	n := sc.Parameters["replicas"]
-	return sc.Provisioner == rdrbdv1alpha1.Driver && n != "" && n != "1", nil
+	if sc.Provisioner != rdrbdv1alpha1.Driver {
+		return false, nil
+	}
+	// r-drbd defaults replicas to 1 and refuses a class it cannot parse.
+	n, err := strconv.Atoi(strings.TrimSpace(sc.Parameters["replicas"]))
+	return err == nil && n > 1, nil
 }
 
 var errNeedsNodes = errors.New("replication needs three nodes")

@@ -315,13 +315,14 @@ func TestReplicatedNeedsThreeNodes(t *testing.T) {
 }
 
 // The rule reads the class itself: the distro's r-drbd-replicated is
-// refused on two nodes like stornas-replicated, r-drbd-local is not.
+// refused on two nodes like stornas-replicated; one replica, however
+// written, is not.
 func TestReplicatedClassByParameters(t *testing.T) {
 	a := newAPI()
 	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for name, replicas := range map[string]string{"r-drbd-replicated": "2", "r-drbd-local": "1"} {
+	for name, replicas := range map[string]string{"r-drbd-replicated": "2", "r-drbd-local": "1", "site-local": " 01"} {
 		sc := &storagev1.StorageClass{
 			ObjectMeta:  metav1.ObjectMeta{Name: name},
 			Provisioner: "r-drbd.io",
@@ -338,6 +339,10 @@ func TestReplicatedClassByParameters(t *testing.T) {
 	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"b","size":"1Gi","storageClass":"r-drbd-local"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("r-drbd-local: code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"c","size":"1Gi","storageClass":"site-local"}`, sys)
+	if w.Code != 201 {
+		t.Fatalf("replicas \" 01\": code=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
