@@ -84,6 +84,18 @@ while read -r _ ref; do
 	check "action:$repo" "${ref#*@}" "$(latest_tag "https://github.com/$repo" v v)"
 done < <(grep -rhoE 'uses: [a-z0-9-]+/[a-z0-9-]+@v[0-9.]+' .github/workflows | sort -u)
 
+# Runner images, pinned per job; latest is the newest ubuntuNN image
+# GitHub publishes in actions/runner-images.
+runner_latest=$(git ls-remote --tags --refs https://github.com/actions/runner-images \
+	| sed -n 's|.*refs/tags/ubuntu\([0-9][0-9]\)/.*|\1.04|p' | sort -V | tail -1)
+while read -r _ img; do
+	check runner:ubuntu "${img#ubuntu-}" "$runner_latest"
+done < <(grep -rhoE 'runs-on: ubuntu-[0-9.]+' .github/workflows | sort -u)
+if grep -rqE 'runs-on: ubuntu-latest' .github/workflows; then
+	echo "DRIFT runner:ubuntu: ubuntu-latest is not a pin"
+	drift=1
+fi
+
 # Node: the newest LTS major.
 node_lts=$(curl -fsS -m 30 https://nodejs.org/dist/index.json \
 	| python3 -c 'import json,sys; print(next(r["version"] for r in json.load(sys.stdin) if r["lts"]).lstrip("v").split(".")[0])' || true)
