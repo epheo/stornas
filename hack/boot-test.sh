@@ -233,6 +233,9 @@ banner_has() { # banner_has <text>: login screen and MOTD both carry it
 retry 120 "login banner shows the served certificate" banner_has "$SERVED_FP"
 retry 60 "login banner shows the generated admin password" banner_has "$ADMIN_PW"
 retry 60 "serial console shows the certificate" grep -qaF "$SERVED_FP" "$WORKDIR/console.log"
+banner_url=$(vssh sed -n 's/^stornas web UI: //p' /etc/issue.d/50-stornas.issue)
+vssh curl -kfsS -m 15 "$banner_url/healthz" >/dev/null \
+	|| die "the login banner's address $banner_url does not reach the UI"
 
 # Real-browser phases; need playwright's chromium
 # (npx playwright install chromium, once per machine).

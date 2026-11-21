@@ -54,15 +54,18 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 
 	ns := envOr("STORNAS_NAMESPACE", "stornas-system")
-	cert, err := servingcert.Ensure(ctx, cs, ns, "stornas-tls", certHosts(ctx, cs), time.Now())
-	if err != nil {
+	certs := &servingcert.Rotator{
+		CS: cs, Namespace: ns, Name: "stornas-tls",
+		Hosts: func(ctx context.Context) []string { return certHosts(ctx, cs) },
+		Published: func(ctx context.Context, fingerprint string) error {
+			log.Printf("TLS certificate SHA-256 %s", fingerprint)
+			return console.Publish(ctx, cs, ns, fingerprint)
+		},
+	}
+	if err := certs.Load(ctx); err != nil {
 		log.Fatalf("serving certificate: %v", err)
 	}
-	fingerprint := servingcert.Fingerprint(cert.Leaf.Raw)
-	if err := console.Publish(ctx, cs, ns, fingerprint); err != nil {
-		log.Fatalf("publish certificate fingerprint: %v", err)
-	}
-	log.Printf("TLS certificate SHA-256 %s", fingerprint)
+	go certs.Run(ctx)
 
 	src := &auth.KubeSource{Dyn: dyn, CS: cs, Namespace: ns}
 	if pw, err := src.Bootstrap(ctx); err != nil {
@@ -136,7 +139,7 @@ func main() {
 	srv := &http.Server{
 		Addr:      *addr,
 		Handler:   mux,
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		TLSConfig: &tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12},
 	}
 	go func() {
 		<-ctx.Done()

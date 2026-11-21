@@ -95,10 +95,10 @@ Nothing is documented here before its flow is green.
 **Appliance lifecycle**
 - The UI serves HTTPS only, on port 30080, with a self-signed certificate
   generated at first boot and kept across restarts and upgrades.
-- Every node's login screen and MOTD show the UI address, the
-  certificate's SHA-256 fingerprint to check in the browser, and the
-  first-boot admin password until the UI has it changed; admin and
-  viewer roles.
+- Every node's login screen and MOTD show its UI address and the
+  certificate's SHA-256 fingerprint to check in the browser. The
+  control-plane node also shows the first-boot admin password until the
+  UI has it changed; workers never do. Admin and viewer roles.
 - Upgrades arrive as a new bootc image, air-gap friendly
   (`bootc switch --transport oci-archive`); greenboot gates the boot and
   a bad image rolls back automatically with data intact.

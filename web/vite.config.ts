@@ -21,9 +21,10 @@ export default defineConfig({
 	],
 	server: {
 		// Dev: proxy /api to the Go backend so the SPA can use same-origin paths.
-		// ws:true upgrades the WebSocket stream through the proxy too.
+		// ws:true upgrades the WebSocket stream through the proxy too; the
+		// backend serves TLS only, with its self-signed certificate.
 		proxy: {
-			'/api': { target: 'http://localhost:8080', ws: true },
+			'/api': { target: 'https://localhost:8080', ws: true, secure: false },
 		},
 	},
 });

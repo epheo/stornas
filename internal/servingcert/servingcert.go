@@ -13,9 +13,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,9 +32,9 @@ const (
 	renewLead = 30 * 24 * time.Hour
 )
 
-// Ensure returns the certificate stored in the Secret, creating it when
-// absent, unreadable, or within renewLead of expiry. hosts become the SANs
-// of a new certificate.
+// Ensure returns the certificate stored in the Secret, replacing it when
+// absent, unreadable, within renewLead of expiry, or not valid for every
+// host. hosts become the SANs of a new certificate.
 func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts []string, now time.Time) (tls.Certificate, error) {
 	secrets := cs.CoreV1().Secrets(ns)
 	s, err := secrets.Get(ctx, name, metav1.GetOptions{})
@@ -44,7 +46,7 @@ func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts
 	}
 	if s != nil {
 		if c, err := tls.X509KeyPair(s.Data[corev1.TLSCertKey], s.Data[corev1.TLSPrivateKeyKey]); err == nil &&
-			c.Leaf != nil && now.Add(renewLead).Before(c.Leaf.NotAfter) {
+			c.Leaf != nil && now.Add(renewLead).Before(c.Leaf.NotAfter) && covers(c.Leaf, hosts) {
 			return c, nil
 		}
 	}
@@ -67,6 +69,74 @@ func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts
 		return tls.Certificate{}, err
 	}
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// A failed node list yields fewer hosts, never a new certificate.
+func covers(leaf *x509.Certificate, hosts []string) bool {
+	for _, h := range hosts {
+		if h != "" && leaf.VerifyHostname(h) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// Rotator serves the current certificate and replaces it before expiry:
+// a server that never restarts must not end up serving an expired one.
+type Rotator struct {
+	CS        kubernetes.Interface
+	Namespace string
+	Name      string
+	Hosts     func(context.Context) []string
+	// Published runs on every new certificate with its fingerprint.
+	Published func(context.Context, string) error
+
+	cur atomic.Pointer[tls.Certificate]
+}
+
+// Load ensures and publishes the certificate once, before serving.
+func (r *Rotator) Load(ctx context.Context) error {
+	return r.ensure(ctx, time.Now())
+}
+
+func (r *Rotator) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return r.cur.Load(), nil
+}
+
+// Run wakes at the renewal date. A failed renewal tries again an hour
+// later: nothing else would wake it before the certificate expires.
+func (r *Rotator) Run(ctx context.Context) {
+	for {
+		wait := time.Until(r.cur.Load().Leaf.NotAfter.Add(-renewLead))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		if err := r.ensure(ctx, time.Now()); err != nil {
+			log.Printf("serving certificate renewal: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Hour):
+			}
+		}
+	}
+}
+
+func (r *Rotator) ensure(ctx context.Context, now time.Time) error {
+	c, err := Ensure(ctx, r.CS, r.Namespace, r.Name, r.Hosts(ctx), now)
+	if err != nil {
+		return err
+	}
+	if old := r.cur.Load(); old != nil && Fingerprint(old.Leaf.Raw) == Fingerprint(c.Leaf.Raw) {
+		return nil
+	}
+	if err := r.Published(ctx, Fingerprint(c.Leaf.Raw)); err != nil {
+		return err
+	}
+	r.cur.Store(&c)
+	return nil
 }
 
 // Fingerprint is the SHA-256 of the DER certificate, colon-separated

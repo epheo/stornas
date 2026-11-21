@@ -66,3 +66,51 @@ func TestFingerprintFormat(t *testing.T) {
 		t.Fatalf("fingerprint %q", fp)
 	}
 }
+
+// A node that joins later is not in the stored SANs: the next Ensure
+// replaces the certificate; a failed node list (fewer hosts) does not.
+func TestEnsureCoversHosts(t *testing.T) {
+	cs := k8sfake.NewClientset()
+	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
+	a, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas"}, now)
+	if err != nil || Fingerprint(a.Leaf.Raw) != Fingerprint(b.Leaf.Raw) {
+		t.Fatalf("fewer hosts replaced the certificate: %v", err)
+	}
+	c, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1", "node2"}, now)
+	if err != nil || Fingerprint(a.Leaf.Raw) == Fingerprint(c.Leaf.Raw) {
+		t.Fatalf("a new node kept the old certificate: %v", err)
+	}
+}
+
+// The rotator swaps the served certificate and republishes on renewal.
+func TestRotatorRenews(t *testing.T) {
+	var published []string
+	r := &Rotator{
+		CS: k8sfake.NewClientset(), Namespace: "ns", Name: "tls",
+		Hosts: func(context.Context) []string { return []string{"stornas"} },
+		Published: func(_ context.Context, fp string) error {
+			published = append(published, fp)
+			return nil
+		},
+	}
+	ctx := context.Background()
+	if err := r.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := r.GetCertificate(nil)
+	if err := r.ensure(ctx, time.Now()); err != nil || len(published) != 1 {
+		t.Fatalf("an unchanged certificate republished: %v %v", published, err)
+	}
+	if err := r.ensure(ctx, first.Leaf.NotAfter.Add(-renewLead/2)); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := r.GetCertificate(nil)
+	if Fingerprint(first.Leaf.Raw) == Fingerprint(second.Leaf.Raw) || len(published) != 2 ||
+		published[1] != Fingerprint(second.Leaf.Raw) {
+		t.Fatalf("renewal not served or published: %v", published)
+	}
+}

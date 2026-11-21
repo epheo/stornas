@@ -10,19 +10,18 @@ import (
 )
 
 func TestRender(t *testing.T) {
-	issue, motd := Render("AB:CD", map[string]string{"admin": "PW"})
-	for _, want := range []string{`https://\4:30080`, "SHA-256: AB:CD", "admin: PW"} {
-		if !strings.Contains(issue, want) {
-			t.Fatalf("issue lacks %q:\n%s", want, issue)
+	text := Render("192.168.1.10", "AB:CD", map[string]string{"admin": "PW"})
+	for _, want := range []string{"https://192.168.1.10:30080", "SHA-256: AB:CD", "admin: PW"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("banner lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(motd, `\4`) || !strings.Contains(motd, "admin: PW") {
-		t.Fatalf("motd:\n%s", motd)
+	if strings.Contains(text, `\`) {
+		t.Fatalf("agetty would expand an escape:\n%s", text)
 	}
 	// A changed password leaves the console.
-	issue, _ = Render("AB:CD", nil)
-	if strings.Contains(issue, "password") {
-		t.Fatalf("issue still shows a password:\n%s", issue)
+	if text := Render("", "AB:CD", nil); strings.Contains(text, "password") || !strings.Contains(text, "<this host>") {
+		t.Fatalf("banner:\n%s", text)
 	}
 }
 

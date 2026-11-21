@@ -48,10 +48,14 @@ func Publish(ctx context.Context, cs kubernetes.Interface, ns, fingerprint strin
 	return err
 }
 
-// Render returns the issue and MOTD text. passwords maps a user to the
-// generated password it still runs on.
-func Render(fingerprint string, passwords map[string]string) (issue, motd string) {
-	var lines []string
+// Render returns the login screen and MOTD text. host is the node's
+// address; passwords maps a user to the generated password it still runs
+// on. agetty expands backslash escapes, and none of these values holds one.
+func Render(host, fingerprint string, passwords map[string]string) string {
+	if host == "" {
+		host = "<this host>"
+	}
+	lines := []string{fmt.Sprintf("stornas web UI: https://%s:%d", host, UIPort)}
 	if fingerprint != "" {
 		lines = append(lines, "TLS certificate SHA-256: "+fingerprint)
 	}
@@ -63,12 +67,5 @@ func Render(fingerprint string, passwords map[string]string) (issue, motd string
 	for _, u := range users {
 		lines = append(lines, fmt.Sprintf("Initial password for %s: %s (the UI asks to change it)", u, passwords[u]))
 	}
-	tail := strings.Join(lines, "\n")
-	if tail != "" {
-		tail += "\n"
-	}
-	// agetty expands \4 to the host's IPv4 address.
-	issue = fmt.Sprintf("stornas web UI: https://\\4:%d\n%s\n", UIPort, tail)
-	motd = fmt.Sprintf("stornas web UI: https://<this host>:%d\n%s", UIPort, tail)
-	return issue, motd
+	return strings.Join(lines, "\n") + "\n\n"
 }

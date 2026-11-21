@@ -561,6 +561,18 @@ api() { # api <method> <path> [json body]
 	fi
 }
 retry 60 "appliance API login" api_login
+
+log "login banners: address and certificate on every node, the password on the control plane only"
+REPL_FP=$(openssl s_client -connect "$IP1:30080" </dev/null 2>/dev/null \
+	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
+[ -n "$REPL_FP" ] || die "no UI certificate served"
+banner_on() { "$1" cat /etc/issue.d/50-stornas.issue 2>/dev/null | grep -qF "$2"; }
+node1_banner() { banner_on v1 "https://$IP1:30080" && banner_on v1 "$REPL_FP"; }
+worker_banner() { banner_on v2 "https://$IP2:30080" && banner_on v2 "$REPL_FP"; }
+retry 120 "node1 banner shows its address and the certificate" node1_banner
+retry 60 "node1 banner shows the generated admin password" banner_on v1 "$ADMIN_PW"
+retry 120 "worker banner shows its address and the certificate" worker_banner
+banner_on v2 "$ADMIN_PW" && die "a worker banner shows the admin password"
 # Real-browser phases; need playwright's chromium.
 ui_phase() { # ui_phase <phase>
 	UI_URL="https://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \

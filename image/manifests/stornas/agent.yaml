@@ -20,6 +20,10 @@ rules:
   - apiGroups: [storage.stornas.io]
     resources: [nodeinventories]
     verbs: [get, list, watch, create]
+  # Its own Node only (field-selected cache): the login banner's address and role.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
   - apiGroups: [storage.stornas.io]
     resources:
       [storagepools/status, shares/status, targets/status, nodeinventories/status]
