@@ -10,7 +10,10 @@ on:
 
 jobs:
   upgrade:
-    runs-on: ubuntu-latest
+    # On ubuntu-26.04 bootc-image-builder's osbuild cannot mount
+    # /run/osbuild/containers/storage (permission denied); the distro's
+    # VM lanes pin 24.04 for the same builder.
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7.0.1
