@@ -16,8 +16,10 @@
 				<button
 					onclick={() => toasts.dismiss(t.id)}
 					aria-label="Dismiss"
-					class="shrink-0 text-slate-400 hover:text-slate-100"><X size={14} /></button
+					class="shrink-0 text-slate-400 hover:text-slate-100"
 				>
+					<X size={14} />
+				</button>
 			</div>
 		{/each}
 	</div>

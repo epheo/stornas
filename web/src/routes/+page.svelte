@@ -166,9 +166,9 @@
 			<h2 class="mb-3 text-sm font-medium text-slate-300">Capacity</h2>
 			{#if snap.pools.length === 0}
 				<p class="text-sm text-slate-500">
-					No storage pools yet. <a class="text-sky-400 hover:underline" href="/pools"
-						>Create one from free disks.</a
-					>
+					No storage pools yet. <a class="text-sky-400 hover:underline" href="/pools">
+						Create one from free disks.
+					</a>
 				</p>
 			{:else}
 				<div class="space-y-3">
