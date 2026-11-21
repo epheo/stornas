@@ -152,6 +152,21 @@ func TestResolvePlacementSticksToCurrent(t *testing.T) {
 	}
 }
 
+// A node back from a hard kill still reports its pre-kill InUse and lists
+// first; the export stays on the survivor that holds it.
+func TestResolvePlacementStaleInUseKeepsCurrent(t *testing.T) {
+	v := volume("node-b",
+		replica{node: "node-b", role: rdrbdv1alpha1.RoleDiskful, inUse: true},
+		replica{node: "node-a", role: rdrbdv1alpha1.RoleDiskful, inUse: true})
+	node, _, _, err := ResolvePlacement(v, "node-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-a" {
+		t.Fatalf("node = %s", node)
+	}
+}
+
 func TestResolvePlacementAllReplicasAvoided(t *testing.T) {
 	v := volume("", replica{node: "node-a", role: rdrbdv1alpha1.RoleDiskful})
 	if _, _, _, err := ResolvePlacement(v, "", map[string]bool{"node-a": true}); err == nil {
