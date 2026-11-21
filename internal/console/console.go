@@ -7,7 +7,9 @@ package console
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -55,7 +57,7 @@ func Render(host, fingerprint string, passwords map[string]string) string {
 	if host == "" {
 		host = "<this host>"
 	}
-	lines := []string{fmt.Sprintf("stornas web UI: https://%s:%d", host, UIPort)}
+	lines := []string{"stornas web UI: https://" + net.JoinHostPort(host, strconv.Itoa(UIPort))}
 	if fingerprint != "" {
 		lines = append(lines, "TLS certificate SHA-256: "+fingerprint)
 	}

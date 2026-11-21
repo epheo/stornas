@@ -19,6 +19,9 @@ func TestRender(t *testing.T) {
 	if strings.Contains(text, `\`) {
 		t.Fatalf("agetty would expand an escape:\n%s", text)
 	}
+	if text := Render("fd00::1", "", nil); !strings.Contains(text, "https://[fd00::1]:30080") {
+		t.Fatalf("IPv6 address not bracketed:\n%s", text)
+	}
 	// A changed password leaves the console.
 	if text := Render("", "AB:CD", nil); strings.Contains(text, "password") || !strings.Contains(text, "<this host>") {
 		t.Fatalf("banner:\n%s", text)

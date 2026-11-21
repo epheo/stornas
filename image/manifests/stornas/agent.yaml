@@ -20,7 +20,8 @@ rules:
   - apiGroups: [storage.stornas.io]
     resources: [nodeinventories]
     verbs: [get, list, watch, create]
-  # Its own Node only (field-selected cache): the login banner's address and role.
+  # The login banner's address and role. RBAC cannot narrow list/watch to
+  # one name; the agent's cache selects its own Node only.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get, list, watch]

@@ -67,22 +67,18 @@ func TestFingerprintFormat(t *testing.T) {
 	}
 }
 
-// A node that joins later is not in the stored SANs: the next Ensure
-// replaces the certificate; a failed node list (fewer hosts) does not.
-func TestEnsureCoversHosts(t *testing.T) {
+// A node that joins later keeps the certificate: the fingerprint an admin
+// checked must not change on the next restart.
+func TestEnsureKeepsCertificateWhenNodesJoin(t *testing.T) {
 	cs := k8sfake.NewClientset()
 	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
 	a, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas"}, now)
+	b, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1", "node2"}, now)
 	if err != nil || Fingerprint(a.Leaf.Raw) != Fingerprint(b.Leaf.Raw) {
-		t.Fatalf("fewer hosts replaced the certificate: %v", err)
-	}
-	c, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1", "node2"}, now)
-	if err != nil || Fingerprint(a.Leaf.Raw) == Fingerprint(c.Leaf.Raw) {
-		t.Fatalf("a new node kept the old certificate: %v", err)
+		t.Fatalf("a joining node replaced the certificate: %v", err)
 	}
 }
 

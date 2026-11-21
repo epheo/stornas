@@ -226,16 +226,22 @@ code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$UI_PORT/h
 SERVED_FP=$(openssl s_client -connect "127.0.0.1:$UI_PORT" </dev/null 2>/dev/null \
 	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
 [ -n "$SERVED_FP" ] || die "no certificate served"
+# Read first, grep after: a failed ssh or a grep closing the pipe early
+# must never pass a check.
+banner_text() { vssh cat /etc/issue.d/50-stornas.issue /run/motd.d/50-stornas; }
 banner_has() { # banner_has <text>: login screen and MOTD both carry it
-	vssh cat /etc/issue.d/50-stornas.issue /run/motd.d/50-stornas 2>/dev/null \
-		| grep -cF "$1" | grep -qx 2
+	local text
+	text=$(banner_text) || return 1
+	[ "$(grep -cF "$1" <<<"$text")" = 2 ]
 }
 retry 120 "login banner shows the served certificate" banner_has "$SERVED_FP"
 retry 60 "login banner shows the generated admin password" banner_has "$ADMIN_PW"
 retry 60 "serial console shows the certificate" grep -qaF "$SERVED_FP" "$WORKDIR/console.log"
-banner_url=$(vssh sed -n 's/^stornas web UI: //p' /etc/issue.d/50-stornas.issue)
-vssh curl -kfsS -m 15 "$banner_url/healthz" >/dev/null \
-	|| die "the login banner's address $banner_url does not reach the UI"
+node_ip=$(kc get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+[ -n "$node_ip" ] || die "node has no InternalIP"
+banner_has "stornas web UI: https://$node_ip:30080" || die "the login banner does not name the node address $node_ip"
+vssh curl -kfsS -m 15 "https://$node_ip:30080/healthz" >/dev/null \
+	|| die "the login banner's address $node_ip does not reach the UI"
 
 # Real-browser phases; need playwright's chromium
 # (npx playwright install chromium, once per machine).
@@ -544,7 +550,9 @@ code=$(http_code -H 'Content-Type: application/json' \
 	"https://127.0.0.1:$UI_PORT/api/v1/login")
 [ "$code" = 401 ] || die "retired generated password still logs in (got $code)"
 banner_hides_pw() {
-	banner_has "$SERVED_FP" && ! vssh cat /etc/issue.d/50-stornas.issue /run/motd.d/50-stornas | grep -qF "$ADMIN_PW"
+	local text
+	text=$(banner_text) || return 1
+	grep -qF "$SERVED_FP" <<<"$text" && ! grep -qF "$ADMIN_PW" <<<"$text"
 }
 retry 60 "login banner drops the changed password" banner_hides_pw
 

@@ -33,8 +33,9 @@ const (
 )
 
 // Ensure returns the certificate stored in the Secret, replacing it when
-// absent, unreadable, within renewLead of expiry, or not valid for every
-// host. hosts become the SANs of a new certificate.
+// absent, unreadable, or within renewLead of expiry. hosts become the SANs
+// of a new certificate only: a node joining later must not change the
+// fingerprint the admin already checked.
 func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts []string, now time.Time) (tls.Certificate, error) {
 	secrets := cs.CoreV1().Secrets(ns)
 	s, err := secrets.Get(ctx, name, metav1.GetOptions{})
@@ -46,7 +47,7 @@ func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts
 	}
 	if s != nil {
 		if c, err := tls.X509KeyPair(s.Data[corev1.TLSCertKey], s.Data[corev1.TLSPrivateKeyKey]); err == nil &&
-			c.Leaf != nil && now.Add(renewLead).Before(c.Leaf.NotAfter) && covers(c.Leaf, hosts) {
+			c.Leaf != nil && now.Add(renewLead).Before(c.Leaf.NotAfter) {
 			return c, nil
 		}
 	}
@@ -71,16 +72,6 @@ func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts
 	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
-// A failed node list yields fewer hosts, never a new certificate.
-func covers(leaf *x509.Certificate, hosts []string) bool {
-	for _, h := range hosts {
-		if h != "" && leaf.VerifyHostname(h) != nil {
-			return false
-		}
-	}
-	return true
-}
-
 // Rotator serves the current certificate and replaces it before expiry:
 // a server that never restarts must not end up serving an expired one.
 type Rotator struct {
@@ -103,23 +94,20 @@ func (r *Rotator) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	return r.cur.Load(), nil
 }
 
-// Run wakes at the renewal date. A failed renewal tries again an hour
-// later: nothing else would wake it before the certificate expires.
+// Run checks the wall clock at least daily: a timer runs on the monotonic
+// clock, which stops across suspend and ignores a stepped wall clock. A
+// failed renewal retries at the next wake; nothing else would wake it
+// before the certificate expires.
 func (r *Rotator) Run(ctx context.Context) {
 	for {
-		wait := time.Until(r.cur.Load().Leaf.NotAfter.Add(-renewLead))
+		wait := min(time.Until(r.cur.Load().Leaf.NotAfter.Add(-renewLead)), 24*time.Hour)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-time.After(max(wait, time.Hour)):
 		}
 		if err := r.ensure(ctx, time.Now()); err != nil {
 			log.Printf("serving certificate renewal: %v", err)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Hour):
-			}
 		}
 	}
 }
