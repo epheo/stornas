@@ -223,8 +223,11 @@ curl -kfsS -m 15 -b "$WORKDIR/cookies" "https://127.0.0.1:$UI_PORT/api/v1/state"
 log "the UI is HTTPS only, and the console names its certificate"
 code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$UI_PORT/healthz" || true)
 [ "$code" = 400 ] || die "plain HTTP got $code, want the TLS server's 400"
-SERVED_FP=$(openssl s_client -connect "127.0.0.1:$UI_PORT" </dev/null 2>/dev/null \
-	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
+served_fp() {
+	openssl s_client -connect "127.0.0.1:$UI_PORT" </dev/null 2>/dev/null \
+		| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2
+}
+SERVED_FP=$(served_fp) || die "no certificate served"
 [ -n "$SERVED_FP" ] || die "no certificate served"
 # Read first, grep after: a failed ssh or a grep closing the pipe early
 # must never pass a check.
@@ -407,8 +410,7 @@ log "server restart: UI back, stale session refused"
 kc -n stornas-system rollout restart deploy/stornas-server
 kc -n stornas-system rollout status deploy/stornas-server --timeout=180s
 retry 120 "healthz after server restart" curl -kfsS -m 15 "https://127.0.0.1:$UI_PORT/healthz"
-fp_now=$(openssl s_client -connect "127.0.0.1:$UI_PORT" </dev/null 2>/dev/null \
-	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
+fp_now=$(served_fp) || die "no certificate served after the server restart"
 [ "$fp_now" = "$SERVED_FP" ] || die "server restart replaced the certificate ($fp_now)"
 stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "https://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
 retry 60 "stale session refused" stale_refused

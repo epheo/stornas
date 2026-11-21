@@ -124,6 +124,12 @@ spec:
               value: /usr/share/stornas/web
           ports:
             - containerPort: 8080
+          # Endpoints only once the server listens: it loads its certificate
+          # from the API first, and a restart or upgrade must not route UI
+          # requests to a pod that refuses them.
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080, scheme: HTTPS}
+            periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

@@ -239,8 +239,11 @@ retry 300 "consumer ready" consumer_ready
 kc -n stornas-system exec deploy/upgrade-consumer -- sh -c 'echo before-upgrade > /data/marker && sync'
 retry 300 "greenboot green on A" greenboot_green
 # What the live server serves, not what was published before the reboot.
+# OVN-Kubernetes serves NodePorts on the node address, not on loopback.
+NODE_IP=$(kc get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+[ -n "$NODE_IP" ] || die "node has no InternalIP"
 ui_fingerprint() {
-	vssh sh -c 'openssl s_client -connect 127.0.0.1:30080 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256' \
+	vssh sh -c "openssl s_client -connect $NODE_IP:30080 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256" \
 		| cut -d= -f2
 }
 retry 300 "UI serving its certificate on A" ui_fingerprint
