@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"log"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -20,8 +23,10 @@ import (
 	"github.com/epheo/stornas/internal/api"
 	"github.com/epheo/stornas/internal/auth"
 	"github.com/epheo/stornas/internal/clusterstate"
+	"github.com/epheo/stornas/internal/console"
 	"github.com/epheo/stornas/internal/eventbus"
 	"github.com/epheo/stornas/internal/model"
+	"github.com/epheo/stornas/internal/servingcert"
 	"github.com/epheo/stornas/internal/stream"
 	"github.com/epheo/stornas/internal/tasks"
 )
@@ -48,7 +53,21 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
-	src := &auth.KubeSource{Dyn: dyn, CS: cs, Namespace: envOr("STORNAS_NAMESPACE", "stornas-system")}
+	ns := envOr("STORNAS_NAMESPACE", "stornas-system")
+	certs := &servingcert.Rotator{
+		CS: cs, Namespace: ns, Name: "stornas-tls",
+		Hosts: func(ctx context.Context) []string { return certHosts(ctx, cs) },
+		Published: func(ctx context.Context, fingerprint string) error {
+			log.Printf("TLS certificate SHA-256 %s", fingerprint)
+			return console.Publish(ctx, cs, ns, fingerprint)
+		},
+	}
+	if err := certs.Load(ctx); err != nil {
+		log.Fatalf("serving certificate: %v", err)
+	}
+	go certs.Run(ctx)
+
+	src := &auth.KubeSource{Dyn: dyn, CS: cs, Namespace: ns}
 	if pw, err := src.Bootstrap(ctx); err != nil {
 		log.Printf("auth bootstrap: %v (login unavailable until a LocalUser exists)", err)
 	} else if pw != "" {
@@ -117,16 +136,40 @@ func main() {
 	mux.Handle("DELETE /api/v1/users/{name}", admin(mutate.DeleteUser))
 	mux.Handle("GET /", spaHandler(*webDir))
 
-	srv := &http.Server{Addr: *addr, Handler: mux}
+	srv := &http.Server{
+		Addr:      *addr,
+		Handler:   mux,
+		TLSConfig: &tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12},
+	}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Shutdown(context.Background()) // no drain deadline needed at process exit
 	}()
 
-	log.Printf("stornas %s listening on %s", version, *addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	log.Printf("stornas %s listening on %s (TLS)", version, *addr)
+	if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// certHosts names the certificate after every node: the NodePort answers on
+// all of them. A failed list still yields a usable certificate.
+func certHosts(ctx context.Context, cs kubernetes.Interface) []string {
+	hosts := []string{"stornas", "localhost", "127.0.0.1"}
+	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("certificate SANs without node names: %v", err)
+		return hosts
+	}
+	for _, n := range nodes.Items {
+		hosts = append(hosts, n.Name)
+		for _, a := range n.Status.Addresses {
+			if a.Type == corev1.NodeInternalIP || a.Type == corev1.NodeExternalIP {
+				hosts = append(hosts, a.Address)
+			}
+		}
+	}
+	return hosts
 }
 
 // kubeConfig prefers in-cluster (the normal deployment), falling back to

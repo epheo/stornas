@@ -213,17 +213,43 @@ retry 900 "r-drbd agent up" rdrbd_agent_up
 retry 600 "stornas operator, agent, server running" stornas_up
 
 log "UI answers and login works"
-retry 300 "healthz via hostfwd" curl -fsS -m 15 "http://127.0.0.1:$UI_PORT/healthz"
+retry 300 "healthz via hostfwd" curl -kfsS -m 15 "https://127.0.0.1:$UI_PORT/healthz"
 ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+curl -kfsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-	"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
-curl -fsS -m 15 -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
+	"https://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null || die "login failed"
+curl -kfsS -m 15 -b "$WORKDIR/cookies" "https://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' || die "state missing pools"
+
+log "the UI is HTTPS only, and the console names its certificate"
+code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$UI_PORT/healthz" || true)
+[ "$code" = 400 ] || die "plain HTTP got $code, want the TLS server's 400"
+served_fp() {
+	openssl s_client -connect "127.0.0.1:$UI_PORT" </dev/null 2>/dev/null \
+		| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2
+}
+SERVED_FP=$(served_fp) || die "no certificate served"
+[ -n "$SERVED_FP" ] || die "no certificate served"
+# Read first, grep after: a failed ssh or a grep closing the pipe early
+# must never pass a check.
+banner_text() { vssh cat /etc/issue.d/50-stornas.issue /run/motd.d/50-stornas; }
+banner_has() { # banner_has <text>: login screen and MOTD both carry it
+	local text
+	text=$(banner_text) || return 1
+	[ "$(grep -cF "$1" <<<"$text")" = 2 ]
+}
+retry 120 "login banner shows the served certificate" banner_has "$SERVED_FP"
+retry 60 "login banner shows the generated admin password" banner_has "$ADMIN_PW"
+retry 60 "serial console shows the certificate" grep -qaF "$SERVED_FP" "$WORKDIR/console.log"
+node_ip=$(kc get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+[ -n "$node_ip" ] || die "node has no InternalIP"
+banner_has "stornas web UI: https://$node_ip:30080" || die "the login banner does not name the node address $node_ip"
+vssh curl -kfsS -m 15 "https://$node_ip:30080/healthz" >/dev/null \
+	|| die "the login banner's address $node_ip does not reach the UI"
 
 # Real-browser phases; need playwright's chromium
 # (npx playwright install chromium, once per machine).
 ui_phase() { # ui_phase <phase> [user] [password]
-	UI_URL="http://127.0.0.1:$UI_PORT" UI_USER="${2:-admin}" ADMIN_PW="${3:-$ADMIN_PW}" \
+	UI_URL="https://127.0.0.1:$UI_PORT" UI_USER="${2:-admin}" ADMIN_PW="${3:-$ADMIN_PW}" \
 		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
 }
 
@@ -267,12 +293,12 @@ EOF
 # The session layer is the security boundary; every refusal is product
 # behavior worth pinning.
 log "auth boundaries: anonymous and wrong-password refused"
-http_code() { curl -s -m 15 -o /dev/null -w '%{http_code}' "$@"; }
-code=$(http_code "http://127.0.0.1:$UI_PORT/api/v1/state")
+http_code() { curl -ks -m 15 -o /dev/null -w '%{http_code}' "$@"; }
+code=$(http_code "https://127.0.0.1:$UI_PORT/api/v1/state")
 [ "$code" = 401 ] || die "anonymous state got $code, want 401"
 code=$(http_code -H 'Content-Type: application/json' \
 	-d '{"username":"admin","password":"not-the-password"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/login")
+	"https://127.0.0.1:$UI_PORT/api/v1/login")
 [ "$code" = 401 ] || die "wrong-password login got $code, want 401"
 
 # Supported topologies: one node, or three and up (README). A single
@@ -281,7 +307,7 @@ log "replication refused below three nodes, in the form and the API"
 ui_phase replication-refused
 code=$(http_code -b "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-replicated"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
+	"https://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
 [ "$code" = 409 ] || die "replicated volume on one node got $code, want 409"
 kc -n stornas-system get pvc nope >/dev/null 2>&1 && die "refused volume was created anyway"
 
@@ -300,7 +326,7 @@ retry 600 "volume pinned to bulk Bound" bulk_vol_bound
 BULK_PV=$(kc -n stornas-system get pvc bulk-vol -o jsonpath='{.spec.volumeName}')
 vssh sh -c "lvs --noheadings -o lv_name stornas-bulk | grep -q $BULK_PV" \
 	|| die "bulk-vol is not in pool bulk's VG"
-code=$(http_code -b "$WORKDIR/cookies" -X DELETE "http://127.0.0.1:$UI_PORT/api/v1/pools/bulk")
+code=$(http_code -b "$WORKDIR/cookies" -X DELETE "https://127.0.0.1:$UI_PORT/api/v1/pools/bulk")
 [ "$code" = 409 ] || die "delete of a pool backing a volume got $code, want 409"
 TARGET_VOL=bulk-vol ui_phase delete-volume
 bulk_pv_gone() { ! kc get pv "$BULK_PV" >/dev/null 2>&1; }
@@ -362,20 +388,20 @@ kc delete namespace e2e-foreign --wait
 log "viewer role: created in the UI, read allowed, mutations refused"
 TARGET_USER=eyes TARGET_USER_PW=e2eviewer123 ui_phase create-user
 viewer_login() {
-	curl -fsS -m 15 -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
+	curl -kfsS -m 15 -c "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 		-d '{"username":"eyes","password":"e2eviewer123"}' \
-		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
+		"https://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
 }
 retry 60 "viewer login" viewer_login
-curl -fsS -m 15 -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' \
+curl -kfsS -m 15 -b "$WORKDIR/vcookies" "https://127.0.0.1:$UI_PORT/api/v1/state" | grep -q '"pools":' \
 	|| die "viewer cannot read state"
 code=$(http_code -b "$WORKDIR/vcookies" -H 'Content-Type: application/json' \
 	-d '{"name":"nope","size":"1Gi","storageClass":"stornas-local"}' \
-	"http://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
+	"https://127.0.0.1:$UI_PORT/api/v1/namespaces/stornas-system/volumes")
 [ "$code" = 403 ] || die "viewer mutation got $code, want 403"
-curl -fsS -m 15 -b "$WORKDIR/vcookies" -X POST "http://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
+curl -kfsS -m 15 -b "$WORKDIR/vcookies" -X POST "https://127.0.0.1:$UI_PORT/api/v1/logout" >/dev/null \
 	|| die "logout failed"
-code=$(http_code -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state")
+code=$(http_code -b "$WORKDIR/vcookies" "https://127.0.0.1:$UI_PORT/api/v1/state")
 [ "$code" = 401 ] || die "logged-out session still valid (got $code)"
 
 # Sessions are in-memory by design: a server restart must refuse old
@@ -383,13 +409,15 @@ code=$(http_code -b "$WORKDIR/vcookies" "http://127.0.0.1:$UI_PORT/api/v1/state"
 log "server restart: UI back, stale session refused"
 kc -n stornas-system rollout restart deploy/stornas-server
 kc -n stornas-system rollout status deploy/stornas-server --timeout=180s
-retry 120 "healthz after server restart" curl -fsS -m 15 "http://127.0.0.1:$UI_PORT/healthz"
-stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "http://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
+retry 120 "healthz after server restart" curl -kfsS -m 15 "https://127.0.0.1:$UI_PORT/healthz"
+fp_now=$(served_fp) || die "no certificate served after the server restart"
+[ "$fp_now" = "$SERVED_FP" ] || die "server restart replaced the certificate ($fp_now)"
+stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "https://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
 retry 60 "stale session refused" stale_refused
 relogin() {
-	curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	curl -kfsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-		"http://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
+		"https://127.0.0.1:$UI_PORT/api/v1/login" >/dev/null
 }
 retry 60 "fresh login after restart" relogin
 
@@ -402,7 +430,7 @@ TARGET_USER=eyes ui_phase delete-user
 eyes_dead() {
 	[ "$(http_code -H 'Content-Type: application/json' \
 		-d '{"username":"eyes","password":"e2eviewer123"}' \
-		"http://127.0.0.1:$UI_PORT/api/v1/login")" = 401 ]
+		"https://127.0.0.1:$UI_PORT/api/v1/login")" = 401 ]
 }
 retry 60 "deleted user cannot log in" eyes_dead
 
@@ -521,8 +549,14 @@ log "first-boot onboarding: nudge, password change, relogin"
 NEW_PW=stornas-e2e-pw1 ui_phase onboarding
 code=$(http_code -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-	"http://127.0.0.1:$UI_PORT/api/v1/login")
+	"https://127.0.0.1:$UI_PORT/api/v1/login")
 [ "$code" = 401 ] || die "retired generated password still logs in (got $code)"
+banner_hides_pw() {
+	local text
+	text=$(banner_text) || return 1
+	grep -qF "$SERVED_FP" <<<"$text" && ! grep -qF "$ADMIN_PW" <<<"$text"
+}
+retry 60 "login banner drops the changed password" banner_hides_pw
 
 # The air-gap contract: every ref in the embedded manifest must come
 # from the store, never a registry.

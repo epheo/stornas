@@ -160,11 +160,11 @@ diagnostics() {
 	lc_pod=$(kc -n stornas-system get pods -l app.kubernetes.io/name=stornas-server -o jsonpath='{.items[0].status.podIP}' 2>/dev/null) || true
 	lc_svc=$(kc -n stornas-system get svc stornas -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
 	echo "stornas-server pod ${lc_pod:-?} service ${lc_svc:-?}; probes from node2 pod ${agent2:-?} then node2 host"
-	for u in "http://${lc_pod:-127.0.0.1}:8080/healthz" "http://${lc_svc:-127.0.0.1}:8080/healthz" "http://stornas.stornas-system.svc:8080/healthz"; do
+	for u in "https://${lc_pod:-127.0.0.1}:8080/healthz" "https://${lc_svc:-127.0.0.1}:8080/healthz" "https://stornas.stornas-system.svc:8080/healthz"; do
 		echo "--- pod: $u"
-		kc -n stornas-system exec "${agent2:-none}" -- curl -s -m5 -o /dev/null -w '%{http_code}\n' "$u" 2>&1 | tail -2 || true
+		kc -n stornas-system exec "${agent2:-none}" -- curl -ks -m5 -o /dev/null -w '%{http_code}\n' "$u" 2>&1 | tail -2 || true
 	done
-	v2 sh -c "curl -s -m5 -o /dev/null -w 'host->pod %{http_code}\n' http://${lc_pod:-127.0.0.1}:8080/healthz; curl -s -m5 -o /dev/null -w 'host->svc %{http_code}\n' http://${lc_svc:-127.0.0.1}:8080/healthz; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
+	v2 sh -c "curl -ks -m5 -o /dev/null -w 'host->pod %{http_code}\n' https://${lc_pod:-127.0.0.1}:8080/healthz; curl -ks -m5 -o /dev/null -w 'host->svc %{http_code}\n' https://${lc_svc:-127.0.0.1}:8080/healthz; ping -c2 -W2 ${lc_pod:-127.0.0.1} | tail -2" 2>&1 || true
 	log "DIAGNOSTICS: tunnels, routes, firewall on the data nodes"
 	for fn in v1 v2; do
 		$fn sh -c 'hostname; ovs-vsctl --columns=name,options find interface type=geneve 2>/dev/null; ip route show 2>/dev/null; firewall-cmd --list-all 2>/dev/null | grep -E "interfaces|services|ports|target"; ss -unl 2>/dev/null | grep 6081' 2>&1 || true
@@ -548,22 +548,42 @@ VIP=$NET.60
 # user would; kubectl stays for cluster-level scaffolding only.
 ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
 api_login() {
-	curl -fsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
+	curl -kfsS -m 15 -c "$WORKDIR/cookies" -H 'Content-Type: application/json' \
 		-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-		"http://$IP1:30080/api/v1/login" >/dev/null
+		"https://$IP1:30080/api/v1/login" >/dev/null
 }
 api() { # api <method> <path> [json body]
 	if [ $# -ge 3 ]; then
-		curl -fsS -m 15 -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
-			-d "$3" "http://$IP1:30080/api/v1$2"
+		curl -kfsS -m 15 -b "$WORKDIR/cookies" -X "$1" -H 'Content-Type: application/json' \
+			-d "$3" "https://$IP1:30080/api/v1$2"
 	else
-		curl -fsS -m 15 -b "$WORKDIR/cookies" -X "$1" "http://$IP1:30080/api/v1$2"
+		curl -kfsS -m 15 -b "$WORKDIR/cookies" -X "$1" "https://$IP1:30080/api/v1$2"
 	fi
 }
 retry 60 "appliance API login" api_login
+
+log "login banners: address and certificate on every node, the password on the control plane only"
+REPL_FP=$(openssl s_client -connect "$IP1:30080" </dev/null 2>/dev/null \
+	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
+[ -n "$REPL_FP" ] || die "no UI certificate served"
+# Read first, grep after: a failed ssh must never pass a check.
+banner_on() { # banner_on <v1|v2|v3> <text>
+	local text
+	text=$("$1" cat /etc/issue.d/50-stornas.issue) || return 1
+	grep -qF "$2" <<<"$text"
+}
+node_banner() { banner_on "$1" "https://$2:30080" && banner_on "$1" "$REPL_FP"; }
+retry 120 "node1 banner shows its address and the certificate" node_banner v1 "$IP1"
+retry 60 "node1 banner shows the generated admin password" banner_on v1 "$ADMIN_PW"
+for n in 2 3; do
+	ip_var=IP$n
+	retry 120 "node$n banner shows its address and the certificate" node_banner "v$n" "${!ip_var}"
+	worker_text=$("v$n" cat /etc/issue.d/50-stornas.issue) || die "node$n banner unreadable"
+	grep -qF "$ADMIN_PW" <<<"$worker_text" && die "node$n banner shows the admin password"
+done
 # Real-browser phases; need playwright's chromium.
 ui_phase() { # ui_phase <phase>
-	UI_URL="http://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
+	UI_URL="https://$IP1:30080" ADMIN_PW="$ADMIN_PW" REPL_VIP="$VIP" \
 		REPL_VIP_CIDR="$VIP/24" REPL_NFS_CLIENTS="$NET.0/24(rw,no_root_squash)" \
 		REPL_NFS="$IP1:/stornas-system-failover" SURVIVOR=node1 \
 		node web/e2e/ui.mjs "$1" || die "UI phase $1 failed"
@@ -1221,7 +1241,7 @@ v2 sh -c "dd if=$MIN_DEV bs=4096 skip=1 count=1 iflag=direct status=none | cmp -
 # resolve flow keys on it. dmesg wording is DRBD's business (CLAUDE.md: kernel
 # internals are never the test subject).
 volume_split() { # volume_split <pvc>
-	curl -fsS -m 15 -b "$WORKDIR/cookies" "http://$IP1:30080/api/v1/state" \
+	curl -kfsS -m 15 -b "$WORKDIR/cookies" "https://$IP1:30080/api/v1/state" \
 		| node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{
 			const v=JSON.parse(d).volumes.find(v=>v.name===process.argv[1]);
 			process.exit(v?.replication?.splitBrain===true?0:1)})' "$1"
@@ -1492,8 +1512,8 @@ retry 60 "share mount gone from node1" share_unmounted
 log "pool delete refused while volumes remain, in the dialog and the API"
 ui_phase delete-pool-refused
 retry 60 "appliance API login" api_login
-code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
-	"http://$IP1:30080/api/v1/pools/pool-node1")
+code=$(curl -ks -m 15 -o /dev/null -w '%{http_code}' -b "$WORKDIR/cookies" -X DELETE \
+	"https://$IP1:30080/api/v1/pools/pool-node1")
 [ "$code" = 409 ] || die "pool delete got $code, want 409"
 kc get storagepool pool-node1 >/dev/null 2>&1 || die "guarded pool was deleted anyway"
 
