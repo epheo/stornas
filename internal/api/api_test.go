@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -310,6 +311,33 @@ func TestReplicatedNeedsThreeNodes(t *testing.T) {
 	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"media","size":"1Gi","storageClass":"stornas-local"}`, sys)
 	if w.Code != 201 {
 		t.Fatalf("local refused: code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// The rule reads the class itself: the distro's r-drbd-replicated is
+// refused on two nodes like stornas-replicated, r-drbd-local is not.
+func TestReplicatedClassByParameters(t *testing.T) {
+	a := newAPI()
+	if err := a.CS.CoreV1().Nodes().Delete(context.Background(), "node3", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for name, replicas := range map[string]string{"r-drbd-replicated": "2", "r-drbd-local": "1"} {
+		sc := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: name},
+			Provisioner: "r-drbd.io",
+			Parameters:  map[string]string{"tier": "default", "replicas": replicas},
+		}
+		if _, err := a.CS.StorageV1().StorageClasses().Create(context.Background(), sc, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"a","size":"1Gi","storageClass":"r-drbd-replicated"}`, sys)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "three nodes") {
+		t.Fatalf("r-drbd-replicated: code=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doReq(t, a.CreateVolume, "POST", "/api/v1/volumes", `{"name":"b","size":"1Gi","storageClass":"r-drbd-local"}`, sys)
+	if w.Code != 201 {
+		t.Fatalf("r-drbd-local: code=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
