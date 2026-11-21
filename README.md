@@ -99,7 +99,8 @@ Nothing is documented here before its flow is green.
   (`bootc switch --transport oci-archive`); greenboot gates the boot and
   a bad image rolls back automatically with data intact.
 - No registry pull, package install, or download happens at runtime:
-  stornas, r-drbd, and CSI sidecar images are embedded and digest-pinned.
+  every image is embedded, stornas's by this repo, r-drbd's and the CSI
+  sidecars' by the distro.
 
 ## Architecture
 
