@@ -163,12 +163,12 @@ kc -n stornas-system exec smoke-consumer -- sh -c 'echo probe-ok > /data/probe &
 	| grep -q probe-ok || die "PVC write/read failed"
 
 log "UI answers and login works"
-retry 120 "healthz on the NodePort" pexec curl -fsS http://127.0.0.1:30080/healthz
+retry 120 "healthz on the NodePort" pexec curl -kfsS https://127.0.0.1:30080/healthz
 ADMIN_PW=$(kc -n stornas-system get secret admin-password -o jsonpath='{.data.password}' | base64 -d)
-pexec curl -fsS -c /tmp/smoke-cookies -H 'Content-Type: application/json' \
+pexec curl -kfsS -c /tmp/smoke-cookies -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}" \
-	http://127.0.0.1:30080/api/v1/login >/dev/null || die "login failed"
-pexec curl -fsS -b /tmp/smoke-cookies http://127.0.0.1:30080/api/v1/state \
+	https://127.0.0.1:30080/api/v1/login >/dev/null || die "login failed"
+pexec curl -kfsS -b /tmp/smoke-cookies https://127.0.0.1:30080/api/v1/state \
 	| grep -q '"pools":' || die "state missing pools"
 
 log "assert: no failed systemd units"

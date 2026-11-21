@@ -238,6 +238,15 @@ retry 600 "PVC Bound" pvc_bound
 retry 300 "consumer ready" consumer_ready
 kc -n stornas-system exec deploy/upgrade-consumer -- sh -c 'echo before-upgrade > /data/marker && sync'
 retry 300 "greenboot green on A" greenboot_green
+# What the live server serves, not what was published before the reboot.
+ui_fingerprint() {
+	vssh sh -c 'openssl s_client -connect 127.0.0.1:30080 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256' \
+		| cut -d= -f2
+}
+retry 300 "UI serving its certificate on A" ui_fingerprint
+FP_A=$(ui_fingerprint)
+[ -n "$FP_A" ] || die "no UI certificate served"
+same_fingerprint() { [ "$(ui_fingerprint)" = "$FP_A" ]; }
 
 log "switching to the good image (oci-archive over ssh, no registry)"
 vscp "$WORKDIR/good.tar" /var/tmp/next.tar
@@ -252,6 +261,7 @@ retry 600 "node Ready after upgrade" node_ready
 retry 600 "storage pool Available after upgrade" pool_available
 retry 600 "consumer back after upgrade" consumer_ready
 retry 120 "data intact after upgrade" data_intact
+retry 120 "UI certificate kept across the upgrade" same_fingerprint
 retry 600 "greenboot green on the good image" greenboot_green
 vssh rm -f /var/tmp/next.tar
 
@@ -272,6 +282,7 @@ retry 600 "node Ready after rollback" node_ready
 retry 600 "storage pool Available after rollback" pool_available
 retry 600 "consumer back after rollback" consumer_ready
 retry 120 "data intact after rollback" data_intact
+retry 120 "UI certificate kept across the rollback" same_fingerprint
 retry 600 "greenboot green after rollback" greenboot_green
 # With rolled_back, the poisoned deployment left as the rollback entry
 # shows the poison was deployed and the good image came back after it.

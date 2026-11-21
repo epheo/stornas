@@ -11,7 +11,8 @@ const user = process.env.UI_USER || 'admin';
 const phase = process.argv[2];
 
 const browser = await chromium.launch();
-const page = await browser.newPage();
+// The appliance serves a self-signed certificate.
+const page = await browser.newPage({ ignoreHTTPSErrors: true });
 page.setDefaultTimeout(60_000);
 page.on('pageerror', (err) => {
 	console.error(`page error: ${err.message}`);
