@@ -40,6 +40,16 @@ diagnostics() {
 		echo "--- ${p}"
 		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
 	done
+	# Pods stuck in ContainerCreating after a reboot have shown OVN never
+	# annotating them, with ovnkube-master restarted once.
+	log "DIAGNOSTICS: OVN-Kubernetes, previous and current containers"
+	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
+		echo "--- $p previous"
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --previous --tail=60 2>&1 | tail -60 || true
+		echo "--- $p current, errors"
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --tail=400 2>&1 \
+			| grep -iE 'error|fail|annotat|timeout|leader|panic' | tail -40 || true
+	done
 	log "DIAGNOSTICS: crio and microshift errors, this boot"
 	vssh journalctl -b -u crio -p warning --no-pager 2>&1 | tail -30 || true
 	vssh journalctl -b -u microshift -p err --no-pager 2>&1 | tail -30 || true
