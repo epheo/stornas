@@ -6,8 +6,8 @@
 # reboot. Then switch to a deliberately poisoned image whose required
 # greenboot check fails: greenboot must go red and the boot counter
 # must fall the host back to the good deployment, data still intact.
-# The kmod-mismatch matrix row collapses to this: a mismatch fails the
-# distro's r-drbd check, and the same machinery must recover the appliance.
+# A kmod mismatch never reaches an image: the distro's build checks the
+# module's vermagic against the image kernel.
 #
 # Needs a root-capable podman (PODMAN='sudo podman' in CI),
 # qemu-system-x86_64, and OVMF. KVM when present.

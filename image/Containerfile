@@ -27,6 +27,10 @@ RUN cat /usr/lib/embedded-images/manifest.stornas >> /usr/lib/embedded-images/ma
 	&& rm /usr/lib/embedded-images/manifest.stornas
 COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
 
+# Pools come only from StoragePools: the distro's service would turn a
+# leftover myvg1/thin into an unmanaged Pool and a second default class.
+RUN systemctl mask microshift-r-drbd-default-pool.service
+
 # The distro's own check gates r-drbd; this one gates stornas.
 COPY files/50_stornas_storage_check.sh /etc/greenboot/check/required.d/
 

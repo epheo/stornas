@@ -1,6 +1,5 @@
 # Upgrade and rollback acceptance: bootc switch to a good image, then a
 # poisoned one that greenboot must roll back, data intact throughout.
-# Covers the kmod-mismatch matrix row via the same red-boot machinery.
 name: upgrade-test
 
 on:

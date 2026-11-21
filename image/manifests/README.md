@@ -17,6 +17,6 @@ Pools keep r-drbd's capacity defaults: no thin overcommit, 5% reserve.
 A pool name's length plus its dashes stays within 21: a snapshot's
 device-mapper name carries the VG name, where each dash counts twice.
 
-The external snapshot-controller ships with MicroShift, not here;
-these manifests add only the VolumeSnapshotClass and the
-csi-snapshotter sidecar in the r-drbd controller pod.
+The snapshot-controller ships with MicroShift and the csi-snapshotter
+sidecar with the distro's r-drbd controller; these manifests add only
+the `stornas` VolumeSnapshotClass.
