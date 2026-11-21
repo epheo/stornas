@@ -28,8 +28,10 @@ import (
 // A primary whose disk is not UpToDate is therefore moved on purpose, a
 // planned failover with a short export outage. Then: the current
 // primary (moving an export off a live primary would break it), then
-// prefer (sticky
-// placement avoids flapping), then any diskful replica. Nodes in avoid
+// prefer (sticky placement avoids flapping), then any diskful replica.
+// prefer also breaks ties between in-use replicas: a node back from a
+// hard kill keeps its pre-kill InUse until its agent reports again, and
+// list order must not pull the export off the live primary. Nodes in avoid
 // never serve; skipping an avoided primary is the failover itself, since
 // DRBD auto-promote lets the next opener take over once quorum fenced
 // the old one. replicas counts diskful copies so callers can enforce
@@ -57,16 +59,15 @@ func ResolvePlacement(v *rdrbdv1alpha1.Volume, prefer string, avoid map[string]b
 	score := func(c candidate) int {
 		s := 0
 		if c.upToDate {
-			s = 4
+			s += 4
 		}
-		switch {
-		case c.inUse:
-			return s + 2
-		case c.node == prefer:
-			return s + 1
-		default:
-			return s
+		if c.inUse {
+			s += 2
 		}
+		if c.node == prefer {
+			s++
+		}
+		return s
 	}
 	pick := -1
 	for i, c := range all {

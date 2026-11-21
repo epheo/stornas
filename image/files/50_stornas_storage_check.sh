@@ -1,11 +1,12 @@
 #!/bin/bash
-# Required greenboot check for the stornas storage plane, replacing the
-# microshift-topolvm check erased in the Containerfile. Gates on workloads
-# with static names only.
+# Required greenboot check for the stornas workloads; the distro's
+# 50_microshift_r_drbd_check gates r-drbd. Static workload names only.
 set -euo pipefail
 
 # shellcheck disable=SC1091
 source /usr/share/microshift/functions/greenboot.sh
+
+SCRIPT_NAME=$(basename "$0")
 
 if [ "$(id -u)" -ne 0 ] ; then
     echo "The '${SCRIPT_NAME}' script must be run with the 'root' user privileges"
@@ -29,10 +30,6 @@ WAIT_TIMEOUT_SECS=$(get_wait_timeout)
 if ! microshift healthcheck \
         -v=2 --timeout="${WAIT_TIMEOUT_SECS}s" \
         --custom '{
-            "r-drbd-system": {
-                "deployments": ["r-drbd-controller"],
-                "daemonsets": ["r-drbd-agent"]
-            },
             "stornas-system": {
                 "deployments": ["stornas-operator", "stornas-server"],
                 "daemonsets": ["stornas-agent"]

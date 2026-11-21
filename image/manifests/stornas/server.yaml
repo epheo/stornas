@@ -19,6 +19,10 @@ rules:
   - apiGroups: [""]
     resources: [nodes, persistentvolumeclaims, events]
     verbs: [get, list, watch]
+  # Volume creation reads a class's replicas to apply the three-node rule.
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get]
   - apiGroups: [r-drbd.io]
     resources: [pools, volumes]
     verbs: [get, list, watch]

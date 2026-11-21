@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,6 +211,29 @@ func replicated(class string) bool {
 		strings.HasPrefix(class, storagev1alpha1.ReplicatedClass+"-")
 }
 
+// replicatedClass reads the class, not only its name: the distro ships
+// r-drbd-replicated, and a restore inherits whatever class its source
+// used. An unknown class falls back to the name, as for a tier clone the
+// operator has not created yet.
+func (a *API) replicatedClass(ctx context.Context, class string) (bool, error) {
+	if class == "" {
+		return false, nil
+	}
+	sc, err := a.CS.StorageV1().StorageClasses().Get(ctx, class, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return replicated(class), nil
+	case err != nil:
+		return false, err
+	}
+	if sc.Provisioner != rdrbdv1alpha1.Driver {
+		return false, nil
+	}
+	// r-drbd defaults replicas to 1 and refuses a class it cannot parse.
+	n, err := strconv.Atoi(strings.TrimSpace(sc.Parameters[rdrbdv1alpha1.ParamReplicas]))
+	return err == nil && n > 1, nil
+}
+
 var errNeedsNodes = errors.New("replication needs three nodes")
 
 type volumeRequest struct {
@@ -289,7 +313,12 @@ func (a *API) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		}
 		req.StorageClass = local
 	}
-	if replicated(req.StorageClass) {
+	rep, err := a.replicatedClass(r.Context(), req.StorageClass)
+	if err != nil {
+		http.Error(w, "storage class: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rep {
 		nodes, err := a.CS.CoreV1().Nodes().List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, "nodes: "+err.Error(), http.StatusInternalServerError)

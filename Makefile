@@ -3,12 +3,12 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed kmod image smoke vm-test replication-test upgrade-test clean
+.PHONY: ci build generate types lint test web images sync-manifests embed image check-rdrbd-crds smoke vm-test replication-test upgrade-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets
 # and the same stale-generated-files check. The diff is scoped to generated
 # paths so a dirty working tree does not fail the gate. Only the image
-# build stays out: it pulls the base image and kernel-devel.
+# build stays out: it pulls the base image.
 ci: generate build lint types test web
 	git diff --exit-code -- web/src/lib/model.gen.ts operator/api/v1alpha1/zz_generated.deepcopy.go operator/config
 
@@ -47,18 +47,11 @@ images: web
 sync-manifests: generate
 	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
 
-# OCI archives for /usr/lib/embedded-images: the app images from local
-# storage plus every ref in image/embedded-images.txt. The distro's
-# import service only imports archives listed in its manifest, so every
-# archive gets a "path ref" line in a fragment the Containerfile appends
-# to the distro manifest; a tar without a line is dead weight and the
-# pod behind it pulls from the network.
-# Registry archives are named by pinned ref and reused when present: CI
-# restores this dir from a cache keyed on image/embedded-images.txt, so
-# gates stop depending on registries. .part keeps a failed copy out.
-# The staging dir starts empty: a bumped pin would leave its old tar.
-REGISTRY_ARCHIVES := .cache/registry-images
-
+# OCI archives for /usr/lib/embedded-images. The distro's import service
+# only imports archives listed in its manifest, so every archive gets a
+# "path ref" line in a fragment the Containerfile appends to the distro
+# manifest; a tar without a line is dead weight and the pod behind it
+# pulls from the network. r-drbd and the CSI sidecars come with the distro.
 embed: images
 	rm -rf image/build/embedded-images
 	mkdir -p image/build/embedded-images
@@ -69,29 +62,18 @@ embed: images
 		echo "/usr/lib/embedded-images/$$(basename $$img).tar $$img:latest" \
 			>> image/build/embedded-images/manifest.stornas; \
 	done
-	mkdir -p $(REGISTRY_ARCHIVES)
-	grep -v '^#' image/embedded-images.txt | while read -r img; do \
-		[ -z "$$img" ] && continue; \
-		out=$$(echo "$$img" | sed 's|.*/||; s|:|-|').tar; \
-		if [ ! -s $(REGISTRY_ARCHIVES)/$$out ]; then \
-			skopeo copy docker://$$img \
-				oci-archive:$(REGISTRY_ARCHIVES)/$$out.part:$$img || exit 1; \
-			mv $(REGISTRY_ARCHIVES)/$$out.part $(REGISTRY_ARCHIVES)/$$out; \
-		fi; \
-		cp $(REGISTRY_ARCHIVES)/$$out image/build/embedded-images/$$out || exit 1; \
-		echo "/usr/lib/embedded-images/$$out $$img" \
-			>> image/build/embedded-images/manifest.stornas; \
-	done
 
-kmod:
-	podman build --target kmod -t stornas-kmod -f image/kmod/Containerfile image/kmod
-
-image: sync-manifests embed kmod
-	podman build --build-context kmod=docker-image://localhost/stornas-kmod \
-		--from $(BASE_IMAGE) --label org.opencontainers.image.base.name=$(BASE_IMAGE) \
+image: sync-manifests embed
+	podman build --from $(BASE_IMAGE) --label org.opencontainers.image.base.name=$(BASE_IMAGE) \
 		--label org.opencontainers.image.source=https://github.com/epheo/stornas \
 		--label org.opencontainers.image.version=$(VERSION) \
 		-f image/Containerfile -t stornas-os:$(VERSION) image
+
+# Operator envtest loads a copy of the base image's r-drbd CRDs.
+RDRBD_CRDS := operator/internal/controller/testdata/rdrbd-crds.yaml
+check-rdrbd-crds:
+	$(PODMAN) run --rm --pull=always --entrypoint cat $(BASE_IMAGE) \
+		/usr/lib/microshift/manifests.d/000-r-drbd/base/crds.yaml | diff -u $(RDRBD_CRDS) -
 
 # Runtime gates, same harness shapes as the distro's smoke-test and
 # vm-test. Both need a root-capable podman (PODMAN='sudo podman');

@@ -2,23 +2,6 @@
 # Pin by digest before release; :latest only while bootstrapping.
 FROM ghcr.io/epheo/microshift:latest
 
-# The appliance runs the newest CentOS Stream 10 kernel, chosen by the
-# kmod stage together with its headers. installonlypkgs is empty in the
-# bootc base, so dnf replaces the kernel in place and rpm-ostree's
-# kernel-install hook rebuilds the initramfs. A repo behind the base
-# would refuse the downgrade and leave the kmod orphaned: fail here.
-COPY --from=kmod /out/kernel /tmp/kernel
-RUN dnf install -y /tmp/kernel/*.rpm && dnf clean all \
-	&& [ "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)" \
-		= "$(rpm -qp --qf '%{VERSION}-%{RELEASE}.%{ARCH}' /tmp/kernel/kernel-core-*.rpm)" ] \
-	&& rm -rf /tmp/kernel
-
-# The drbd9 kmod is not in CentOS repos; it comes from the kmod build
-# stage (image/kmod) matched to this image's kernel. No drbd-utils on the
-# host: the r-drbd agent image carries its own, and the package's units
-# would disconnect r-drbd's resources at shutdown.
-COPY --from=kmod /out/rpms /tmp/drbd-rpms
-
 # iputils: arping sends the gratuitous ARP on VIP failover.
 # iscsi-initiator-utils: admin debugging of exports, and the e2e client.
 RUN dnf install -y \
@@ -32,15 +15,7 @@ RUN dnf install -y \
 	samba \
 	samba-client \
 	nfs-utils \
-	/tmp/drbd-rpms/*/kmod-drbd-[0-9]*.rpm \
-	&& dnf clean all \
-	&& rm -rf /tmp/drbd-rpms
-# A second tree under /usr/lib/modules makes bootc install refuse the
-# image at deploy time; a drbd module built for another kernel would
-# only fail at boot.
-RUN kver=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core) \
-	&& [ "$(ls /usr/lib/modules)" = "$kver" ] \
-	&& modinfo -k "$kver" -F vermagic drbd | grep -q "^$kver "
+	&& dnf clean all
 
 # Everything the appliance runs ships in the image: workload images as OCI
 # archives (imported into cri-o at boot by the distro's import service)
@@ -50,25 +25,13 @@ COPY build/embedded-images/ /usr/lib/embedded-images/
 # distro's (which keeps its own entries, e.g. portail).
 RUN cat /usr/lib/embedded-images/manifest.stornas >> /usr/lib/embedded-images/manifest \
 	&& rm /usr/lib/embedded-images/manifest.stornas
-COPY manifests/r-drbd/ /usr/lib/microshift/manifests.d/000-r-drbd/
 COPY manifests/stornas/ /usr/lib/microshift/manifests.d/010-stornas/
 
-# r-drbd replaces the distro's TopoLVM (README architecture): two default
-# StorageClasses is a conflict, and two LVM managers must not share VGs.
-# Erase the RPM, not just the manifests: it also ships a required greenboot
-# check that would wait forever for TopoLVM and block boot-complete.target.
-RUN rpm -e microshift-topolvm microshift-topolvm-release-info
+# Pools come only from StoragePools: the distro's service would turn a
+# leftover myvg1/thin into an unmanaged Pool and a second default class.
+RUN systemctl mask microshift-r-drbd-default-pool.service
 
-# The host must never scan DRBD devices or LVs: they may hold guest VGs.
-COPY files/lvmlocal.conf /etc/lvm/lvmlocal.conf
-
-# Kubelet's graceful node shutdown (off by default) stops pods and unmounts
-# their volumes before the node goes down, so the r-drbd agent, stopped
-# last, holds no Primary. Without it a volume in use leaves its peers
-# Outdated until the node is back.
-COPY files/40-graceful-shutdown.yaml /etc/microshift/config.d/
-
-# Greenboot gates on the stornas stack instead.
+# The distro's own check gates r-drbd; this one gates stornas.
 COPY files/50_stornas_storage_check.sh /etc/greenboot/check/required.d/
 
 # The base image runs firewalld; without these ports the appliance
@@ -93,27 +56,11 @@ RUN touch /etc/samba/stornas-shares.conf \
 	&& printf '%s\n' \
 		'd /var/lib/stornas 0755 root root -' \
 		'd /var/lib/stornas/shares 0755 root root -' \
-		'd /var/lib/drbd 0755 root root -' \
 		'd /var/target 0755 root root -' \
 		'd /var/target/pr 0755 root root -' \
 		'd /var/target/alua 0755 root root -' \
-		'd /run/drbd 0755 root root -' \
-		'd /run/drbd/lock 0755 root root -' \
 		> /usr/lib/tmpfiles.d/stornas.conf \
 	&& systemctl enable smb nfs-server
 # Shares live on /var (var_lib_t), which smbd_t cannot touch; the export
 # boolean is the appliance-wide grant, no per-path fcontext to keep in sync.
 RUN setsebool -P samba_export_all_rw on
-
-# Storage kernel modules load at boot, not on demand: the r-drbd agent
-# reports DRBD unsupported if the module is absent, and nothing on the
-# node compiles or loads modules (air gap; dm-snapshot for LVM
-# snapshots, dm-thin-pool for pools).
-# usermode_helper=disabled: SELinux confines kernel-spawned helpers
-# (kernel_generic_helper_t cannot exec bash), each resync handler then
-# exits 1 and DRBD drops the fresh connection; the r-drbd agent follows
-# DRBD events itself.
-RUN printf '%s\n' drbd drbd_transport_tcp dm-snapshot dm-thin-pool \
-		> /usr/lib/modules-load.d/stornas-storage.conf \
-	&& echo 'options drbd usermode_helper=disabled' \
-		> /usr/lib/modprobe.d/stornas-drbd.conf

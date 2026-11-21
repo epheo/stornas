@@ -44,11 +44,6 @@ latest_tag() { # latest_tag <repo-url> <tag-prefix> [version-prefix]: stable onl
 		| sort -V | tail -1 | sed "s|^|${3:-}|"
 }
 
-# DRBD kmod, built in-tree; drbd-utils come with the r-drbd image.
-kmod=image/kmod/Containerfile
-check drbd "$(sed -n 's/^ARG DRBD_VERSION=//p' $kmod)" \
-	"$(latest_tag https://github.com/LINBIT/drbd drbd-)"
-
 # Build tools pinned in the Makefiles.
 mk=operator/Makefile
 check golangci-lint "$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' $mk)" \
@@ -88,6 +83,20 @@ while read -r _ ref; do
 	repo=${ref%@*}
 	check "action:$repo" "${ref#*@}" "$(latest_tag "https://github.com/$repo" v v)"
 done < <(grep -rhoE 'uses: [a-z0-9-]+/[a-z0-9-]+@v[0-9.]+' .github/workflows | sort -u)
+
+# Runner images, pinned per job and named per pin, so a hold covers only
+# its own pin. Latest is the newest GA x64 Ubuntu in the runner-images
+# table: tags appear months earlier, while the image is still in beta.
+runner_latest=$(curl -fsS -m 30 https://raw.githubusercontent.com/actions/runner-images/main/README.md \
+	| grep -E '^\|' | grep -viE 'beta' | grep -oE '`ubuntu-[0-9]{2}\.04`' \
+	| tr -d '`' | sed 's/^ubuntu-//' | sort -V | tail -1 || true)
+while read -r _ img; do
+	check "runner:$img" "${img#ubuntu-}" "$runner_latest"
+done < <(grep -rhoE 'runs-on: ubuntu-[0-9.]+' .github/workflows | sort -u)
+if grep -rqE 'runs-on: ubuntu-latest' .github/workflows; then
+	echo "DRIFT runner:ubuntu: ubuntu-latest is not a pin"
+	drift=1
+fi
 
 # Node: the newest LTS major.
 node_lts=$(curl -fsS -m 30 https://nodejs.org/dist/index.json \

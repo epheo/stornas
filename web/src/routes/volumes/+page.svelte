@@ -152,25 +152,25 @@
 							<td class="px-3 py-2 text-xs">
 								{#if vol.replication}
 									{#if vol.replication.splitBrain}
-										<span class="mr-1 inline-block"
-											><StatusBadge kind="bad" label="split brain" /></span
-										>
+										<span class="mr-1 inline-block">
+											<StatusBadge kind="bad" label="split brain" />
+										</span>
 									{/if}
 									{#if vol.replication.peerUnreachable}
-										<span class="mr-1 inline-block"
-											><StatusBadge
+										<span class="mr-1 inline-block">
+											<StatusBadge
 												kind="bad"
 												label="peer unreachable: {vol.replication.peerUnreachable.reason}"
-											/></span
-										>
+											/>
+										</span>
 										<p class="mt-1 text-red-400">{vol.replication.peerUnreachable.message}</p>
 									{/if}
 									<!-- The matrix promise: every diskful node down is said
 									     plainly, not left to badge archaeology. -->
 									{#if (vol.replication.replicas ?? []).length > 0 && (vol.replication.replicas ?? []).every( (r) => downNodes.has(r.node) )}
-										<span class="mr-1 inline-block"
-											><StatusBadge kind="bad" label="unavailable, node down" /></span
-										>
+										<span class="mr-1 inline-block">
+											<StatusBadge kind="bad" label="unavailable, node down" />
+										</span>
 									{/if}
 									{#each vol.replication.replicas ?? [] as r (r.node)}
 										<span class="mr-1 inline-block">
