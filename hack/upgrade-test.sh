@@ -79,14 +79,17 @@ cleanup() {
 trap cleanup EXIT
 
 # ssh strips one quoting layer; %q every arg (same as boot-test).
+# Bounded: a VM wedged mid-shutdown accepts ssh and never runs the command,
+# which held one retry past its deadline until the job timed out with no
+# diagnostics (run 44966074863). bootc switch fits well inside 300 s.
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+	-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=6
+	-o LogLevel=ERROR -i "$WORKDIR/id")
 vssh() {
-	ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o ConnectTimeout=5 -o LogLevel=ERROR -i "$WORKDIR/id" -p "$SSH_PORT" \
-		root@127.0.0.1 "$(printf '%q ' "$@")"
+	timeout 300 ssh "${SSH_OPTS[@]}" -p "$SSH_PORT" root@127.0.0.1 "$(printf '%q ' "$@")"
 }
 vscp() { # vscp <local> <remote-path>
-	scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o LogLevel=ERROR -i "$WORKDIR/id" -P "$SSH_PORT" "$1" "root@127.0.0.1:$2"
+	timeout 900 scp "${SSH_OPTS[@]}" -P "$SSH_PORT" "$1" "root@127.0.0.1:$2"
 }
 kc() { vssh kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
 
