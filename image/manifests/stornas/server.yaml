@@ -67,6 +67,10 @@ rules:
   - apiGroups: [storage.stornas.io]
     resources: [localusers]
     verbs: [get, list, create, delete, patch]
+  # The UI certificate fingerprint, published for the agents' login banner.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update]
   - apiGroups: [storage.stornas.io]
     resources: [shares, targets]
     verbs: [create, delete]
@@ -108,15 +112,24 @@ spec:
       # a worker loss must not take the UI with it.
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
+      priorityClassName: system-cluster-critical
       containers:
         - name: server
           image: ghcr.io/epheo/stornas:latest
           imagePullPolicy: Never # embedded via /usr/lib/embedded-images
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
           env:
             - name: STORNAS_WEB
               value: /usr/share/stornas/web
           ports:
             - containerPort: 8080
+          # Endpoints only once the server listens: it loads its certificate
+          # from the API first, and a restart or upgrade must not route UI
+          # requests to a pod that refuses them.
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080, scheme: HTTPS}
+            periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -129,8 +142,8 @@ metadata:
   name: stornas
   namespace: stornas-system
 spec:
-  # NodePort keeps the UI reachable on the host without the router;
-  # moving to 443 via the appliance front door comes with the auth layer.
+  # NodePort keeps the UI reachable on the host without the router. The
+  # server terminates TLS itself; internal/console.UIPort mirrors 30080.
   type: NodePort
   selector:
     app.kubernetes.io/name: stornas-server

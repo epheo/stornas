@@ -93,8 +93,12 @@ Nothing is documented here before its flow is green.
 - r-drbd controller down: IO continues; provisioning blocks and recovers.
 
 **Appliance lifecycle**
-- First boot generates an admin password (console and MOTD) and the UI
-  nudges a change; admin and viewer roles.
+- The UI serves HTTPS only, on port 30080, with a self-signed certificate
+  generated at first boot and kept across restarts and upgrades.
+- Every node's login screen and MOTD show its UI address and the
+  certificate's SHA-256 fingerprint to check in the browser. The
+  control-plane node also shows the first-boot admin password until the
+  UI has it changed; workers never do. Admin and viewer roles.
 - Upgrades arrive as a new bootc image, air-gap friendly
   (`bootc switch --transport oci-archive`); greenboot gates the boot and
   a bad image rolls back automatically with data intact.
@@ -112,8 +116,9 @@ Three moving parts, one rule each:
 - **stornas-agent** is a dumb, privileged DaemonSet, the only thing that
   touches the host. It reconciles md/LVM, LIO configfs, samba, and
   kernel nfsd from CRD specs and reports inventory; it never decides.
-- **stornas server** serves the API and the SvelteKit UI, streams live
-  state over a websocket, and writes CRDs on behalf of session users.
+- **stornas server** serves the API and the SvelteKit UI over TLS,
+  streams live state over a websocket, and writes CRDs on behalf of
+  session users.
 
 [r-drbd](https://github.com/epheo/r-drbd) does volume orchestration:
 one controller Deployment (with the CSI driver `r-drbd.io`) and one

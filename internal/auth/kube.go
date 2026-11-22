@@ -19,9 +19,9 @@ var localUserGVR = schema.GroupVersionResource{
 	Group: "storage.stornas.io", Version: "v1alpha1", Resource: "localusers",
 }
 
-// annotGenerated marks a LocalUser still on its bootstrap-generated
+// AnnotGenerated marks a LocalUser still on its bootstrap-generated
 // password; cleared on the first self-service change.
-const annotGenerated = "stornas.io/generated-password"
+const AnnotGenerated = "stornas.io/generated-password"
 
 // KubeSource resolves users from LocalUser CRs and their password Secrets
 // in the appliance namespace. Login is rare, so every lookup is a live
@@ -75,7 +75,7 @@ func (s *KubeSource) Bootstrap(ctx context.Context) (string, error) {
 		"metadata": map[string]any{
 			"name":        "admin",
 			"namespace":   s.Namespace,
-			"annotations": map[string]any{annotGenerated: "true"},
+			"annotations": map[string]any{AnnotGenerated: "true"},
 		},
 		"spec": map[string]any{
 			"role":              "admin",
@@ -94,7 +94,7 @@ func (s *KubeSource) MustChange(ctx context.Context, username string) bool {
 	if err != nil {
 		return false
 	}
-	return u.GetAnnotations()[annotGenerated] == "true"
+	return u.GetAnnotations()[AnnotGenerated] == "true"
 }
 
 // UpdatePassword rotates the referenced Secret in place (the operator's
@@ -120,8 +120,8 @@ func (s *KubeSource) UpdatePassword(ctx context.Context, username, password stri
 	if _, err := s.CS.CoreV1().Secrets(s.Namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
 		return err
 	}
-	if u.GetAnnotations()[annotGenerated] != "" {
-		patch := []byte(`{"metadata":{"annotations":{"` + annotGenerated + `":null}}}`)
+	if u.GetAnnotations()[AnnotGenerated] != "" {
+		patch := []byte(`{"metadata":{"annotations":{"` + AnnotGenerated + `":null}}}`)
 		_, err = s.Dyn.Resource(localUserGVR).Namespace(s.Namespace).Patch(
 			ctx, username, types.MergePatchType, patch, metav1.PatchOptions{})
 	}

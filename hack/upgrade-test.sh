@@ -25,6 +25,8 @@ KEEP=${KEEP:-0}
 QEMU_PID=""
 
 diagnostics() {
+	# A wedged VM would hold each of these for vssh's full 300 s.
+	local VSSH_TIMEOUT=30
 	log "DIAGNOSTICS: bootc status"
 	vssh bootc status 2>&1 || true
 	log "DIAGNOSTICS: greenboot and redboot journals"
@@ -39,6 +41,19 @@ diagnostics() {
 			| awk '$4 !~ /Running|Completed/ {print $1"/"$2}'); do
 		echo "--- ${p}"
 		kc -n "${p%/*}" describe pod "${p#*/}" 2>&1 | sed -n '/Events:/,$p' | tail -10 || true
+	done
+	# Pods stuck in ContainerCreating after a reboot have shown OVN never
+	# annotating them, with ovnkube-master restarted once.
+	log "DIAGNOSTICS: OVN-Kubernetes, previous and current containers"
+	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
+		echo "--- $p previous"
+		# --ignore-errors: a container that never restarted must not end the
+		# dump before the one that did.
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --previous --ignore-errors --prefix \
+			--tail=60 2>&1 | tail -400 || true
+		echo "--- $p current, errors"
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --ignore-errors --prefix --tail=400 2>&1 \
+			| grep -iE 'error|fail|annotat|timeout|leader|panic' | tail -40 || true
 	done
 	log "DIAGNOSTICS: crio and microshift errors, this boot"
 	vssh journalctl -b -u crio -p warning --no-pager 2>&1 | tail -30 || true
@@ -69,14 +84,17 @@ cleanup() {
 trap cleanup EXIT
 
 # ssh strips one quoting layer; %q every arg (same as boot-test).
+# Bounded: a VM wedged mid-shutdown accepts ssh and never runs the command,
+# which held one retry past its deadline until the job timed out with no
+# diagnostics (run 44966074863). bootc switch fits well inside 300 s.
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+	-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=6
+	-o LogLevel=ERROR -i "$WORKDIR/id")
 vssh() {
-	ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o ConnectTimeout=5 -o LogLevel=ERROR -i "$WORKDIR/id" -p "$SSH_PORT" \
-		root@127.0.0.1 "$(printf '%q ' "$@")"
+	timeout "${VSSH_TIMEOUT:-300}" ssh "${SSH_OPTS[@]}" -p "$SSH_PORT" root@127.0.0.1 "$(printf '%q ' "$@")"
 }
 vscp() { # vscp <local> <remote-path>
-	scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o LogLevel=ERROR -i "$WORKDIR/id" -P "$SSH_PORT" "$1" "root@127.0.0.1:$2"
+	timeout 900 scp "${SSH_OPTS[@]}" -P "$SSH_PORT" "$1" "root@127.0.0.1:$2"
 }
 kc() { vssh kubectl --kubeconfig /var/lib/microshift/resources/kubeadmin/kubeconfig "$@"; }
 
@@ -238,6 +256,18 @@ retry 600 "PVC Bound" pvc_bound
 retry 300 "consumer ready" consumer_ready
 kc -n stornas-system exec deploy/upgrade-consumer -- sh -c 'echo before-upgrade > /data/marker && sync'
 retry 300 "greenboot green on A" greenboot_green
+# What the live server serves, not what was published before the reboot.
+# OVN-Kubernetes serves NodePorts on the node address, not on loopback.
+NODE_IP=$(kc get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+[ -n "$NODE_IP" ] || die "node has no InternalIP"
+ui_fingerprint() {
+	vssh sh -c "openssl s_client -connect $NODE_IP:30080 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256" \
+		| cut -d= -f2
+}
+retry 300 "UI serving its certificate on A" ui_fingerprint
+FP_A=$(ui_fingerprint)
+[ -n "$FP_A" ] || die "no UI certificate served"
+same_fingerprint() { [ "$(ui_fingerprint)" = "$FP_A" ]; }
 
 log "switching to the good image (oci-archive over ssh, no registry)"
 vscp "$WORKDIR/good.tar" /var/tmp/next.tar
@@ -252,6 +282,7 @@ retry 600 "node Ready after upgrade" node_ready
 retry 600 "storage pool Available after upgrade" pool_available
 retry 600 "consumer back after upgrade" consumer_ready
 retry 120 "data intact after upgrade" data_intact
+retry 120 "UI certificate kept across the upgrade" same_fingerprint
 retry 600 "greenboot green on the good image" greenboot_green
 vssh rm -f /var/tmp/next.tar
 
@@ -272,6 +303,7 @@ retry 600 "node Ready after rollback" node_ready
 retry 600 "storage pool Available after rollback" pool_available
 retry 600 "consumer back after rollback" consumer_ready
 retry 120 "data intact after rollback" data_intact
+retry 120 "UI certificate kept across the rollback" same_fingerprint
 retry 600 "greenboot green after rollback" greenboot_green
 # With rolled_back, the poisoned deployment left as the rollback entry
 # shows the poison was deployed and the good image came back after it.
