@@ -567,10 +567,11 @@ REPL_FP=$(openssl s_client -connect "$IP1:30080" </dev/null 2>/dev/null \
 	| openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)
 [ -n "$REPL_FP" ] || die "no UI certificate served"
 # Read first, grep after: a failed ssh must never pass a check.
-banner_on() { # banner_on <v1|v2|v3> <text>
+banner_files=(/etc/issue.d/50-stornas.issue /run/motd.d/50-stornas)
+banner_on() { # banner_on <v1|v2|v3> <text>: login screen and MOTD both carry it
 	local text
-	text=$("$1" cat /etc/issue.d/50-stornas.issue) || return 1
-	grep -qF "$2" <<<"$text"
+	text=$("$1" cat "${banner_files[@]}") || return 1
+	[ "$(grep -cF "$2" <<<"$text")" = 2 ]
 }
 node_banner() { banner_on "$1" "https://$2:30080" && banner_on "$1" "$REPL_FP"; }
 retry 120 "node1 banner shows its address and the certificate" node_banner v1 "$IP1"
@@ -578,7 +579,7 @@ retry 60 "node1 banner shows the generated admin password" banner_on v1 "$ADMIN_
 for n in 2 3; do
 	ip_var=IP$n
 	retry 120 "node$n banner shows its address and the certificate" node_banner "v$n" "${!ip_var}"
-	worker_text=$("v$n" cat /etc/issue.d/50-stornas.issue) || die "node$n banner unreadable"
+	worker_text=$("v$n" cat "${banner_files[@]}") || die "node$n banner unreadable"
 	grep -qF "$ADMIN_PW" <<<"$worker_text" && die "node$n banner shows the admin password"
 done
 # Real-browser phases; need playwright's chromium.

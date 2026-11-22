@@ -33,10 +33,10 @@ const (
 )
 
 // Ensure returns the certificate stored in the Secret, replacing it when
-// absent, unreadable, or within renewLead of expiry. hosts become the SANs
-// of a new certificate only: a node joining later must not change the
+// absent, unreadable, or within renewLead of expiry. hosts is read only for
+// a new certificate, its SANs: a node joining later must not change the
 // fingerprint the admin already checked.
-func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts []string, now time.Time) (tls.Certificate, error) {
+func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts func(context.Context) []string, now time.Time) (tls.Certificate, error) {
 	secrets := cs.CoreV1().Secrets(ns)
 	s, err := secrets.Get(ctx, name, metav1.GetOptions{})
 	switch {
@@ -51,7 +51,7 @@ func Ensure(ctx context.Context, cs kubernetes.Interface, ns, name string, hosts
 			return c, nil
 		}
 	}
-	certPEM, keyPEM, err := generate(hosts, now)
+	certPEM, keyPEM, err := generate(hosts(ctx), now)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
@@ -113,7 +113,7 @@ func (r *Rotator) Run(ctx context.Context) {
 }
 
 func (r *Rotator) ensure(ctx context.Context, now time.Time) error {
-	c, err := Ensure(ctx, r.CS, r.Namespace, r.Name, r.Hosts(ctx), now)
+	c, err := Ensure(ctx, r.CS, r.Namespace, r.Name, r.Hosts, now)
 	if err != nil {
 		return err
 	}

@@ -17,7 +17,7 @@ import (
 func TestEnsureCreatesThenReuses(t *testing.T) {
 	cs := k8sfake.NewClientset()
 	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
-	a, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "192.168.1.10"}, now)
+	a, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf("stornas", "192.168.1.10"), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestEnsureCreatesThenReuses(t *testing.T) {
 	if err != nil || s.Type != corev1.SecretTypeTLS {
 		t.Fatalf("secret %v err %v", s, err)
 	}
-	b, err := Ensure(context.Background(), cs, "ns", "tls", nil, now.Add(24*time.Hour))
+	b, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf(), now.Add(24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +44,11 @@ func TestEnsureCreatesThenReuses(t *testing.T) {
 func TestEnsureRenewsBeforeExpiry(t *testing.T) {
 	cs := k8sfake.NewClientset()
 	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
-	a, err := Ensure(context.Background(), cs, "ns", "tls", nil, now)
+	a, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf(), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Ensure(context.Background(), cs, "ns", "tls", nil, a.Leaf.NotAfter.Add(-renewLead/2))
+	b, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf(), a.Leaf.NotAfter.Add(-renewLead/2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +72,11 @@ func TestFingerprintFormat(t *testing.T) {
 func TestEnsureKeepsCertificateWhenNodesJoin(t *testing.T) {
 	cs := k8sfake.NewClientset()
 	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
-	a, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1"}, now)
+	a, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf("stornas", "node1"), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Ensure(context.Background(), cs, "ns", "tls", []string{"stornas", "node1", "node2"}, now)
+	b, err := Ensure(context.Background(), cs, "ns", "tls", hostsOf("stornas", "node1", "node2"), now)
 	if err != nil || Fingerprint(a.Leaf.Raw) != Fingerprint(b.Leaf.Raw) {
 		t.Fatalf("a joining node replaced the certificate: %v", err)
 	}
@@ -109,4 +109,24 @@ func TestRotatorRenews(t *testing.T) {
 		published[1] != Fingerprint(second.Leaf.Raw) {
 		t.Fatalf("renewal not served or published: %v", published)
 	}
+}
+
+// The daily wake reuses the stored certificate without listing Nodes.
+func TestEnsureListsHostsOnlyToGenerate(t *testing.T) {
+	cs := k8sfake.NewClientset()
+	now := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)
+	calls := 0
+	hosts := func(context.Context) []string { calls++; return nil }
+	for range 3 {
+		if _, err := Ensure(context.Background(), cs, "ns", "tls", hosts, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("hosts listed %d times, want once", calls)
+	}
+}
+
+func hostsOf(hosts ...string) func(context.Context) []string {
+	return func(context.Context) []string { return hosts }
 }

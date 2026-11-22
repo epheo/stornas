@@ -152,8 +152,9 @@ func main() {
 	}
 }
 
-// certHosts names the certificate after every node: the NodePort answers on
-// all of them. A failed list still yields a usable certificate.
+// certHosts lists the names a new certificate covers: every node, since the
+// NodePort answers on all of them. Read only when one is generated; a failed
+// list still yields a usable certificate.
 func certHosts(ctx context.Context, cs kubernetes.Interface) []string {
 	hosts := []string{"stornas", "localhost", "127.0.0.1"}
 	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})

@@ -25,6 +25,8 @@ KEEP=${KEEP:-0}
 QEMU_PID=""
 
 diagnostics() {
+	# A wedged VM would hold each of these for vssh's full 300 s.
+	local VSSH_TIMEOUT=30
 	log "DIAGNOSTICS: bootc status"
 	vssh bootc status 2>&1 || true
 	log "DIAGNOSTICS: greenboot and redboot journals"
@@ -45,9 +47,12 @@ diagnostics() {
 	log "DIAGNOSTICS: OVN-Kubernetes, previous and current containers"
 	for p in $(kc -n openshift-ovn-kubernetes get pods -o name 2>/dev/null); do
 		echo "--- $p previous"
-		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --previous --tail=60 2>&1 | tail -60 || true
+		# --ignore-errors: a container that never restarted must not end the
+		# dump before the one that did.
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --previous --ignore-errors --prefix \
+			--tail=60 2>&1 | tail -400 || true
 		echo "--- $p current, errors"
-		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --tail=400 2>&1 \
+		kc -n openshift-ovn-kubernetes logs "$p" --all-containers --ignore-errors --prefix --tail=400 2>&1 \
 			| grep -iE 'error|fail|annotat|timeout|leader|panic' | tail -40 || true
 	done
 	log "DIAGNOSTICS: crio and microshift errors, this boot"
@@ -86,7 +91,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 	-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=6
 	-o LogLevel=ERROR -i "$WORKDIR/id")
 vssh() {
-	timeout 300 ssh "${SSH_OPTS[@]}" -p "$SSH_PORT" root@127.0.0.1 "$(printf '%q ' "$@")"
+	timeout "${VSSH_TIMEOUT:-300}" ssh "${SSH_OPTS[@]}" -p "$SSH_PORT" root@127.0.0.1 "$(printf '%q ' "$@")"
 }
 vscp() { # vscp <local> <remote-path>
 	timeout 900 scp "${SSH_OPTS[@]}" -P "$SSH_PORT" "$1" "root@127.0.0.1:$2"
