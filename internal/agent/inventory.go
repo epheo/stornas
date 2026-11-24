@@ -43,9 +43,12 @@ type InventoryPublisher struct {
 	lastPlan []storagev1alpha1.PlannedPool
 }
 
-// installPlan is the file the installer writes; version 1 only.
+// installPlan is the file the installer writes; version 1 only. Layout is
+// the data-disks label of the image it was written for: stornas's is pairs,
+// and a file without one predates the field.
 type installPlan struct {
 	Version int                           `json:"version"`
+	Layout  string                        `json:"layout"`
 	Pools   []storagev1alpha1.PlannedPool `json:"pools"`
 }
 
@@ -67,6 +70,11 @@ func readPlan(path string) ([]storagev1alpha1.PlannedPool, error) {
 	}
 	if plan.Version != 1 {
 		return nil, fmt.Errorf("%s: unknown version %d", path, plan.Version)
+	}
+	// Another image's plan, such as the distro's thin pool on a node later
+	// switched to stornas: its disks are in use, never stornas's to pair.
+	if plan.Layout != "" && plan.Layout != "pairs" {
+		return nil, nil
 	}
 	return plan.Pools, nil
 }
