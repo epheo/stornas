@@ -156,6 +156,10 @@ spec:
               mountPath: /etc/exports.d
             - name: etc-issue
               mountPath: /etc/issue.d
+            # The installer's pool plan, read once into the inventory.
+            - name: install-plan
+              mountPath: /etc/microshift-installer
+              readOnly: true
             - name: run-motd
               mountPath: /run/motd.d
             - name: shares
@@ -186,6 +190,10 @@ spec:
         - name: etc-issue
           hostPath:
             path: /etc/issue.d
+            type: DirectoryOrCreate
+        - name: install-plan
+          hostPath:
+            path: /etc/microshift-installer
             type: DirectoryOrCreate
         - name: run-motd
           hostPath:

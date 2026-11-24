@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -36,6 +37,38 @@ type InventoryPublisher struct {
 	// watcher, the dominant write traffic on a quiet appliance.
 	lastDisks []storagev1alpha1.Disk
 	lastWrite time.Time
+	// PlanPath is the installer's data disk plan on the host; the operator
+	// turns it into pools once.
+	PlanPath string
+	lastPlan []storagev1alpha1.PlannedPool
+}
+
+// installPlan is the file the installer writes; version 1 only.
+type installPlan struct {
+	Version int                           `json:"version"`
+	Pools   []storagev1alpha1.PlannedPool `json:"pools"`
+}
+
+// readPlan returns the installer's pools, or none when there is no plan.
+func readPlan(path string) ([]storagev1alpha1.PlannedPool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var plan installPlan
+	if err := json.Unmarshal(b, &plan); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if plan.Version != 1 {
+		return nil, fmt.Errorf("%s: unknown version %d", path, plan.Version)
+	}
+	return plan.Pools, nil
 }
 
 const inventoryInterval = time.Minute
@@ -195,7 +228,13 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if reflect.DeepEqual(disks, p.lastDisks) && time.Since(p.lastWrite) < inventoryHeartbeat {
+	plan, err := readPlan(p.PlanPath)
+	if err != nil {
+		// A bad plan never blocks the inventory; the pools can be made by hand.
+		fmt.Printf("install plan: %v\n", err)
+	}
+	if reflect.DeepEqual(disks, p.lastDisks) && reflect.DeepEqual(plan, p.lastPlan) &&
+		time.Since(p.lastWrite) < inventoryHeartbeat {
 		return nil
 	}
 	var inv storagev1alpha1.NodeInventory
@@ -209,11 +248,12 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 		}
 	}
 	inv.Status.Disks = disks
+	inv.Status.InstallPlan = plan
 	inv.Status.ObservedAt = metav1.Now()
 	if err := p.Client.Status().Update(ctx, &inv); err != nil {
 		return err
 	}
-	p.lastDisks, p.lastWrite = disks, time.Now()
+	p.lastDisks, p.lastPlan, p.lastWrite = disks, plan, time.Now()
 	return nil
 }
 

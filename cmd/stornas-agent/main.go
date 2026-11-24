@@ -75,7 +75,8 @@ func main() {
 	if err := users.SetupWithManager(mgr); err != nil {
 		log.Fatal(err)
 	}
-	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host, MD: md, Smart: smart}
+	inv := &agent.InventoryPublisher{Client: mgr.GetClient(), Node: node, Run: host, MD: md, Smart: smart,
+		PlanPath: "/etc/microshift-installer/data-disks.json"}
 	if err := mgr.Add(inv); err != nil {
 		log.Fatal(err)
 	}

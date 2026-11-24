@@ -30,6 +30,10 @@ rules:
         localusers/finalizers,
       ]
     verbs: [update]
+  # The installer's pool plan arrives in the node inventory.
+  - apiGroups: [storage.stornas.io]
+    resources: [nodeinventories]
+    verbs: [get, list, watch, patch]
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]

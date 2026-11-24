@@ -94,3 +94,12 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - storage.stornas.io
+  resources:
+  - nodeinventories
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
