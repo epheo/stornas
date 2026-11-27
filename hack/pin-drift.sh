@@ -109,6 +109,7 @@ while read -r _ major; do
 done < <(grep -rhoE 'node-version: [0-9]+' .github/workflows | sort -u)
 
 # Web dependencies, pinned exact in package.json.
+pkgs=$(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 while read -r pkg ver; do
 	check "npm:$pkg" "$ver" "$(timeout 60 npm view "$pkg" version 2>/dev/null || true)"
 	# An empty answer means not deprecated, so a failed call must not look like one.
@@ -118,7 +119,7 @@ while read -r pkg ver; do
 		echo "UNKNOWN npm:$pkg@$ver: deprecation not read"
 		drift=1
 	fi
-done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
+done <<<"$pkgs"
 
 # amorce builds the OS: a newer appliances/stornas there than at the pinned
 # commit is drift; amorce's other changes are not this repo's. Read with git,
