@@ -917,7 +917,7 @@ retry 60 "iSCSI still reachable on the VIP" vip_answers
 log "NFS client IO from node2 against the node1 export"
 # vers pinned: only 2049/tcp is open, so v4 is the supported protocol and
 # a silent v3 fallback would produce misleading mountd errors. The mount
-# path is relative to the fsid=0 pseudo root (image Containerfile): the
+# path is relative to the fsid=0 pseudo root (amorce's appliances/stornas Containerfile): the
 # composefs rootfs cannot anchor the v4 tree.
 nfs_io() {
 	v2 sh -c "mkdir -p /mnt/nfs-e2e && mount -t nfs -o nfsvers=4.2 $IP1:/stornas-system-failover /mnt/nfs-e2e && echo nfs-io > /mnt/nfs-e2e/probe && sync && grep -q nfs-io /mnt/nfs-e2e/probe && umount /mnt/nfs-e2e"

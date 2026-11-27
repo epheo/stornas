@@ -112,15 +112,19 @@ while read -r pkg ver; do
 done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 
 # amorce builds the OS: a newer appliances/stornas there than at the pinned
-# commit is drift; amorce's other changes are not this repo's.
-amorce=https://api.github.com/repos/epheo/amorce
+# commit is drift; amorce's other changes are not this repo's. Read with git,
+# as the other checks: no API rate limit on shared runner addresses.
 amorce_rev=$(sed -n 's/^AMORCE_REV ?= //p' Makefile)
-amorce_last=$(curl -fsS -m 30 "$amorce/commits?path=appliances/stornas&per_page=1" \
-	| python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["sha"])' || true)
-case $(curl -fsS -m 30 "$amorce/compare/$amorce_last...$amorce_rev" \
-	| python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' || true) in
-ahead | identical) check amorce:appliances/stornas "$amorce_rev" "$amorce_rev" ;;
-*) check amorce:appliances/stornas "$amorce_rev" "$amorce_last" ;;
-esac
+amorce_git=$(mktemp -d)
+amorce_last=""
+if git clone -q --filter=blob:none --no-checkout https://github.com/epheo/amorce "$amorce_git" 2>/dev/null; then
+	amorce_last=$(git -C "$amorce_git" log -1 --format=%H HEAD -- appliances/stornas)
+fi
+if [ -n "$amorce_last" ] && git -C "$amorce_git" merge-base --is-ancestor "$amorce_last" "$amorce_rev" 2>/dev/null; then
+	check amorce:appliances/stornas "$amorce_rev" "$amorce_rev"
+else
+	check amorce:appliances/stornas "$amorce_rev" "$amorce_last"
+fi
+rm -rf "$amorce_git"
 
 exit $drift

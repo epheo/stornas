@@ -81,14 +81,15 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
-          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
-          # amorce pins these by digest, beside the commit its manifests come from.
+          # amorce pins these by digest, beside the commit its manifests come
+          # from. First, so a failed push never leaves stornas-os without them.
           for name in stornas stornas-operator stornas-agent; do
             podman push --digestfile "$name.digest" "ghcr.io/epheo/$name:latest" "docker://ghcr.io/epheo/$name:$GITHUB_SHA"
             podman push "ghcr.io/epheo/$name:latest" "docker://ghcr.io/epheo/$name:latest"
             echo "$name@$(cat "$name.digest") for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           done
+          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
+          podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
       - name: collect console log on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.2
