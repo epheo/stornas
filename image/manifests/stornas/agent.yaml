@@ -158,7 +158,7 @@ spec:
               mountPath: /etc/issue.d
             # The installer's pool plan, read once into the inventory.
             - name: install-plan
-              mountPath: /etc/microshift-installer
+              mountPath: /etc/amorce
               readOnly: true
             - name: run-motd
               mountPath: /run/motd.d
@@ -193,7 +193,7 @@ spec:
             type: DirectoryOrCreate
         - name: install-plan
           hostPath:
-            path: /etc/microshift-installer
+            path: /etc/amorce
             type: DirectoryOrCreate
         - name: run-motd
           hostPath:
