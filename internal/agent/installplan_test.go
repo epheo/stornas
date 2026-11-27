@@ -33,7 +33,8 @@ func TestReadPlan(t *testing.T) {
 	}
 	// A pool the inventory's schema would refuse is left out, the rest kept.
 	write(`{"version":1,"layout":"pairs","pools":[{"name":"bad","raid":"raid10","devices":["/dev/disk/by-id/a"]},` +
-		`{"name":"empty","raid":"raid1","devices":[]},{"name":"ok","raid":"raid1","devices":["/dev/disk/by-id/c"]}]}`)
+		`{"name":"empty","raid":"raid1","devices":[]},{"name":"odd","raid":"raid1","tier":"ssd_fast","devices":["/dev/disk/by-id/d"]},` +
+		`{"name":"ok","raid":"raid1","devices":["/dev/disk/by-id/c"]}]}`)
 	if pools, _, err := readPlan(p); err == nil || len(pools) != 1 || pools[0].Name != "ok" {
 		t.Fatalf("bad pools: %+v %v", pools, err)
 	}

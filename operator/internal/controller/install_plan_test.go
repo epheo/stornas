@@ -32,6 +32,16 @@ import (
 	storagev1alpha1 "github.com/epheo/stornas/operator/api/v1alpha1"
 )
 
+// staleList is a reader whose pool list lags behind, as a cache can.
+type staleList struct{ client.Client }
+
+func (s staleList) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*storagev1alpha1.StoragePoolList); ok {
+		return nil
+	}
+	return s.Client.List(ctx, list, opts...)
+}
+
 var _ = Describe("Install plan", func() {
 	ctx := context.Background()
 	disk := func(path, size string) storagev1alpha1.Disk {
@@ -161,5 +171,51 @@ var _ = Describe("Install plan", func() {
 			[]storagev1alpha1.Disk{disk("/dev/disk/by-id/wwn-g-a", "4Ti")},
 			pair("hdd-1", "hdd", "/dev/disk/by-id/wwn-g-a", "/dev/disk/by-id/wwn-g-b"))
 		Expect(poolsOf("plan-gone")).To(BeEmpty())
+		By("waiting for another inventory when no planned disk is there")
+		var inv storagev1alpha1.NodeInventory
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "plan-gone"}, &inv)).To(Succeed())
+		Expect(inv.Annotations).NotTo(HaveKey(InstallPlanApplied))
+	})
+
+	It("gives the default tier to the pools actually made", func() {
+		inventory("plan-half", "pairs",
+			[]storagev1alpha1.Disk{disk("/dev/disk/by-id/wwn-h-s1", "1Ti"), disk("/dev/disk/by-id/wwn-h-s2", "1Ti")},
+			pair("ssd-1", "ssd", "/dev/disk/by-id/wwn-h-s1", "/dev/disk/by-id/wwn-h-s2"),
+			pair("hdd-1", "hdd", "/dev/disk/by-id/wwn-h-h1", "/dev/disk/by-id/wwn-h-h2"))
+		pools := poolsOf("plan-half")
+		Expect(pools).To(HaveLen(1))
+		for _, p := range pools {
+			Expect(p.Spec.Tier).To(Equal("default"))
+		}
+	})
+
+	It("never makes a second pool on the same disks when its list lags", func() {
+		devices := []string{"/dev/disk/by-id/wwn-l-a", "/dev/disk/by-id/wwn-l-b"}
+		// A pass made the pool, then failed before marking the inventory.
+		done := &storagev1alpha1.StoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "hdd-1"},
+			Spec:       storagev1alpha1.StoragePoolSpec{Node: "plan-lag", Devices: devices, Raid: "raid1", Tier: "default"},
+		}
+		Expect(k8sClient.Create(ctx, done)).To(Succeed())
+		inv := &storagev1alpha1.NodeInventory{ObjectMeta: metav1.ObjectMeta{Name: "plan-lag"}}
+		Expect(k8sClient.Create(ctx, inv)).To(Succeed())
+		inv.Status.Disks = []storagev1alpha1.Disk{disk(devices[0], "4Ti"), disk(devices[1], "4Ti")}
+		inv.Status.InstallPlan = []storagev1alpha1.PlannedPool{pair("hdd-1", "hdd", devices...)}
+		inv.Status.InstallPlanLayout = "pairs"
+		Expect(k8sClient.Status().Update(ctx, inv)).To(Succeed())
+		r := &InstallPlan{Client: k8sClient, Reader: staleList{k8sClient}}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: "plan-lag"}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(poolsOf("plan-lag")).To(HaveLen(1))
+	})
+
+	It("skips a pool the schema refuses, once", func() {
+		inventory("plan-odd", "pairs",
+			[]storagev1alpha1.Disk{disk("/dev/disk/by-id/wwn-o-a", "4Ti"), disk("/dev/disk/by-id/wwn-o-b", "4Ti")},
+			pair("odd-1", "Odd", "/dev/disk/by-id/wwn-o-a", "/dev/disk/by-id/wwn-o-b"))
+		Expect(poolsOf("plan-odd")).To(BeEmpty())
+		var inv storagev1alpha1.NodeInventory
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "plan-odd"}, &inv)).To(Succeed())
+		Expect(inv.Annotations).To(HaveKey(InstallPlanApplied))
 	})
 })

@@ -43,6 +43,9 @@ const InstallPlanApplied = "storage.stornas.io/install-plan-applied"
 // decided here, for the cluster.
 type InstallPlan struct {
 	client.Client
+	// Reader reads pools past the cache: a retry right after a create must
+	// see that pool, or it would make a second one on the same disks.
+	Reader   client.Reader
 	Recorder events.EventRecorder
 }
 
@@ -62,25 +65,39 @@ func (r *InstallPlan) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		return ctrl.Result{}, nil
 	}
 	var pools storagev1alpha1.StoragePoolList
-	if err := r.List(ctx, &pools); err != nil {
+	if err := r.reader().List(ctx, &pools); err != nil {
 		return ctrl.Result{}, err
 	}
 	taken := map[string]bool{}
 	for _, p := range pools.Items {
 		taken[p.Name] = true
 	}
-	tiers := plannedTiers(&inv)
 	log := logf.FromContext(ctx)
+	var accepted []storagev1alpha1.PlannedPool
+	gone := 0
 	for _, planned := range inv.Status.InstallPlan {
 		reason := conflict(planned, inv.Name, pools.Items)
 		if reason == "" {
-			reason = missing(planned, inv.Status.Disks)
+			var absent bool
+			reason, absent = missing(planned, inv.Status.Disks)
+			if absent {
+				gone++
+			}
 		}
 		if reason != "" {
 			log.Info("install plan pool skipped", "pool", planned.Name, "reason", reason)
 			r.event(&inv, "PoolSkipped", planned.Name+": "+reason)
 			continue
 		}
+		accepted = append(accepted, planned)
+	}
+	// Every disk absent is more likely a bad tick of the inventory (its
+	// by-id names unread) than a plan for another machine: wait for the next.
+	if gone == len(inv.Status.InstallPlan) {
+		return ctrl.Result{}, nil
+	}
+	tiers := plannedTiers(accepted, inv.Status.Disks)
+	for _, planned := range accepted {
 		if err := r.create(ctx, &inv, planned, tiers[planned.Tier], taken); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -116,11 +133,25 @@ func (r *InstallPlan) create(ctx context.Context, inv *storagev1alpha1.NodeInven
 				Tier:    tier,
 			},
 		}
-		// Taken since the list was read: by another node's plan, or a
-		// person. Try the next name.
 		err := r.Create(ctx, pool)
 		if apierrors.IsAlreadyExists(err) {
+			// This very pool, made by an earlier pass that failed later on;
+			// or the name was taken since the list, by another node or a
+			// person: then the next name.
+			var existing storagev1alpha1.StoragePool
+			if err := r.reader().Get(ctx, client.ObjectKey{Name: name}, &existing); err != nil {
+				return err
+			}
+			if existing.Spec.Node == inv.Name && sameDevices(existing.Spec.Devices, planned.Devices) {
+				return nil
+			}
 			continue
+		}
+		if apierrors.IsInvalid(err) {
+			// A plan the schema refuses is never retried: a person can make
+			// the pool by hand.
+			r.event(inv, "PoolSkipped", planned.Name+": "+err.Error())
+			return nil
 		}
 		if err != nil {
 			return err
@@ -135,16 +166,19 @@ func (r *InstallPlan) create(ctx context.Context, inv *storagev1alpha1.NodeInven
 // StorageClass and the UI's default placement serve tier default, so the
 // node's pools land there; with two kinds, the one holding the most
 // capacity does, and the other keeps its kind as its tier.
-func plannedTiers(inv *storagev1alpha1.NodeInventory) map[string]string {
+func plannedTiers(pools []storagev1alpha1.PlannedPool, disks []storagev1alpha1.Disk) map[string]string {
+	if len(pools) == 0 {
+		return nil
+	}
 	size := map[string]int64{}
-	for _, d := range inv.Status.Disks {
+	for _, d := range disks {
 		if d.Size != nil {
 			size[d.Path] = d.Size.Value()
 		}
 	}
 	capacity := map[string]int64{}
 	out := map[string]string{}
-	for _, p := range inv.Status.InstallPlan {
+	for _, p := range pools {
 		out[p.Tier] = p.Tier
 		for _, d := range p.Devices {
 			capacity[p.Tier] += size[d]
@@ -161,18 +195,30 @@ func plannedTiers(inv *storagev1alpha1.NodeInventory) map[string]string {
 	return out
 }
 
-// missing says which planned disk this node does not offer, or "".
-func missing(p storagev1alpha1.PlannedPool, disks []storagev1alpha1.Disk) string {
+// missing says which planned disk this node does not offer, or "", and
+// whether it is absent rather than in use.
+func missing(p storagev1alpha1.PlannedPool, disks []storagev1alpha1.Disk) (string, bool) {
 	for _, d := range p.Devices {
 		i := slices.IndexFunc(disks, func(x storagev1alpha1.Disk) bool { return x.Path == d })
 		switch {
 		case i < 0:
-			return d + " is not on this node"
+			return d + " is not on this node", true
 		case disks[i].Claimed:
-			return d + " is already in use"
+			return d + " is already in use", false
 		}
 	}
-	return ""
+	return "", false
+}
+
+func sameDevices(a, b []string) bool {
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
+}
+
+func (r *InstallPlan) reader() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
 }
 
 // conflict says why a planned pool cannot be created as asked, or "".

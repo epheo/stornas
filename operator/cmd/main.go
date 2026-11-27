@@ -197,6 +197,7 @@ func main() {
 	}
 	if err := (&controller.InstallPlan{
 		Client:   mgr.GetClient(),
+		Reader:   mgr.GetAPIReader(),
 		Recorder: mgr.GetEventRecorder("stornas-operator"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "InstallPlan")

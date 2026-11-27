@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ type installPlan struct {
 	Pools   []storagev1alpha1.PlannedPool `json:"pools"`
 }
 
+// tierRE is StoragePool's tier rule: a pool's kind may become its tier.
+var tierRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$`)
+
 // readPlan returns the installer's pools and layout, or none when there is
 // no plan. A pool the inventory's schema would refuse is left out, so a
 // hand-edited plan never stops the disks from being reported.
@@ -78,14 +82,15 @@ func readPlan(path string) ([]storagev1alpha1.PlannedPool, string, error) {
 	var pools []storagev1alpha1.PlannedPool
 	var bad []string
 	for _, p := range plan.Pools {
-		if p.Name == "" || len(p.Devices) == 0 || (p.Raid != "none" && p.Raid != "raid1") {
+		if p.Name == "" || len(p.Devices) == 0 || (p.Raid != "none" && p.Raid != "raid1") ||
+			(p.Tier != "" && !tierRE.MatchString(p.Tier)) {
 			bad = append(bad, p.Name)
 			continue
 		}
 		pools = append(pools, p)
 	}
 	if len(bad) > 0 {
-		err = fmt.Errorf("%s: pools left out, not name, devices and raid none or raid1: %v", path, bad)
+		err = fmt.Errorf("%s: pools left out, not name, devices, raid none or raid1 and a tier name: %v", path, bad)
 	}
 	return pools, plan.Layout, err
 }
