@@ -71,11 +71,14 @@ check go-toolchain "$(sed -n 's/^toolchain go//p' go.mod)" \
 	"$(curl -fsS -m 30 "https://raw.githubusercontent.com/kubernetes/kubernetes/v1${k8s#v0}/.go-version" || true)"
 
 # Other direct Go dependencies of both modules.
+# Captured, not fed by process substitution: a failed or partial go list
+# must stop the run, not drop checks.
 for mod in . operator; do
+	mods=$(cd "$mod" && timeout 300 go list -m -u -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}} {{with .Update}}{{.Version}}{{end}}{{end}}' all)
 	while read -r path ver upd; do
-		case $path in k8s.io/* | sigs.k8s.io/controller-runtime) continue ;; esac
+		case $path in "" | k8s.io/* | sigs.k8s.io/controller-runtime) continue ;; esac
 		check "go:$path" "$ver" "${upd:-$ver}"
-	done < <(cd "$mod" && go list -m -u -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}} {{with .Update}}{{.Version}}{{end}}{{end}}' all)
+	done <<<"$mods"
 done
 
 # GitHub Actions, pinned to exact releases.
@@ -106,10 +109,17 @@ while read -r _ major; do
 done < <(grep -rhoE 'node-version: [0-9]+' .github/workflows | sort -u)
 
 # Web dependencies, pinned exact in package.json.
+pkgs=$(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 while read -r pkg ver; do
 	check "npm:$pkg" "$ver" "$(timeout 60 npm view "$pkg" version 2>/dev/null || true)"
-	deprecated "npm:$pkg" "$ver" "$(timeout 60 npm view "$pkg@$ver" deprecated 2>/dev/null || true)"
-done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
+	# An empty answer means not deprecated, so a failed call must not look like one.
+	if msg=$(timeout 60 npm view "$pkg@$ver" deprecated 2>/dev/null); then
+		deprecated "npm:$pkg" "$ver" "$msg"
+	else
+		echo "UNKNOWN npm:$pkg@$ver: deprecation not read"
+		drift=1
+	fi
+done <<<"$pkgs"
 
 # amorce builds the OS: a newer appliances/stornas there than at the pinned
 # commit is drift; amorce's other changes are not this repo's. Read with git,
