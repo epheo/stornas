@@ -3,6 +3,6 @@ web/node_modules
 web/.svelte-kit
 web/test-results
 operator/bin
-image/build
+.amorce
 stornas
 stornas-agent
