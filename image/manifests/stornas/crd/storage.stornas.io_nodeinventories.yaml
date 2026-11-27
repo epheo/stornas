@@ -120,6 +120,11 @@ spec:
                   - raid
                   type: object
                 type: array
+              installPlanLayout:
+                description: |-
+                  installPlanLayout is the plan's layout as the installer wrote it;
+                  the operator takes only pairs.
+                type: string
               observedAt:
                 format: date-time
                 type: string

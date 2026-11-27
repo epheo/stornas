@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,44 +40,83 @@ type InventoryPublisher struct {
 	lastWrite time.Time
 	// PlanPath is the installer's data disk plan on the host; the operator
 	// turns it into pools once.
-	PlanPath string
-	lastPlan []storagev1alpha1.PlannedPool
+	PlanPath   string
+	lastPlan   []storagev1alpha1.PlannedPool
+	lastLayout string
 }
 
 // installPlan is the file the installer writes; version 1 only. Layout is
-// the data-disks label of the image it was written for: stornas's is pairs,
-// and a file without one predates the field.
+// the data-disks label of the image it was written for; the operator
+// decides what to make of it.
 type installPlan struct {
 	Version int                           `json:"version"`
 	Layout  string                        `json:"layout"`
 	Pools   []storagev1alpha1.PlannedPool `json:"pools"`
 }
 
-// readPlan returns the installer's pools, or none when there is no plan.
-func readPlan(path string) ([]storagev1alpha1.PlannedPool, error) {
+// readPlan returns the installer's pools and layout, or none when there is
+// no plan. A pool the inventory's schema would refuse is left out, so a
+// hand-edited plan never stops the disks from being reported.
+func readPlan(path string) ([]storagev1alpha1.PlannedPool, string, error) {
 	if path == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, "", nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var plan installPlan
 	if err := json.Unmarshal(b, &plan); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, "", fmt.Errorf("%s: %w", path, err)
 	}
 	if plan.Version != 1 {
-		return nil, fmt.Errorf("%s: unknown version %d", path, plan.Version)
+		return nil, "", fmt.Errorf("%s: unknown version %d", path, plan.Version)
 	}
-	// Another image's plan, such as the distro's thin pool on a node later
-	// switched to stornas: its disks are in use, never stornas's to pair.
-	if plan.Layout != "" && plan.Layout != "pairs" {
-		return nil, nil
+	var pools []storagev1alpha1.PlannedPool
+	var bad []string
+	for _, p := range plan.Pools {
+		if p.Name == "" || len(p.Devices) == 0 || (p.Raid != "none" && p.Raid != "raid1") {
+			bad = append(bad, p.Name)
+			continue
+		}
+		pools = append(pools, p)
 	}
-	return plan.Pools, nil
+	if len(bad) > 0 {
+		err = fmt.Errorf("%s: pools left out, not name, devices and raid none or raid1: %v", path, bad)
+	}
+	return pools, plan.Layout, err
+}
+
+// canonical names each planned disk as the inventory does: the installer
+// may pick another of a disk's by-id links (nvme-eui before nvme-, say).
+// A link that resolves to no disk stays as written; the operator skips it.
+func (p *InventoryPublisher) canonical(ctx context.Context, pools []storagev1alpha1.PlannedPool) []storagev1alpha1.PlannedPool {
+	out, err := p.Run.Run(ctx, "find", "/dev/disk/by-id", "-maxdepth", "1",
+		"-type", "l", "-printf", "%f %l\n")
+	if err != nil {
+		return pools
+	}
+	kernel := map[string]string{}
+	for _, line := range splitLines(string(out)) {
+		if name, target, ok := strings.Cut(line, " "); ok {
+			kernel["/dev/disk/by-id/"+name] = "/dev/" + target[strings.LastIndex(target, "/")+1:]
+		}
+	}
+	aliases := p.byIDAliases(ctx)
+	res := make([]storagev1alpha1.PlannedPool, len(pools))
+	for i, pool := range pools {
+		pool.Devices = slices.Clone(pool.Devices)
+		for j, d := range pool.Devices {
+			if a := aliases[kernel[d]]; a != "" {
+				pool.Devices[j] = a
+			}
+		}
+		res[i] = pool
+	}
+	return res
 }
 
 const inventoryInterval = time.Minute
@@ -236,12 +276,15 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	plan, err := readPlan(p.PlanPath)
+	plan, layout, err := readPlan(p.PlanPath)
 	if err != nil {
 		// A bad plan never blocks the inventory; the pools can be made by hand.
 		fmt.Printf("install plan: %v\n", err)
 	}
-	if reflect.DeepEqual(disks, p.lastDisks) && reflect.DeepEqual(plan, p.lastPlan) &&
+	if len(plan) > 0 {
+		plan = p.canonical(ctx, plan)
+	}
+	if reflect.DeepEqual(disks, p.lastDisks) && reflect.DeepEqual(plan, p.lastPlan) && layout == p.lastLayout &&
 		time.Since(p.lastWrite) < inventoryHeartbeat {
 		return nil
 	}
@@ -257,11 +300,12 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	}
 	inv.Status.Disks = disks
 	inv.Status.InstallPlan = plan
+	inv.Status.InstallPlanLayout = layout
 	inv.Status.ObservedAt = metav1.Now()
 	if err := p.Client.Status().Update(ctx, &inv); err != nil {
 		return err
 	}
-	p.lastDisks, p.lastPlan, p.lastWrite = disks, plan, time.Now()
+	p.lastDisks, p.lastPlan, p.lastLayout, p.lastWrite = disks, plan, layout, time.Now()
 	return nil
 }
 

@@ -70,6 +70,10 @@ type NodeInventoryStatus struct {
 	// operator creates those pools once, then marks the inventory.
 	// +optional
 	InstallPlan []PlannedPool `json:"installPlan,omitempty"`
+	// installPlanLayout is the plan's layout as the installer wrote it;
+	// the operator takes only pairs.
+	// +optional
+	InstallPlanLayout string `json:"installPlanLayout,omitempty"`
 	// +optional
 	ObservedAt metav1.Time `json:"observedAt,omitempty"`
 }
