@@ -189,6 +189,26 @@ var _ = Describe("Install plan", func() {
 		}
 	})
 
+	It("keeps the tiers a pass that failed halfway would have given", func() {
+		hdd := []string{"/dev/disk/by-id/wwn-r-h1", "/dev/disk/by-id/wwn-r-h2"}
+		ssd := []string{"/dev/disk/by-id/wwn-r-s1", "/dev/disk/by-id/wwn-r-s2"}
+		first := &storagev1alpha1.StoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "plan-retry-hdd"},
+			Spec:       storagev1alpha1.StoragePoolSpec{Node: "plan-retry", Devices: hdd, Raid: "raid1", Tier: "default"},
+		}
+		Expect(k8sClient.Create(ctx, first)).To(Succeed())
+		inventory("plan-retry", "pairs",
+			[]storagev1alpha1.Disk{disk(hdd[0], "8Ti"), disk(hdd[1], "8Ti"), disk(ssd[0], "1Ti"), disk(ssd[1], "1Ti")},
+			pair("hdd-1", "hdd", hdd...), pair("ssd-1", "ssd", ssd...))
+		pools := poolsOf("plan-retry")
+		Expect(pools).To(HaveLen(2))
+		for _, p := range pools {
+			if p.Spec.Devices[0] == ssd[0] {
+				Expect(p.Spec.Tier).To(Equal("ssd"))
+			}
+		}
+	})
+
 	It("never makes a second pool on the same disks when its list lags", func() {
 		devices := []string{"/dev/disk/by-id/wwn-l-a", "/dev/disk/by-id/wwn-l-b"}
 		// A pass made the pool, then failed before marking the inventory.

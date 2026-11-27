@@ -73,9 +73,15 @@ func (r *InstallPlan) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 		taken[p.Name] = true
 	}
 	log := logf.FromContext(ctx)
-	var accepted []storagev1alpha1.PlannedPool
+	// made counts too when choosing tiers: a pass that failed halfway must
+	// not change the tier of the pools a retry makes.
+	var accepted, made []storagev1alpha1.PlannedPool
 	gone := 0
 	for _, planned := range inv.Status.InstallPlan {
+		if madeBefore(planned, inv.Name, pools.Items) {
+			made = append(made, planned)
+			continue
+		}
 		reason := conflict(planned, inv.Name, pools.Items)
 		if reason == "" {
 			var absent bool
@@ -96,7 +102,7 @@ func (r *InstallPlan) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Res
 	if gone == len(inv.Status.InstallPlan) {
 		return ctrl.Result{}, nil
 	}
-	tiers := plannedTiers(accepted, inv.Status.Disks)
+	tiers := plannedTiers(append(slices.Clone(made), accepted...), inv.Status.Disks)
 	for _, planned := range accepted {
 		if err := r.create(ctx, &inv, planned, tiers[planned.Tier], taken); err != nil {
 			return ctrl.Result{}, err
@@ -208,6 +214,13 @@ func missing(p storagev1alpha1.PlannedPool, disks []storagev1alpha1.Disk) (strin
 		}
 	}
 	return "", false
+}
+
+// madeBefore says whether this node already has the planned pool.
+func madeBefore(p storagev1alpha1.PlannedPool, node string, pools []storagev1alpha1.StoragePool) bool {
+	return slices.ContainsFunc(pools, func(x storagev1alpha1.StoragePool) bool {
+		return x.Spec.Node == node && sameDevices(x.Spec.Devices, p.Devices)
+	})
 }
 
 func sameDevices(a, b []string) bool {
