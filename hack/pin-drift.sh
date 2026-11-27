@@ -111,4 +111,16 @@ while read -r pkg ver; do
 	deprecated "npm:$pkg" "$ver" "$(npm view "$pkg@$ver" deprecated 2>/dev/null || true)"
 done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 
+# amorce builds the OS: a newer appliances/stornas there than at the pinned
+# commit is drift; amorce's other changes are not this repo's.
+amorce=https://api.github.com/repos/epheo/amorce
+amorce_rev=$(sed -n 's/^AMORCE_REV ?= //p' Makefile)
+amorce_last=$(curl -fsS -m 30 "$amorce/commits?path=appliances/stornas&per_page=1" \
+	| python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["sha"])' || true)
+case $(curl -fsS -m 30 "$amorce/compare/$amorce_last...$amorce_rev" \
+	| python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' || true) in
+ahead | identical) check amorce:appliances/stornas "$amorce_rev" "$amorce_rev" ;;
+*) check amorce:appliances/stornas "$amorce_rev" "$amorce_last" ;;
+esac
+
 exit $drift

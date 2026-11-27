@@ -2,8 +2,9 @@
 # qcow2, boot under qemu (KVM on the runner), and validate the whole stack
 # via hack/boot-test.sh - the same harness shape as the microshift
 # distro's own vm-test. Heavy on disk and time, so it never gates PRs.
-# A green boot on main publishes ghcr.io/epheo/stornas-os: only images
-# that booted ever reach consumers such as derived site images.
+# A green boot on main publishes ghcr.io/epheo/stornas-os, and the
+# component images at this commit for amorce's appliances/stornas to pin:
+# only images that booted ever reach consumers.
 name: boot-test
 
 on:
@@ -82,6 +83,12 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
           podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:$VERSION"
           podman push "localhost/stornas-os:$VERSION" "docker://$PUBLISH_REPO:latest"
+          # amorce pins these by digest, beside the commit its manifests come from.
+          for name in stornas stornas-operator stornas-agent; do
+            podman push --digestfile "$name.digest" "ghcr.io/epheo/$name:latest" "docker://ghcr.io/epheo/$name:$GITHUB_SHA"
+            podman push "ghcr.io/epheo/$name:latest" "docker://ghcr.io/epheo/$name:latest"
+            echo "$name@$(cat "$name.digest") for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          done
       - name: collect console log on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.2

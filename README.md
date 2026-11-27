@@ -206,6 +206,11 @@ make upgrade-test      # air-gapped upgrade and poisoned-image rollback
 
 `make image` layers stornas on the newest epheo/microshift image and
 keeps its kernel, DRBD module, and r-drbd version.
+The OS layer lives in [amorce](https://github.com/epheo/amorce)'s
+`appliances/stornas`, at the commit `AMORCE_REV` in the Makefile pins; it
+takes this checkout's manifests and component images.
+A green boot on main publishes ghcr.io/epheo/stornas-os and the component
+images, tagged by commit, for amorce to pin.
 The gates boot real VMs with qemu and drive the UI with playwright.
 The rule they enforce: a feature exists once its UI/UX flow passes e2e;
 kernel, mdadm, and DRBD internals are never the test subject, only

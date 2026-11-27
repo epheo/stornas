@@ -3,7 +3,7 @@ LDFLAGS := -X main.version=$(VERSION)
 GOLANGCI_LINT := operator/bin/golangci-lint
 BASE_IMAGE ?= ghcr.io/epheo/microshift:latest
 
-.PHONY: ci build generate types lint test web images sync-manifests embed image check-rdrbd-crds smoke vm-test replication-test upgrade-test clean
+.PHONY: ci build generate types lint test web images sync-manifests amorce image check-rdrbd-crds smoke vm-test replication-test upgrade-test clean
 
 # The full local gate; .github/workflows/ci.yml runs these same targets
 # and the same stale-generated-files check. The diff is scoped to generated
@@ -40,34 +40,27 @@ web:
 
 # App images, built into local podman storage under their runtime names.
 images: web
-	podman build -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas:latest .
-	podman build -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-operator:latest .
-	podman build -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) -t ghcr.io/epheo/stornas-agent:latest .
+	podman build -f image/app/Containerfile --target server --build-arg VERSION=$(VERSION) --label org.opencontainers.image.source=https://github.com/epheo/stornas -t ghcr.io/epheo/stornas:latest .
+	podman build -f image/app/Containerfile --target operator --build-arg VERSION=$(VERSION) --label org.opencontainers.image.source=https://github.com/epheo/stornas -t ghcr.io/epheo/stornas-operator:latest .
+	podman build -f image/app/Containerfile --target agent --build-arg VERSION=$(VERSION) --label org.opencontainers.image.source=https://github.com/epheo/stornas -t ghcr.io/epheo/stornas-agent:latest .
 
 sync-manifests: generate
 	cp operator/config/crd/bases/*.yaml image/manifests/stornas/crd/
 
-# OCI archives for /usr/lib/embedded-images. The distro's import service
-# only imports archives listed in its manifest, so every archive gets a
-# "path ref" line in a fragment the Containerfile appends to the distro
-# manifest; a tar without a line is dead weight and the pod behind it
-# pulls from the network. r-drbd and the CSI sidecars come with the distro.
-embed: images
-	rm -rf image/build/embedded-images
-	mkdir -p image/build/embedded-images
-	: > image/build/embedded-images/manifest.stornas
-	for img in ghcr.io/epheo/stornas ghcr.io/epheo/stornas-operator ghcr.io/epheo/stornas-agent; do \
-		podman save --format oci-archive \
-			-o image/build/embedded-images/$$(basename $$img).tar $$img:latest || exit 1; \
-		echo "/usr/lib/embedded-images/$$(basename $$img).tar $$img:latest" \
-			>> image/build/embedded-images/manifest.stornas; \
-	done
+# The OS image is amorce's appliances/stornas, at this commit, built from
+# this checkout's manifests and the components make images built.
+AMORCE_REV ?= d3a24129f95a6620f4f8898b8d532e7b1acdc181
 
-image: sync-manifests embed
-	podman build --from $(BASE_IMAGE) --label org.opencontainers.image.base.name=$(BASE_IMAGE) \
-		--label org.opencontainers.image.source=https://github.com/epheo/stornas \
-		--label org.opencontainers.image.version=$(VERSION) \
-		-f image/Containerfile -t stornas-os:$(VERSION) image
+amorce:
+	rm -rf .amorce
+	git init -q .amorce
+	git -C .amorce fetch -q --depth 1 https://github.com/epheo/amorce $(AMORCE_REV)
+	git -C .amorce checkout -q FETCH_HEAD
+
+# Rootless, as make images: build.sh reads the components from that storage.
+image: sync-manifests images amorce
+	STORNAS_SRC=$(CURDIR) BASE_IMAGE=$(BASE_IMAGE) PODMAN=podman \
+		.amorce/appliances/stornas/build.sh stornas-os:$(VERSION)
 
 # Operator envtest loads a copy of the base image's r-drbd CRDs.
 RDRBD_CRDS := operator/internal/controller/testdata/rdrbd-crds.yaml
@@ -97,4 +90,4 @@ upgrade-test:
 
 clean:
 	rm -f stornas stornas-agent
-	rm -rf web/build web/.svelte-kit operator/bin image/build
+	rm -rf web/build web/.svelte-kit operator/bin .amorce
