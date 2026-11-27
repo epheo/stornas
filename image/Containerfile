@@ -4,14 +4,12 @@ FROM ghcr.io/epheo/microshift:latest
 
 # How the installer offers this image; it turns data disks into mirrored
 # pairs and leaves them in /etc/amorce for the operator.
-# secure-boot=off until the distro signs the DRBD module.
 LABEL io.github.epheo.installer.id="storage" \
       io.github.epheo.installer.name="Storage" \
       io.github.epheo.installer.summary="File shares, iSCSI disks, replication" \
       io.github.epheo.installer.includes="Web UI on port 30080;SMB and NFS shares;iSCSI disks;Snapshots;Replication, 3+ machines" \
       io.github.epheo.installer.data-disks="pairs" \
-      io.github.epheo.installer.target="ghcr.io/epheo/stornas-os:latest" \
-      io.github.epheo.installer.secure-boot="off"
+      io.github.epheo.installer.target="ghcr.io/epheo/stornas-os:latest"
 
 # iputils: arping sends the gratuitous ARP on VIP failover.
 # iscsi-initiator-utils: admin debugging of exports, and the e2e client.
