@@ -92,6 +92,39 @@ spec:
                   - path
                   type: object
                 type: array
+              installPlan:
+                description: |-
+                  installPlan is the installer's pool plan found on the host; the
+                  operator creates those pools once, then marks the inventory.
+                items:
+                  description: PlannedPool is a pool chosen in the installer for this
+                    node.
+                  properties:
+                    devices:
+                      description: devices are stable /dev/disk/by-id paths.
+                      items:
+                        type: string
+                      type: array
+                    name:
+                      type: string
+                    raid:
+                      enum:
+                      - none
+                      - raid1
+                      type: string
+                    tier:
+                      type: string
+                  required:
+                  - devices
+                  - name
+                  - raid
+                  type: object
+                type: array
+              installPlanLayout:
+                description: |-
+                  installPlanLayout is the plan's layout as the installer wrote it;
+                  the operator takes only pairs.
+                type: string
               observedAt:
                 format: date-time
                 type: string

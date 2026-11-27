@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,6 +39,89 @@ type InventoryPublisher struct {
 	// watcher, the dominant write traffic on a quiet appliance.
 	lastDisks []storagev1alpha1.Disk
 	lastWrite time.Time
+	// PlanPath is the installer's data disk plan on the host; the operator
+	// turns it into pools once.
+	PlanPath   string
+	lastPlan   []storagev1alpha1.PlannedPool
+	lastLayout string
+}
+
+// installPlan is the file the installer writes; version 1 only. Layout is
+// the data-disks label of the image it was written for; the operator
+// decides what to make of it.
+type installPlan struct {
+	Version int                           `json:"version"`
+	Layout  string                        `json:"layout"`
+	Pools   []storagev1alpha1.PlannedPool `json:"pools"`
+}
+
+// tierRE is StoragePool's tier rule: a pool's kind may become its tier.
+var tierRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$`)
+
+// readPlan returns the installer's pools and layout, or none when there is
+// no plan. A pool the inventory's schema would refuse is left out, so a
+// hand-edited plan never stops the disks from being reported.
+func readPlan(path string) ([]storagev1alpha1.PlannedPool, string, error) {
+	if path == "" {
+		return nil, "", nil
+	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	var plan installPlan
+	if err := json.Unmarshal(b, &plan); err != nil {
+		return nil, "", fmt.Errorf("%s: %w", path, err)
+	}
+	if plan.Version != 1 {
+		return nil, "", fmt.Errorf("%s: unknown version %d", path, plan.Version)
+	}
+	var pools []storagev1alpha1.PlannedPool
+	var bad []string
+	for _, p := range plan.Pools {
+		if p.Name == "" || len(p.Devices) == 0 || (p.Raid != "none" && p.Raid != "raid1") ||
+			(p.Tier != "" && !tierRE.MatchString(p.Tier)) {
+			bad = append(bad, p.Name)
+			continue
+		}
+		pools = append(pools, p)
+	}
+	if len(bad) > 0 {
+		err = fmt.Errorf("%s: pools left out, not name, devices, raid none or raid1 and a tier name: %v", path, bad)
+	}
+	return pools, plan.Layout, err
+}
+
+// canonical names each planned disk as the inventory does: the installer
+// may pick another of a disk's by-id links (nvme-eui before nvme-, say).
+// A link that resolves to no disk stays as written; the operator skips it.
+func (p *InventoryPublisher) canonical(ctx context.Context, pools []storagev1alpha1.PlannedPool) []storagev1alpha1.PlannedPool {
+	out, err := p.Run.Run(ctx, "find", "/dev/disk/by-id", "-maxdepth", "1",
+		"-type", "l", "-printf", "%f %l\n")
+	if err != nil {
+		return pools
+	}
+	kernel := map[string]string{}
+	for _, line := range splitLines(string(out)) {
+		if name, target, ok := strings.Cut(line, " "); ok {
+			kernel["/dev/disk/by-id/"+name] = "/dev/" + target[strings.LastIndex(target, "/")+1:]
+		}
+	}
+	aliases := p.byIDAliases(ctx)
+	res := make([]storagev1alpha1.PlannedPool, len(pools))
+	for i, pool := range pools {
+		pool.Devices = slices.Clone(pool.Devices)
+		for j, d := range pool.Devices {
+			if a := aliases[kernel[d]]; a != "" {
+				pool.Devices[j] = a
+			}
+		}
+		res[i] = pool
+	}
+	return res
 }
 
 const inventoryInterval = time.Minute
@@ -195,7 +281,16 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if reflect.DeepEqual(disks, p.lastDisks) && time.Since(p.lastWrite) < inventoryHeartbeat {
+	plan, layout, err := readPlan(p.PlanPath)
+	if err != nil {
+		// A bad plan never blocks the inventory; the pools can be made by hand.
+		fmt.Printf("install plan: %v\n", err)
+	}
+	if len(plan) > 0 {
+		plan = p.canonical(ctx, plan)
+	}
+	if reflect.DeepEqual(disks, p.lastDisks) && reflect.DeepEqual(plan, p.lastPlan) && layout == p.lastLayout &&
+		time.Since(p.lastWrite) < inventoryHeartbeat {
 		return nil
 	}
 	var inv storagev1alpha1.NodeInventory
@@ -209,11 +304,13 @@ func (p *InventoryPublisher) publish(ctx context.Context) error {
 		}
 	}
 	inv.Status.Disks = disks
+	inv.Status.InstallPlan = plan
+	inv.Status.InstallPlanLayout = layout
 	inv.Status.ObservedAt = metav1.Now()
 	if err := p.Client.Status().Update(ctx, &inv); err != nil {
 		return err
 	}
-	p.lastDisks, p.lastWrite = disks, time.Now()
+	p.lastDisks, p.lastPlan, p.lastLayout, p.lastWrite = disks, plan, layout, time.Now()
 	return nil
 }
 

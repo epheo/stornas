@@ -51,10 +51,29 @@ type Disk struct {
 	PowerOnHours *int64 `json:"powerOnHours,omitempty"`
 }
 
+// PlannedPool is a pool chosen in the installer for this node.
+type PlannedPool struct {
+	Name string `json:"name"`
+	// devices are stable /dev/disk/by-id paths.
+	Devices []string `json:"devices"`
+	// +kubebuilder:validation:Enum=none;raid1
+	Raid string `json:"raid"`
+	// +optional
+	Tier string `json:"tier,omitempty"`
+}
+
 // NodeInventoryStatus is the agent's latest disk observation.
 type NodeInventoryStatus struct {
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`
+	// installPlan is the installer's pool plan found on the host; the
+	// operator creates those pools once, then marks the inventory.
+	// +optional
+	InstallPlan []PlannedPool `json:"installPlan,omitempty"`
+	// installPlanLayout is the plan's layout as the installer wrote it;
+	// the operator takes only pairs.
+	// +optional
+	InstallPlanLayout string `json:"installPlanLayout,omitempty"`
 	// +optional
 	ObservedAt metav1.Time `json:"observedAt,omitempty"`
 }

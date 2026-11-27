@@ -410,7 +410,10 @@ log "server restart: UI back, stale session refused"
 kc -n stornas-system rollout restart deploy/stornas-server
 kc -n stornas-system rollout status deploy/stornas-server --timeout=180s
 retry 120 "healthz after server restart" curl -kfsS -m 15 "https://127.0.0.1:$UI_PORT/healthz"
-fp_now=$(served_fp) || die "no certificate served after the server restart"
+# The old pod may still hold the NodePort for a moment after the rollout,
+# so one handshake can miss: wait for a served certificate as for healthz.
+cert_served() { fp_now=$(served_fp) && [ -n "$fp_now" ]; }
+retry 60 "a certificate served after the server restart" cert_served
 [ "$fp_now" = "$SERVED_FP" ] || die "server restart replaced the certificate ($fp_now)"
 stale_refused() { [ "$(http_code -b "$WORKDIR/cookies" "https://127.0.0.1:$UI_PORT/api/v1/state")" = 401 ]; }
 retry 60 "stale session refused" stale_refused

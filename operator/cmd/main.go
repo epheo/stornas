@@ -195,6 +195,14 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "LocalUser")
 		os.Exit(1)
 	}
+	if err := (&controller.InstallPlan{
+		Client:   mgr.GetClient(),
+		Reader:   mgr.GetAPIReader(),
+		Recorder: mgr.GetEventRecorder("stornas-operator"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "InstallPlan")
+		os.Exit(1)
+	}
 	if err := (&controller.ClaimBinder{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ClaimBinder")
 		os.Exit(1)

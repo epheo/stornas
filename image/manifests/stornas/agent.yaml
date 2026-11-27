@@ -156,6 +156,10 @@ spec:
               mountPath: /etc/exports.d
             - name: etc-issue
               mountPath: /etc/issue.d
+            # The installer's pool plan, reported in the inventory; the operator applies it once.
+            - name: install-plan
+              mountPath: /etc/amorce
+              readOnly: true
             - name: run-motd
               mountPath: /run/motd.d
             - name: shares
@@ -186,6 +190,10 @@ spec:
         - name: etc-issue
           hostPath:
             path: /etc/issue.d
+            type: DirectoryOrCreate
+        - name: install-plan
+          hostPath:
+            path: /etc/amorce
             type: DirectoryOrCreate
         - name: run-motd
           hostPath:

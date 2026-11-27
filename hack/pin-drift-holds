@@ -1,4 +1,4 @@
 # <component> <reason>: drift allowed until the reason clears.
 # <npm:package@version> <reason>: that deprecated pin allowed until the reason clears.
-npm:typescript @sveltejs/kit 3.4.0 and svelte-check 4.7.8 peer-depend on TypeScript 6
+npm:typescript @sveltejs/kit 3.4.1 and svelte-check 4.7.8 peer-depend on TypeScript 6
 runner:ubuntu-24.04 VM gates stay on 24.04: bootc-image-builder's osbuild cannot mount /run/osbuild/containers/storage on 26.04; the distro's VM lanes pin 24.04 too
