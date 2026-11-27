@@ -23,6 +23,7 @@ SSH_PORT=${SSH_PORT:-2232}
 VM_MEM=${VM_MEM:-8192}
 KEEP=${KEEP:-0}
 QEMU_PID=""
+NODE_IP=""
 
 diagnostics() {
 	# A wedged VM would hold each of these for vssh's full 300 s.
@@ -62,7 +63,7 @@ diagnostics() {
 	kc get storagepool test -o yaml 2>&1 | sed -n '/status:/,$p' | tail -20 || true
 	log "DIAGNOSTICS: the UI's NodePort"
 	kc -n stornas-system get pods,endpointslices -o wide 2>&1 || true
-	vssh "curl -ksS -m 10 -o /dev/null -w '%{http_code} in %{time_total}s\n' https://$NODE_IP:30080/healthz" 2>&1 || true
+	[ -z "$NODE_IP" ] || vssh "curl -ksS -m 10 -o /dev/null -w '%{http_code} in %{time_total}s\n' https://$NODE_IP:30080/healthz" 2>&1 || true
 	kc -n stornas-system logs deploy/stornas-server --tail=30 2>&1 || true
 }
 
@@ -270,9 +271,9 @@ ui_fingerprint() {
 	vssh sh -c "timeout 10 openssl s_client -connect $NODE_IP:30080 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256" \
 		| cut -d= -f2
 }
-retry 300 "UI serving its certificate on A" ui_fingerprint
-FP_A=$(ui_fingerprint)
-[ -n "$FP_A" ] || die "no UI certificate served"
+# Keep the answer the retry got: a second handshake can race a restart.
+ui_served() { FP_A=$(ui_fingerprint) && [ -n "$FP_A" ]; }
+retry 300 "UI serving its certificate on A" ui_served
 same_fingerprint() { [ "$(ui_fingerprint)" = "$FP_A" ]; }
 
 log "switching to the good image (oci-archive over ssh, no registry)"

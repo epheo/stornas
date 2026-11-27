@@ -39,7 +39,7 @@ deprecated() { # deprecated <name> <pinned> <message>
 }
 
 latest_tag() { # latest_tag <repo-url> <tag-prefix> [version-prefix]: stable only
-	git ls-remote --tags --refs "$1" \
+	timeout 60 git ls-remote --tags --refs "$1" \
 		| sed -n "s|.*refs/tags/$2\([0-9][0-9.]*\)$|\1|p" \
 		| sort -V | tail -1 | sed "s|^|${3:-}|"
 }
@@ -107,8 +107,8 @@ done < <(grep -rhoE 'node-version: [0-9]+' .github/workflows | sort -u)
 
 # Web dependencies, pinned exact in package.json.
 while read -r pkg ver; do
-	check "npm:$pkg" "$ver" "$(npm view "$pkg" version 2>/dev/null || true)"
-	deprecated "npm:$pkg" "$ver" "$(npm view "$pkg@$ver" deprecated 2>/dev/null || true)"
+	check "npm:$pkg" "$ver" "$(timeout 60 npm view "$pkg" version 2>/dev/null || true)"
+	deprecated "npm:$pkg" "$ver" "$(timeout 60 npm view "$pkg@$ver" deprecated 2>/dev/null || true)"
 done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(k, v) for d in ("dependencies","devDependencies") for k, v in p.get(d, {}).items()]')
 
 # amorce builds the OS: a newer appliances/stornas there than at the pinned
@@ -117,7 +117,7 @@ done < <(python3 -c 'import json; p=json.load(open("web/package.json")); [print(
 amorce_rev=$(sed -n 's/^AMORCE_REV ?= //p' Makefile)
 amorce_git=$(mktemp -d)
 amorce_last=""
-if git clone -q --filter=blob:none --no-checkout https://github.com/epheo/amorce "$amorce_git" 2>/dev/null; then
+if timeout 120 git clone -q --filter=blob:none --no-checkout https://github.com/epheo/amorce "$amorce_git" 2>/dev/null; then
 	amorce_last=$(git -C "$amorce_git" log -1 --format=%H HEAD -- appliances/stornas)
 fi
 if [ -n "$amorce_last" ] && git -C "$amorce_git" merge-base --is-ancestor "$amorce_last" "$amorce_rev" 2>/dev/null; then
